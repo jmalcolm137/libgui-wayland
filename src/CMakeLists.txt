@@ -33,6 +33,17 @@ add_custom_command(
     VERBATIM
 )
 
+set(XDG_OUTPUT_XML "${WAYLAND_PROTOCOLS_DIR}/unstable/xdg-output/xdg-output-unstable-v1.xml")
+add_custom_command(
+    OUTPUT
+        "${WM_WAYLAND_DIR}/xdg-output-client-protocol.h"
+        "${WM_WAYLAND_DIR}/xdg-output-protocol.c"
+    COMMAND "${WAYLAND_SCANNER}" client-header "${XDG_OUTPUT_XML}" "${WM_WAYLAND_DIR}/xdg-output-client-protocol.h"
+    COMMAND "${WAYLAND_SCANNER}" private-code "${XDG_OUTPUT_XML}" "${WM_WAYLAND_DIR}/xdg-output-protocol.c"
+    DEPENDS "${XDG_OUTPUT_XML}"
+    VERBATIM
+)
+
 add_library(wm SHARED
     LibWM.cpp
     MenuController.cpp
@@ -40,6 +51,7 @@ add_library(wm SHARED
     WindowServerConnection.cpp
     "${WM_WAYLAND_DIR}/xdg-shell-protocol.c"
     "${WM_WAYLAND_DIR}/xdg-decoration-protocol.c"
+    "${WM_WAYLAND_DIR}/xdg-output-protocol.c"
 )
 target_include_directories(wm PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"

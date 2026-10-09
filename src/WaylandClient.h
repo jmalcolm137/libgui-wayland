@@ -37,6 +37,8 @@ struct xdg_popup;
 struct xdg_surface;
 struct xdg_toplevel;
 struct xdg_wm_base;
+struct zxdg_output_manager_v1;
+struct zxdg_output_v1;
 struct zxdg_decoration_manager_v1;
 struct zxdg_toplevel_decoration_v1;
 
@@ -109,8 +111,10 @@ public:
     void set_maximized(i32 window_id, bool maximized);
     void set_minimized(i32 window_id);
 
-    // Attach the client's shared bitmap (given as an fd) and commit.
-    void attach_and_commit(i32 window_id, int client_fd, Gfx::IntSize, i32 pitch, bool has_alpha);
+    // Attach the client's shared bitmap (given as an fd) and commit. `size` is
+    // the backing store size; `visible_size` is the part to present (they differ
+    // during interactive resize, when LibGUI over-allocates by a margin).
+    void attach_and_commit(i32 window_id, int client_fd, Gfx::IntSize size, Gfx::IntSize visible_size, i32 pitch, bool has_alpha);
 
     // Reserve a strip at the top of the window (a menubar) drawn by `draw`,
     // with the client's content shifted down by `inset` pixels.
@@ -136,6 +140,8 @@ public:
     void set_decoration_manager(zxdg_decoration_manager_v1* manager) { m_decoration_manager = manager; }
     void set_data_device_manager(wl_data_device_manager* manager);
     void add_output(wl_output* output);
+    void set_xdg_output_manager(zxdg_output_manager_v1* manager);
+    void on_output_logical_size(wl_output*, Gfx::IntSize logical_size);
     void on_output_mode(Gfx::IntSize physical_size) { m_physical_size = physical_size; }
     void on_output_scale(int factor) { m_scale = factor > 0 ? factor : 1; }
     void on_output_done();
@@ -213,6 +219,8 @@ private:
     wl_pointer* m_pointer { nullptr };
     wl_keyboard* m_keyboard { nullptr };
     wl_output* m_output { nullptr };
+    Vector<wl_output*> m_outputs;
+    zxdg_output_manager_v1* m_xdg_output_manager { nullptr };
     xdg_wm_base* m_wm_base { nullptr };
     zxdg_decoration_manager_v1* m_decoration_manager { nullptr };
     RefPtr<Core::Notifier> m_notifier;
@@ -240,6 +248,7 @@ private:
     Gfx::IntSize m_physical_size;
     Gfx::IntSize m_screen_size;
     int m_scale { 1 };
+    bool m_have_logical_size { false };
 
     HashMap<i32, NonnullOwnPtr<WindowSurface>> m_windows;
     HashMap<i32, NonnullOwnPtr<Popup>> m_popups;

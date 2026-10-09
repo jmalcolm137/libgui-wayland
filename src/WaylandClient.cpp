@@ -21,6 +21,7 @@
 #include <xkbcommon/xkbcommon.h>
 
 #include "xdg-decoration-client-protocol.h"
+#include "xdg-output-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
 
 namespace LibWM {
@@ -46,6 +47,8 @@ static void registry_global(void* data, wl_registry* registry, uint32_t name, ch
     else if (!strcmp(interface, wl_data_device_manager_interface.name)) {
         dbgln("LibWM/Wayland: found wl_data_device_manager v{}", version);
         self.set_data_device_manager(reinterpret_cast<wl_data_device_manager*>(wl_registry_bind(registry, name, &wl_data_device_manager_interface, min(version, 3u))));
+    } else if (!strcmp(interface, zxdg_output_manager_v1_interface.name)) {
+        self.set_xdg_output_manager(reinterpret_cast<zxdg_output_manager_v1*>(wl_registry_bind(registry, name, &zxdg_output_manager_v1_interface, min(version, 3u))));
     }
 }
 
@@ -99,6 +102,27 @@ static wl_output_listener const s_output_listener = {
     .scale = output_scale,
     .name = output_name,
     .description = output_description,
+};
+
+// --- zxdg_output_v1 (logical size under fractional scaling) -------------------
+
+static void xdg_output_logical_position(void*, zxdg_output_v1*, int32_t, int32_t) { }
+
+static void xdg_output_logical_size(void* data, zxdg_output_v1*, int32_t width, int32_t height)
+{
+    static_cast<WaylandClient*>(data)->on_output_logical_size(nullptr, { width, height });
+}
+
+static void xdg_output_done(void*, zxdg_output_v1*) { }
+static void xdg_output_name(void*, zxdg_output_v1*, char const*) { }
+static void xdg_output_description(void*, zxdg_output_v1*, char const*) { }
+
+static zxdg_output_v1_listener const s_xdg_output_listener = {
+    .logical_position = xdg_output_logical_position,
+    .logical_size = xdg_output_logical_size,
+    .done = xdg_output_done,
+    .name = xdg_output_name,
+    .description = xdg_output_description,
 };
 
 // --- xdg_surface_object --------------------------------------------------------------
@@ -500,7 +524,21 @@ void WaylandClient::dispatch()
 void WaylandClient::add_output(wl_output* output)
 {
     m_output = output;
+    m_outputs.append(output);
     wl_output_add_listener(output, &s_output_listener, this);
+    if (m_xdg_output_manager) {
+        auto* xdg_output = zxdg_output_manager_v1_get_xdg_output(m_xdg_output_manager, output);
+        zxdg_output_v1_add_listener(xdg_output, &s_xdg_output_listener, this);
+    }
+}
+
+void WaylandClient::set_xdg_output_manager(zxdg_output_manager_v1* manager)
+{
+    m_xdg_output_manager = manager;
+    for (auto* output : m_outputs) {
+        auto* xdg_output = zxdg_output_manager_v1_get_xdg_output(manager, output);
+        zxdg_output_v1_add_listener(xdg_output, &s_xdg_output_listener, this);
+    }
 }
 
 void WaylandClient::add_seat(wl_seat* seat)
@@ -532,12 +570,22 @@ void WaylandClient::add_wm_base(xdg_wm_base* wm_base)
     xdg_wm_base_add_listener(wm_base, &s_wm_base_listener, this);
 }
 
+void WaylandClient::on_output_logical_size(wl_output*, Gfx::IntSize logical_size)
+{
+    if (logical_size.is_empty())
+        return;
+    m_have_logical_size = true;
+    m_screen_size = logical_size;
+}
+
 void WaylandClient::on_output_done()
 {
+    // zxdg_output_v1 gives the real logical size under fractional scaling and
+    // takes precedence over mode/scale.
+    if (m_have_logical_size)
+        return;
     if (m_physical_size.is_empty())
         return;
-    // Report the logical size to SerenityOS; physical pixels stay with the
-    // compositor and the output scale (principle P1).
     m_screen_size = { m_physical_size.width() / m_scale, m_physical_size.height() / m_scale };
 }
 
@@ -739,6 +787,7 @@ void WaylandClient::on_keyboard_focus(wl_surface* surface, bool entered)
 
 void WaylandClient::on_toplevel_configure(xdg_toplevel* toplevel, Gfx::IntSize size, bool activated, bool fullscreen, bool maximized)
 {
+    dbgln("LibWM/Wayland: toplevel configure {}x{} activated={} fullscreen={} maximized={}", size.width(), size.height(), activated, fullscreen, maximized);
     for (auto const& it : m_windows) {
         auto& w = *it.value;
         if (w.toplevel != toplevel)
@@ -758,7 +807,6 @@ void WaylandClient::on_toplevel_configure(xdg_toplevel* toplevel, Gfx::IntSize s
         return;
     }
 }
-
 void WaylandClient::on_toplevel_close(xdg_toplevel* toplevel)
 {
     for (auto const& it : m_windows) {
@@ -1223,24 +1271,26 @@ void WaylandClient::purge_released_buffers(WindowSurface& window_surface)
     window_surface.buffers = move(kept);
 }
 
-void WaylandClient::attach_and_commit(i32 window_id, int client_fd, Gfx::IntSize size, i32 pitch, bool has_alpha)
+void WaylandClient::attach_and_commit(i32 window_id, int client_fd, Gfx::IntSize size, Gfx::IntSize visible_size, i32 pitch, bool has_alpha)
 {
     auto* window_surface = find(window_id);
     if (!window_surface || !m_shm || size.is_empty())
         return;
+    if (visible_size.is_empty())
+        visible_size = size;
 
     purge_released_buffers(*window_surface);
 
     // If the window has a top inset (menubar), compose it above the client's
     // content into a single buffer. Otherwise attach the client's buffer as-is.
     if (window_surface->inset > 0 && window_surface->draw_inset) {
-        int total_height = size.height() + window_surface->inset;
-        size_t bytes = static_cast<size_t>(size.width()) * 4 * static_cast<size_t>(total_height);
+        int total_height = visible_size.height() + window_surface->inset;
+        size_t bytes = static_cast<size_t>(visible_size.width()) * 4 * static_cast<size_t>(total_height);
         auto buffer = Core::AnonymousBuffer::create_with_size(bytes);
         if (buffer.is_error())
             return;
         window_surface->composed_buffer = buffer.release_value();
-        auto composed = Gfx::Bitmap::create_with_anonymous_buffer(Gfx::BitmapFormat::BGRA8888, window_surface->composed_buffer, { size.width(), total_height }, 1);
+        auto composed = Gfx::Bitmap::create_with_anonymous_buffer(Gfx::BitmapFormat::BGRA8888, window_surface->composed_buffer, { visible_size.width(), total_height }, 1);
         if (composed.is_error())
             return;
         window_surface->composed_bitmap = composed.release_value();
@@ -1250,16 +1300,16 @@ void WaylandClient::attach_and_commit(i32 window_id, int client_fd, Gfx::IntSize
         auto* source = static_cast<u8 const*>(mmap(nullptr, client_bytes, PROT_READ, MAP_SHARED, client_fd, 0));
         if (source == MAP_FAILED)
             return;
-        for (int y = 0; y < size.height(); ++y)
-            memcpy(destination.scanline(window_surface->inset + y), source + static_cast<size_t>(y) * pitch, static_cast<size_t>(size.width()) * 4);
+        for (int y = 0; y < visible_size.height(); ++y)
+            memcpy(destination.scanline(window_surface->inset + y), source + static_cast<size_t>(y) * pitch, static_cast<size_t>(visible_size.width()) * 4);
         munmap(const_cast<u8*>(source), client_bytes);
 
-        window_surface->draw_inset(destination, { 0, 0, size.width(), window_surface->inset });
+        window_surface->draw_inset(destination, { 0, 0, visible_size.width(), window_surface->inset });
 
         bind_bitmap(window_surface->surface, window_surface->composed_buffer, destination, window_surface->buffers);
         wl_surface_commit(window_surface->surface);
         wl_display_flush(m_display);
-        dbgln("LibWM/Wayland: presented window {} ({}x{} incl. {}px inset)", window_id, size.width(), total_height, window_surface->inset);
+        dbgln("LibWM/Wayland: presented window {} ({}x{} incl. {}px inset)", window_id, visible_size.width(), total_height, window_surface->inset);
         return;
     }
 
@@ -1274,7 +1324,9 @@ void WaylandClient::attach_and_commit(i32 window_id, int client_fd, Gfx::IntSize
     }
 
     auto format = has_alpha ? WL_SHM_FORMAT_ARGB8888 : WL_SHM_FORMAT_XRGB8888;
-    auto* buffer = wl_shm_pool_create_buffer(pool, 0, size.width(), size.height(), pitch, format);
+    // Present only the visible region; the extra rows/columns of the widened
+    // backing store are simply not referenced.
+    auto* buffer = wl_shm_pool_create_buffer(pool, 0, visible_size.width(), visible_size.height(), pitch, format);
     if (!buffer) {
         wl_shm_pool_destroy(pool);
         close(fd);
@@ -1282,7 +1334,7 @@ void WaylandClient::attach_and_commit(i32 window_id, int client_fd, Gfx::IntSize
     }
 
     wl_surface_attach(window_surface->surface, buffer, 0, 0);
-    wl_surface_damage(window_surface->surface, 0, 0, size.width(), size.height());
+    wl_surface_damage(window_surface->surface, 0, 0, visible_size.width(), visible_size.height());
     wl_surface_commit(window_surface->surface);
     wl_display_flush(m_display);
 
@@ -1295,7 +1347,7 @@ void WaylandClient::attach_and_commit(i32 window_id, int client_fd, Gfx::IntSize
     wl_buffer_add_listener(buffer, &s_buffer_listener, record.ptr());
     window_surface->buffers.append(move(record));
 
-    dbgln("LibWM/Wayland: presented window {} ({}x{})", window_id, size.width(), size.height());
+    dbgln("LibWM/Wayland: presented window {} ({}x{})", window_id, visible_size.width(), visible_size.height());
 }
 
 }

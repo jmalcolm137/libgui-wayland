@@ -99,6 +99,7 @@ void WindowServerConnection::install_input_callbacks()
     };
     callbacks.window_resize = [this](i32 window_id, Gfx::IntSize size) {
         if (auto* w = window(window_id)) {
+            dbgln("LibWM: window_resized {} -> {}x{}", window_id, size.width(), size.height());
             w->rect.set_size(size);
             async_window_resized(window_id, w->rect);
             Vector<Gfx::IntRect> rects;
@@ -287,7 +288,7 @@ Messages::WindowServer::GetWindowRectFromClientResponse WindowServerConnection::
     return Messages::WindowServer::GetWindowRectFromClientResponse { Gfx::IntRect {} };
 }
 
-void WindowServerConnection::set_window_backing_store(i32 window_id, i32, i32 pitch, IPC::File const& anon_file, i32 serial, bool has_alpha_channel, Gfx::IntSize size, Gfx::IntSize, bool)
+void WindowServerConnection::set_window_backing_store(i32 window_id, i32, i32 pitch, IPC::File const& anon_file, i32 serial, bool has_alpha_channel, Gfx::IntSize size, Gfx::IntSize visible_size, bool)
 {
     auto* w = window(window_id);
     if (!w) {
@@ -326,7 +327,7 @@ void WindowServerConnection::set_window_backing_store(i32 window_id, i32, i32 pi
     w->has_alpha_channel = has_alpha_channel;
     w->last_serial = serial;
     present(*w);
-    WaylandClient::the().attach_and_commit(window_id, anon_file.fd(), size, pitch, has_alpha_channel);
+    WaylandClient::the().attach_and_commit(window_id, anon_file.fd(), size, visible_size, pitch, has_alpha_channel);
 }
 
 void WindowServerConnection::invalidate_rect(i32 window_id, Vector<Gfx::IntRect> const& rects, bool)

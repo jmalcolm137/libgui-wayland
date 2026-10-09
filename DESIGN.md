@@ -508,6 +508,13 @@ The first vertical slice is implemented and verified on a real KDE Plasma Waylan
 * **Window state.** `set_fullscreen`/`set_maximized`/`set_minimized` map to the matching
   `xdg_toplevel` requests; the compositor's resulting `configure` size resizes the client
   content (accounting for the menubar inset), verified by `libwm-fullscreen-test`.
+* **HiDPI / fractional scaling.** The test panel is **fractionally scaled (1.75×)**: physical
+  2560×1600 with a logical output of **1463×914**, which `wl_output.mode/scale` alone reports
+  wrongly as 1280×800. LibWM takes the real logical size from `zxdg_output_v1`. It also honours
+  the client's `visible_size` (LibGUI over-allocates its backing store by 64 px per axis during
+  interactive resize), so the correct region is presented. Crisp rendering at a fractional
+  scale still requires plumbing a device scale into LibGUI's backing store (M8); today the
+  logical buffer is presented 1:1 and the compositor upscales it.
 
 Still deferred (next milestones): pointer/keyboard input (M3), CSD/decoration policy and DPI
 polish (M4), menus/popups and clipboard (M6).
