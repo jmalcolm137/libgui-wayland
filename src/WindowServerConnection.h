@@ -6,10 +6,12 @@
 
 #pragma once
 
+#include <AK/HashMap.h>
 #include <AK/NonnullOwnPtr.h>
 #include <AK/NonnullRefPtr.h>
 #include <AK/RefPtr.h>
 #include <AK/Vector.h>
+#include <LibCore/ElapsedTimer.h>
 #include <LibCore/Socket.h>
 #include <LibGfx/Bitmap.h>
 #include <LibIPC/Connection.h>
@@ -118,6 +120,18 @@ private:
     i32 m_client_id { 1 };
     i32 m_active_window_id { -1 };
     MenuController m_menu;
+
+    // Double-click detection, mirroring WindowServer::WindowManager: a second
+    // press/release within the interval and distance is delivered to the client
+    // as a MouseDoubleClick (after the MouseUp).
+    struct DoubleClickMetadata {
+        Core::ElapsedTimer clock;
+        Gfx::IntPoint last_position;
+    };
+    i32 m_double_click_window { -1 };
+    HashMap<u32, DoubleClickMetadata> m_double_click_metadata;
+    int m_double_click_speed { 250 };
+    int m_max_distance_for_double_click { 4 };
 };
 
 }

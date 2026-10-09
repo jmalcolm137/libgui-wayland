@@ -82,6 +82,29 @@ void WindowServerConnection::install_input_callbacks()
     };
     callbacks.mouse_up = [this](i32 window_id, Gfx::IntPoint position, u32 button, u32 buttons, u32 modifiers) {
         async_mouse_up(window_id, position, button, buttons, modifiers, 0, 0, 0, 0);
+
+        // Mirror WindowServer::WindowManager: a second press/release within the
+        // double-click interval and distance is delivered to the client as a
+        // MouseDoubleClick, after the MouseUp. GUI views use this for
+        // double-click activation (e.g. opening a file in the file picker).
+        if (window_id != m_double_click_window) {
+            m_double_click_window = window_id;
+            m_double_click_metadata.clear();
+        }
+        auto& metadata = m_double_click_metadata.ensure(button);
+        auto delta = position - metadata.last_position;
+        int distance_squared = delta.x() * delta.x() + delta.y() * delta.y();
+        bool is_double_click = metadata.clock.is_valid()
+            && metadata.clock.elapsed_milliseconds() < m_double_click_speed
+            && distance_squared <= m_max_distance_for_double_click * m_max_distance_for_double_click;
+        if (is_double_click) {
+            dbgln("LibWM: mouse double-click window {} at {},{} button={}", window_id, position.x(), position.y(), button);
+            async_mouse_double_click(window_id, position, button, buttons, modifiers, 0, 0, 0, 0);
+            metadata.clock.reset();
+        } else {
+            metadata.clock.start();
+        }
+        metadata.last_position = position;
     };
     callbacks.mouse_wheel = [this](i32 window_id, Gfx::IntPoint position, u32 buttons, u32 modifiers, i32 wheel_delta_x, i32 wheel_delta_y) {
         async_mouse_wheel(window_id, position, 0, buttons, modifiers, wheel_delta_x, wheel_delta_y, wheel_delta_x, wheel_delta_y);

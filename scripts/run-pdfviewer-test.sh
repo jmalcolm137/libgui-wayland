@@ -114,11 +114,62 @@ check "picker opened from File -> Open" "grep -q \"title='Open'\" '$RUNTIME/open
 check "picker selected and opened a file" "grep -q 'set_window_title.*libwm-pdf-open-test.pdf' '$RUNTIME/open.app.log'"
 check "picker flow did not crash"       "! grep -q 'VERIFICATION FAILED' '$RUNTIME/open.app.log'"
 
+# Double-click: the picker view activates on MouseDoubleClick (which WindowServer
+# synthesises from two quick clicks). Start in a controlled HOME containing a
+# directory with one file; double-click the directory to traverse, then
+# double-click the file to open it.
+DC_HOME="$RUNTIME/dc-home"
+mkdir -p "$DC_HOME/aaa"
+cp "$SERENITY_SRC/Tests/LibPDF/colorspaces.pdf" "$DC_HOME/aaa/inner.pdf"
+cat > "$RUNTIME/dc.input" <<'EOF'
+sleep 2000
+key PRESS 68
+key RELEASE 68
+sleep 600
+key PRESS 108
+key RELEASE 108
+sleep 400
+key PRESS 28
+key RELEASE 28
+sleep 1500
+motion 160 75
+button PRESS left
+button RELEASE left
+sleep 90
+motion 160 75
+button PRESS left
+button RELEASE left
+sleep 1500
+motion 160 75
+button PRESS left
+button RELEASE left
+sleep 90
+motion 160 75
+button PRESS left
+button RELEASE left
+sleep 2000
+EOF
+"$HC" --socket libwm-pdf-dc --size 1280x800 --timeout 11 \
+    --output "$RUNTIME/dc-hc.png" --input "$RUNTIME/dc.input" > "$RUNTIME/dc-hc.log" 2>&1 &
+HC_PID=$!
+for _ in $(seq 1 100); do [[ -e "$RUNTIME/libwm-pdf-dc" ]] && break; sleep 0.1; done
+set +e
+env HOME="$DC_HOME" XDG_RUNTIME_DIR="$RUNTIME" WAYLAND_DISPLAY=libwm-pdf-dc \
+    SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
+    LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    timeout 12 "$APP" > "$RUNTIME/dc.app.log" 2>&1
+set -e
+wait "$HC_PID" 2>/dev/null || true
+
+check "double-click traversed a directory and opened a file" "grep -q 'set_window_title.*aaa/inner.pdf' '$RUNTIME/dc.app.log'"
+
 if [[ $failures -ne 0 ]]; then
     echo "==> $failures PDFViewer check(s) failed; app log:"
     cat "$RUNTIME/app.log"
     echo "--- picker run log ---"
     cat "$RUNTIME/open.app.log"
+    echo "--- double-click run log ---"
+    cat "$RUNTIME/dc.app.log"
     exit 1
 fi
 echo "==> PDFViewer test passed (rendered: $FRAME_OUT)"

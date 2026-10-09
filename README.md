@@ -42,7 +42,8 @@ The shim is called **LibWM**. It sits between `LibGUI`'s WindowServer IPC protoc
   thread from the portal thread), and it reads/writes its preferences through an in-process
   **Config** portal; both are served by LibWM without touching library source. Verified
   headlessly against `Tests/LibPDF/*.pdf` (window, menubar, page toolbar, the rendered page,
-  and a full picker-driven open; `scripts/run-pdfviewer-test.sh`). Scroll/animation polish
+  a typed-path picker open, and double-clicking to traverse a directory and open a file;
+  `scripts/run-pdfviewer-test.sh`). Scroll/animation polish
   remains.
 - **M6 (partly)** — clipboard and menus: done for `text/plain`, `text/uri-list`, and
   `image/png` ↔ `image/x-serenityos` (all verified headlessly in both directions), plus a

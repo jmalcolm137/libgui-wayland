@@ -404,6 +404,10 @@ Responsibilities:
 * `wl_pointer` motion/enter/leave/button/axis → Serenity `MouseEvent`s. Coordinates are
   surface-local; CSD offsets are subtracted so widgets see content-local points. Button
   numbering, wheel deltas (`axis`) and modifiers are mapped.
+* Double-clicks are synthesised like WindowServer's `WindowManager`: a second press/release
+  within 250 ms and 4 px of the previous one on the same window is delivered as
+  `mouse_double_click` (after the `mouse_up`). GUI views use it for activation, e.g.
+  double-clicking a file or directory in the file picker.
 * `wl_keyboard` + `xkbcommon`: `keymap` provides an XKB keymap; `enter`/`key`/`modifiers` map
   to `key_down`/`key_up` with `code_point`, Serenity `KeyCode`, modifier mask, and scancode
   via a translation table built from `Kernel/API/KeyCode.h` (which Lagom already installs).
