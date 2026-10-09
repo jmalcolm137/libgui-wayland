@@ -1,8 +1,65 @@
+diff --git a/Meta/CMake/serenity_components.cmake b/Meta/CMake/serenity_components.cmake
+index af660542..7a88a65b 100644
+--- a/Meta/CMake/serenity_components.cmake
++++ b/Meta/CMake/serenity_components.cmake
+@@ -30,13 +30,22 @@ function(serenity_component name)
+     set(should_disable_target $<BOOL:${static_should_disable_target}>)
+     if(NOT "${SERENITY_COMPONENT_TARGETS}" STREQUAL "") # note: one component is /bin/false, which makes this tricky
+         foreach(target IN LISTS SERENITY_COMPONENT_TARGETS)
++            # libgui-wayland: a component may also name helper executables that
++            # are not built under Lagom (utmpupdate, Profiler, ...).
++            if (NOT TARGET "${target}")
++                continue()
++            endif()
+             add_dependencies("Component${name}" "${target}")
+             set(should_disable_target $<OR:${should_disable_target},$<BOOL:$<TARGET_PROPERTY:${target},SERENITY_SKIP_BUILD>>>)
+         endforeach()
+     endif()
+     set_target_properties("Component${name}" PROPERTIES EXCLUDE_FROM_ALL ${should_disable_target})
+     foreach(dependency IN LISTS SERENITY_COMPONENT_DEPENDS)
+-        add_dependencies("Component${name}" "Component${dependency}")
++        # libgui-wayland: services gated on SERENITYOS have no component target
++        # in a Lagom build, so only add dependencies that exist.
++        if (TARGET "Component${dependency}")
++            add_dependencies("Component${name}" "Component${dependency}")
++        endif()
+     endforeach()
+ endfunction()
+ 
+diff --git a/Meta/CMake/utils.cmake b/Meta/CMake/utils.cmake
+index bc8de6a4..d11215b5 100644
+--- a/Meta/CMake/utils.cmake
++++ b/Meta/CMake/utils.cmake
+@@ -190,6 +190,13 @@ if (NOT COMMAND serenity_app)
+ endif()
+ 
+ function(embed_resource target section file)
++    if (NOT SERENITYOS)
++        # libgui-wayland: the host loads resources from the filesystem
++        # (`/res` -> SERENITY_RES_ROOT), so skip the assembly-embedded copy
++        # (which needs ASM enabled and the Serenity linker script).
++        add_library(${target}-resources-${section} INTERFACE)
++        return()
++    endif()
+     get_filename_component(asm_file "${file}" NAME)
+     set(asm_file "${CMAKE_CURRENT_BINARY_DIR}/${target}-${section}.s")
+     get_filename_component(input_file "${file}" ABSOLUTE)
 diff --git a/Meta/Lagom/CMakeLists.txt b/Meta/Lagom/CMakeLists.txt
-index 213a1e77..3db0a482 100644
+index 213a1e77..d6e66f35 100644
 --- a/Meta/Lagom/CMakeLists.txt
 +++ b/Meta/Lagom/CMakeLists.txt
-@@ -473,6 +473,7 @@ if (BUILD_LAGOM)
+@@ -187,6 +187,10 @@ include_directories(${CMAKE_BINARY_DIR})
+ include_directories(${CMAKE_CURRENT_BINARY_DIR})
+ include_directories(${CMAKE_CURRENT_BINARY_DIR}/Userland/Libraries)
+ include_directories(${CMAKE_CURRENT_BINARY_DIR}/Userland/Services)
++# libgui-wayland: host compatibility headers (serenity.h, errno_codes.h, ...).
++include_directories(${SERENITY_PROJECT_ROOT}/../compat)
++# libgui-wayland: generated per-application headers (e.g. <Applications/Foo/FooGML.h>).
++include_directories(${CMAKE_CURRENT_BINARY_DIR}/Userland)
+ 
+ # install rules, think about moving to its own helper cmake file
+ include(CMakePackageConfigHelpers)
+@@ -473,6 +477,7 @@ if (BUILD_LAGOM)
          DeviceTree
          DNS
          Diff
@@ -10,9 +67,34 @@ index 213a1e77..3db0a482 100644
          Gemini
          Gfx
          GL
-@@ -545,18 +546,9 @@ if (BUILD_LAGOM)
+@@ -507,6 +512,17 @@ if (BUILD_LAGOM)
+         Wasm
+         WebSocket
+         XML
++        # libgui-wayland: extra libraries the applications need.
++        Cards
++        Chess
++        CMake
++        Coredump
++        Debug
++        EDID        Keyboard
++        Maps
++        Partition
++        Symbolication
++        VT
+     )
+ 
+     target_link_libraries(LibCore PRIVATE LibURL Threads::Threads)
+@@ -544,19 +560,16 @@ if (BUILD_LAGOM)
+         add_serenity_subdirectory("Userland/Libraries/Lib${lib}")
      endforeach()
  
++    # libgui-wayland: LibPartition uses a Serenity ioctl id that has no host
++    # equivalent; the call fails harmlessly either way.
++    if (TARGET LibPartition)
++        target_compile_definitions(LibPartition PRIVATE STORAGE_DEVICE_GET_BLOCK_SIZE=0x5308)
++    endif()
++
      # GUI
 -    set(LIBGUI_SOURCES
 -        GML/Lexer.cpp
@@ -32,7 +114,7 @@ index 213a1e77..3db0a482 100644
  
      # FIXME: How about we don't include Kernel/API from random high-level libraries?
      install(FILES ${SERENITY_PROJECT_ROOT}/Kernel/API/KeyCode.h DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/Kernel/API")
-@@ -569,6 +561,51 @@ if (BUILD_LAGOM)
+@@ -569,6 +582,121 @@ if (BUILD_LAGOM)
          # Lagom Services
          add_serenity_subdirectory(Userland/Services)
  
@@ -81,6 +163,119 @@ index 213a1e77..3db0a482 100644
 +        # libgui-wayland: LibSerenityAudio (the PipeWire <-> LibAudio compatibility layer).
 +        add_subdirectory("${SERENITY_PROJECT_ROOT}/../libserenity-audio" "${CMAKE_CURRENT_BINARY_DIR}/libserenity-audio")
 +
++        # ------------------------------------------------------------------
++        # libgui-wayland: the SerenityOS applications we support on the host,
++        # built from their own CMakeLists (the build system handles GML,
++        # stringify_gml and embedded resources). Applications that need the
++        # (disabled) LibWeb/LibWebView stack are omitted.
++        # ------------------------------------------------------------------
++        set(libgui_wayland_apps
++            About
++            AnalogClock
++            Assistant
++            Calendar
++            CalendarSettings
++            CharacterMap
++            ClockSettings
++            Escalator
++            FileManager
++            FontEditor
++            HexEditor
++            ImageViewer
++            MailSettings
++            MapsSettings
++            MouseSettings
++            NetworkSettings
++            PixelPaint
++            Run
++            Screenshot
++            Settings
++            SoundPlayer
++            SpaceAnalyzer
++            ThemeEditor
++            UsersSettings
++            VideoPlayer
++            Weather
++            3DFileViewer
++            # Second batch: needs the extra libraries added below.
++            KeyboardMapper
++            KeyboardSettings
++            GamesSettings
++            Maps
++            DisplaySettings
++            PartitionEditor
++            Terminal
++            TerminalSettings
++            SystemMonitor
++            CrashReporter
++            Debugger
++            # Web-stack apps (ENABLE_LAGOM_LIBWEB=ON).
++            Browser
++            BrowserSettings
++            Help
++            Mail
++            Presenter
++            Spreadsheet
++            TextEditor
++            Welcome
++        )
++        foreach(app ${libgui_wayland_apps})
++            add_serenity_subdirectory(Userland/Applications/${app})
++            # Link the two shims and keep them loaded (their portals are
++            # registered from static initializers).
++            target_link_options(${app} PRIVATE "-Wl,--no-as-needed")
++            target_link_libraries(${app} PRIVATE wm serenity-audio)
++            # Host compatibility headers (e.g. a stand-in errno_codes.h).
++            target_include_directories(${app} PRIVATE "${SERENITY_PROJECT_ROOT}/../compat")
++            if (app STREQUAL "SystemMonitor")
++                # Serenity-specific mount flags and scheduler constant.
++                target_compile_definitions(${app} PRIVATE THREAD_PRIORITY_MAX=99 MS_WXALLOWED=0 MS_AXALLOWED=0 MS_NOREGULAR=0)
++            endif()
++        endforeach()
++
          # Lagom Utilities
          lagom_utility(abench SOURCES ../../Userland/Utilities/abench.cpp LIBS LibMain LibFileSystem LibAudio)
          lagom_utility(aconv SOURCES ../../Userland/Utilities/aconv.cpp LIBS LibMain LibFileSystem LibAudio)
+diff --git a/Userland/Libraries/LibShell/CMakeLists.txt b/Userland/Libraries/LibShell/CMakeLists.txt
+index 8cb8818e..8c72e89d 100644
+--- a/Userland/Libraries/LibShell/CMakeLists.txt
++++ b/Userland/Libraries/LibShell/CMakeLists.txt
+@@ -19,7 +19,10 @@ serenity_lib(LibShell shell)
+ target_link_libraries(LibShell PRIVATE LibCore LibRegex LibLine LibFileSystem LibSyntax LibURL)
+ target_sources(LibShell PRIVATE URLHighlight.cpp)
+ 
++# libgui-wayland: SyntaxHighlighter only needs LibSyntax/LibGfx (and LibShell
++# itself), so build it on the host too; LibCodeComprehension stays Serenity-only.
++target_sources(LibShell PRIVATE SyntaxHighlighter.cpp)
++
+ if (SERENITYOS)
+-    target_sources(LibShell PRIVATE SyntaxHighlighter.cpp)
+     target_link_libraries(LibShell PRIVATE LibCodeComprehension)
+ endif()
+diff --git a/Userland/Libraries/LibWebView/CMakeLists.txt b/Userland/Libraries/LibWebView/CMakeLists.txt
+index e0bff107..ef036c5c 100644
+--- a/Userland/Libraries/LibWebView/CMakeLists.txt
++++ b/Userland/Libraries/LibWebView/CMakeLists.txt
+@@ -21,9 +21,7 @@ set(SOURCES
+ 
+ set(GENERATED_SOURCES ${CURRENT_LIB_GENERATED})
+ 
+-if (SERENITYOS)
+-    list(APPEND SOURCES OutOfProcessWebView.cpp)
+-endif()
++list(APPEND SOURCES OutOfProcessWebView.cpp)
+ 
+ embed_as_string(
+     "NativeStyleSheetSource.cpp"
+@@ -53,9 +51,8 @@ serenity_lib(LibWebView webview)
+ target_link_libraries(LibWebView PRIVATE LibCore LibFileSystem LibGfx LibIPC LibProtocol LibJS LibWeb LibSQL LibUnicode LibURL LibSyntax)
+ target_compile_definitions(LibWebView PRIVATE ENABLE_PUBLIC_SUFFIX=$<BOOL:${ENABLE_PUBLIC_SUFFIX_DOWNLOAD}>)
+ 
+-if (SERENITYOS)
+-    target_link_libraries(LibWebView PRIVATE LibFileSystemAccessClient LibGUI)
+-endif()
++# libgui-wayland: OutOfProcessWebView needs these on the host too.
++target_link_libraries(LibWebView PRIVATE LibFileSystemAccessClient LibGUI)
+ 
+ if (NOT SERENITYOS)
+     foreach(header ${GENERATED_SOURCES})

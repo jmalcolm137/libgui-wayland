@@ -1,69 +1,42 @@
-diff --git a/Userland/Libraries/LibCore/PortalServer.h b/Userland/Libraries/LibCore/PortalServer.h
-new file mode 100644
-index 00000000..237c7158
---- /dev/null
-+++ b/Userland/Libraries/LibCore/PortalServer.h
-@@ -0,0 +1,60 @@
-+/*
-+ * Copyright (c) 2026, libgui-wayland contributors
-+ *
-+ * SPDX-License-Identifier: BSD-2-Clause
-+ */
-+
-+#pragma once
-+
-+#include <AK/ByteString.h>
-+#include <AK/Function.h>
-+#include <AK/NonnullOwnPtr.h>
-+#include <AK/Optional.h>
-+#include <AK/Vector.h>
-+
-+namespace Core {
-+
-+class LocalSocket;
-+
-+// Lets in-process components answer connections that would normally go to a
-+// SerenityOS system service over a Unix socket.
-+//
-+// This is the seam through which the Wayland shims redirect the WindowServer /
-+// Clipboard / Config / Audio / ... portals, so that SerenityOS libraries and the
-+// applications they drive remain byte-for-byte unmodified. Multiple providers
-+// register independently (LibWM for the windowing portals, LibSerenityAudio for
-+// the audio ones); each is tried in turn and the first that recognises a path
-+// wins. When no connector is installed, LocalSocket::connect() behaves exactly
-+// as on SerenityOS.
-+class PortalServer {
-+public:
-+    // Returns a connected in-process socket for `path`, or an empty Optional to
-+    // decline it (so the next connector, or the real filesystem socket, is tried).
-+    using Connector = Function<Optional<NonnullOwnPtr<LocalSocket>>(ByteString const& path)>;
-+
-+    static void add_connector(Connector connector)
-+    {
-+        connector_list().append(move(connector));
-+    }
-+
-+    static Optional<NonnullOwnPtr<LocalSocket>> try_connect(ByteString const& path)
-+    {
-+        for (auto& connector : connector_list()) {
-+            if (auto socket = connector(path); socket.has_value())
-+                return socket;
-+        }
-+        return {};
-+    }
-+
-+private:
-+    // Heap-allocated and never destroyed: connectors are installed from static
-+    // initializers, and tearing them down during __cxa_finalize would race the
-+    // server threads they feed.
-+    static Vector<Connector>& connector_list()
-+    {
-+        static auto* s_connectors = new Vector<Connector>;
-+        return *s_connectors;
-+    }
-+};
-+
-+}
+diff --git a/AK/Platform.h b/AK/Platform.h
+index c9489d8e..86613ad1 100644
+--- a/AK/Platform.h
++++ b/AK/Platform.h
+@@ -250,9 +250,12 @@
+ // FIXME: No idea where to get this, but it's 4096 anyway :^)
+ #        define PAGE_SIZE 4096
+ #    else
++// libgui-wayland host seam: sysconf() is not constexpr, so PAGE_SIZE cannot be
++// used as a template argument (e.g. Array<u8, PAGE_SIZE>). It is 4096 on the
++// hosts we target, matching the Windows branch above.
+ #        include <unistd.h>
+ #        undef PAGE_SIZE
+-#        define PAGE_SIZE sysconf(_SC_PAGESIZE)
++#        define PAGE_SIZE 4096
+ #    endif
+ #endif
+ 
+diff --git a/Userland/Libraries/LibCore/Command.cpp b/Userland/Libraries/LibCore/Command.cpp
+index 8f98ddc9..8f735e85 100644
+--- a/Userland/Libraries/LibCore/Command.cpp
++++ b/Userland/Libraries/LibCore/Command.cpp
+@@ -122,8 +122,14 @@ ErrorOr<Command::ProcessResult> Command::status(int options)
+     return ProcessResult::Failed;
+ }
+ 
+-// Only supported in serenity mode because we use `posix_spawn_file_actions_addchdir`
+-#ifdef AK_OS_SERENITY
++// libgui-wayland: build the command helper on the host too; glibc spells the
++// chdir spawn action with a _np suffix.
++#if defined(AK_OS_SERENITY)
++#    define posix_spawn_file_actions_addchdir posix_spawn_file_actions_addchdir
++#elif defined(__GLIBC__)
++#    define posix_spawn_file_actions_addchdir posix_spawn_file_actions_addchdir_np
++#endif
++#if 1
+ 
+ ErrorOr<CommandResult> command(ByteString const& command_string, Optional<LexicalPath> chdir)
+ {
 diff --git a/Userland/Libraries/LibCore/ResourceImplementation.cpp b/Userland/Libraries/LibCore/ResourceImplementation.cpp
 index 2834124a..86aa6d61 100644
 --- a/Userland/Libraries/LibCore/ResourceImplementation.cpp
@@ -141,6 +114,23 @@ index 1ff2626b..0b3f521a 100644
      int rc = ::openat(fd, path_string.characters(), options, mode);
      if (rc < 0)
          return Error::from_syscall("open"sv, -errno);
+diff --git a/Userland/Libraries/LibCore/System.h b/Userland/Libraries/LibCore/System.h
+index d5d616c1..ecee7d0e 100644
+--- a/Userland/Libraries/LibCore/System.h
++++ b/Userland/Libraries/LibCore/System.h
+@@ -78,7 +78,12 @@ inline ErrorOr<void> unveil(StringView, StringView)
+ {
+     return {};
+ }
++inline ErrorOr<void> unveil_after_exec(StringView, StringView) { return {}; }
+ inline ErrorOr<void> pledge(StringView, StringView = {}) { return {}; }
++// libgui-wayland: Serenity-only operations become no-ops on the host.
++inline ErrorOr<void> enter_jail_mode_until_exit() { return {}; }
++inline ErrorOr<void> enter_jail_mode_until_exec() { return {}; }
++inline ErrorOr<void> beep(u16 = 440, u16 = 200) { return {}; }
+ #endif
+ 
+ template<size_t N>
 diff --git a/Userland/Libraries/LibCore/Version.cpp b/Userland/Libraries/LibCore/Version.cpp
 index 2f7d3c0d..35fce12b 100644
 --- a/Userland/Libraries/LibCore/Version.cpp

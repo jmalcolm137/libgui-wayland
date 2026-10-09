@@ -1,0 +1,38 @@
+diff --git a/Userland/Libraries/LibCards/CardGame.cpp b/Userland/Libraries/LibCards/CardGame.cpp
+index 9fb38e33..b20e42dd 100644
+--- a/Userland/Libraries/LibCards/CardGame.cpp
++++ b/Userland/Libraries/LibCards/CardGame.cpp
+@@ -8,6 +8,7 @@
+ 
+ #include "CardGame.h"
+ #include <LibCards/CardPainter.h>
++#include <float.h>
+ #include <LibConfig/Client.h>
+ #include <LibGUI/Action.h>
+ #include <LibGUI/Process.h>
+diff --git a/Userland/Libraries/LibGfx/Painter.cpp b/Userland/Libraries/LibGfx/Painter.cpp
+index 3ac47e88..73a9a838 100644
+--- a/Userland/Libraries/LibGfx/Painter.cpp
++++ b/Userland/Libraries/LibGfx/Painter.cpp
+@@ -105,13 +105,17 @@ void Painter::clear_rect(IntRect const& a_rect, Color color)
+ 
+ void Painter::fill_physical_rect(IntRect const& physical_rect, Color color)
+ {
+-    // Callers must do clipping.
+-    ARGB32* dst = target().scanline(physical_rect.top()) + physical_rect.left();
++    // Callers must do clipping. Be defensive anyway: an unclamped rect (e.g. a
++    // thick short line near the edge) would otherwise write past the bitmap.
++    auto rect = physical_rect.intersected(target().rect());
++    if (rect.is_empty())
++        return;
++    ARGB32* dst = target().scanline(rect.top()) + rect.left();
+     size_t const dst_skip = target().pitch() / sizeof(ARGB32);
+ 
+     auto dst_format = target().format();
+-    for (int i = physical_rect.height() - 1; i >= 0; --i) {
+-        for (int j = 0; j < physical_rect.width(); ++j)
++    for (int i = rect.height() - 1; i >= 0; --i) {
++        for (int j = 0; j < rect.width(); ++j)
+             dst[j] = color_for_format(dst_format, dst[j]).blend(color).value();
+         dst += dst_skip;
+     }

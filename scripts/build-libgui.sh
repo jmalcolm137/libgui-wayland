@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Build the *full* LibGfx + LibGUI from unmodified SerenityOS source on the host,
-# using Lagom as the build system.
+# Build the full LibGfx + LibGUI (plus LibWeb/LibWebView, LibAudio, and the
+# applications) from SerenityOS source on the host, using Lagom as the build
+# system.
 #
-# The only change we make to upstream is a build-system patch that teaches Lagom
-# to compile all of LibGUI (instead of its historical 6-file stub) and to
-# generate the IPC endpoint headers for the SERENITYOS-gated services
-# (WindowServer, Clipboard, LaunchServer, NotificationServer,
-# FileSystemAccessServer) that LibGUI and its friends need. No library or
-# application source is modified.
+# The changes to upstream are small, documented patches (see patches/): teach
+# Lagom to compile the full LibGUI and to generate the IPC endpoint headers for
+# the SERENITYOS-gated services it needs; host seams in LibCore/AK/LibThreading;
+# host tuning in LibAudio; a couple of library source fixes; and a few
+# application include fixes. Application sources are otherwise unmodified.
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -24,7 +24,19 @@ for arg in "$@"; do
     esac
 done
 if [[ ${#TARGETS[@]} -eq 0 ]]; then
-    TARGETS=(LibGfx LibGUI wm Calculator PDFViewer Piano libwm-test-window)
+    # Everything that can run on the host (the SERENITYOS-service/kernel-facing
+    # apps -- Terminal, SystemMonitor, Debugger, CrashReporter, MouseSettings --
+    # are excluded; see README).
+    TARGETS=(
+        LibGfx LibGUI wm serenity-audio
+        Calculator PDFViewer Piano libwm-test-window
+        3DFileViewer About AnalogClock Assistant Browser BrowserSettings
+        Calendar CalendarSettings CharacterMap ClockSettings Escalator FileManager
+        FontEditor GamesSettings Help HexEditor ImageViewer KeyboardMapper
+        KeyboardSettings Mail MailSettings Maps MapsSettings NetworkSettings
+        Presenter Run Screenshot Settings SoundPlayer SpaceAnalyzer Spreadsheet
+        TerminalSettings TextEditor ThemeEditor UsersSettings VideoPlayer Weather
+    )
 fi
 
 if [[ ! -d "$SERENITY_SRC/.git" ]]; then
@@ -47,7 +59,7 @@ done
 echo "==> Configuring Lagom"
 cmake -S "$SERENITY_SRC/Meta/Lagom" -B "$BUILD_DIR" -GNinja \
     -DBUILD_LAGOM=ON \
-    -DENABLE_LAGOM_LIBWEB=OFF \
+    -DENABLE_LAGOM_LIBWEB=ON \
     -DENABLE_LAGOM_LADYBIRD=OFF \
     -DENABLE_CLANG_PLUGINS=OFF \
     -DENABLE_LAGOM_CCACHE=OFF \

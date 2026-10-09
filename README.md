@@ -58,6 +58,12 @@ The shim is called **LibWM**. It sits between `LibGUI`'s WindowServer IPC protoc
   **unmodified SerenityOS Piano** builds and runs, with multi-client mixing, and is verified
   headlessly (window, AudioServer portal, PipeWire `streaming`, zero underruns) by
   `scripts/run-piano-test.sh`.
+- **Applications** — 44 of the 49 apps in `Userland/Applications` build and run on the host,
+  including **Spreadsheet**, **TextEditor**, **PixelPaint**, **FileManager**, **Browser**,
+  **Mail**, **Maps**, **Piano**, **Calculator**, **PDFViewer**, and all the settings/utility
+  apps, with GML, icons, menus, dialogs and syntax highlighting intact. The web stack
+  (`LibWeb`/`LibWebView`) is built on the host too (`-DENABLE_LAGOM_LIBWEB=ON`). The five that
+  remain are Serenity service/kernel-facing and excluded (see below).
 
 ## Remaining work
 
@@ -72,6 +78,10 @@ The shim is called **LibWM**. It sits between `LibGUI`'s WindowServer IPC protoc
   written to disk between runs.
 - **Audio polish.** `LibSerenityAudio` has no AudioManager portal (no system mixer/volume
   integration), and cross-rate clients use LibAudio's naive resampler.
+- **Serenity-only applications (host exclusions).** `Terminal`, `SystemMonitor`, `Debugger`,
+  `CrashReporter` and `MouseSettings` build against Serenity kernel/system services (a pty,
+  `/proc`, ptrace and `sys/arch/regs.h`, WindowServer *service* internals) and neither build nor
+  function on Linux. Every other application in `Userland/Applications` builds and runs.
 - **Theme/font parity, decorations, icons, alpha (M4)** — remaining polish.
 
 ```sh
