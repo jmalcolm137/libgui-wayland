@@ -638,6 +638,8 @@ void WaylandClient::on_pointer_leave()
         m_pointer_window = -1;
         return;
     }
+    if (m_pointer_window >= 0 && m_input.menubar_left)
+        m_input.menubar_left(m_pointer_window);
     if (m_pointer_window >= 0 && m_input.window_left)
         m_input.window_left(m_pointer_window);
     m_pointer_window = -1;
@@ -662,6 +664,8 @@ void WaylandClient::on_pointer_motion(Gfx::IntPoint position)
             m_input.menubar_motion(m_pointer_window, position);
         return;
     }
+    if (m_input.menubar_left)
+        m_input.menubar_left(m_pointer_window);
     if (m_input.mouse_move)
         m_input.mouse_move(m_pointer_window, position.translated(0, -inset), m_pointer_buttons, current_modifiers());
 }

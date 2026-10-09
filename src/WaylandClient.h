@@ -75,6 +75,7 @@ public:
         Function<void(i32 window_id, Gfx::IntSize content_size)> window_resize;
         // Menubar (top inset) and popup (menu) input.
         Function<void(i32 window_id, Gfx::IntPoint position)> menubar_motion;
+        Function<void(i32 window_id)> menubar_left;
         Function<void(i32 window_id, Gfx::IntPoint position)> menubar_press;
         Function<void(i32 popup_id, Gfx::IntPoint position)> popup_motion;
         Function<void(i32 popup_id, Gfx::IntPoint position, bool pressed)> popup_button;

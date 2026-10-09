@@ -83,6 +83,7 @@ public:
 
     // --- interaction (coordinates are surface-local) ---
     void on_menubar_motion(i32 window_id, Gfx::IntPoint position);
+    void on_menubar_left(i32 window_id);
     void on_menubar_press(i32 window_id, Gfx::IntPoint position);
     void on_popup_motion(i32 menu_id, Gfx::IntPoint position);
     void on_popup_button(i32 menu_id, Gfx::IntPoint position, bool pressed);

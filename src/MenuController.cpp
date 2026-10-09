@@ -329,15 +329,20 @@ void MenuController::close_open_menu()
     if (m_open_menu_id == -1)
         return;
     auto menu_id = m_open_menu_id;
+    i32 window_id = -1;
     if (auto* menu = find_menu(menu_id)) {
         menu->is_open = false;
         menu->hovered_valid = false;
+        window_id = menu->window_id;
     }
     m_open_menu_id = -1;
+    m_hovered_menubar_menu = -1;
     if (hide_popup)
         hide_popup(menu_id);
     if (visibility_changed)
         visibility_changed(menu_id, false);
+    if (window_id != -1 && menubar_changed)
+        menubar_changed(window_id);
 }
 
 void MenuController::on_menubar_motion(i32 window_id, Gfx::IntPoint position)
@@ -351,10 +356,21 @@ void MenuController::on_menubar_motion(i32 window_id, Gfx::IntPoint position)
     if (hovered == m_hovered_menubar_menu)
         return;
     m_hovered_menubar_menu = hovered;
+    if (menubar_changed)
+        menubar_changed(window_id);
 
     // With a menu already open, sliding across the menubar switches menus.
     if (m_open_menu_id != -1 && hovered != -1 && hovered != m_open_menu_id)
         on_menubar_press(window_id, position);
+}
+
+void MenuController::on_menubar_left(i32 window_id)
+{
+    if (m_hovered_menubar_menu == -1)
+        return;
+    m_hovered_menubar_menu = -1;
+    if (menubar_changed)
+        menubar_changed(window_id);
 }
 
 void MenuController::on_menubar_press(i32 window_id, Gfx::IntPoint position)
@@ -413,11 +429,17 @@ void MenuController::on_popup_closed(i32 menu_id)
 {
     if (m_open_menu_id != menu_id)
         return;
-    if (auto* menu = find_menu(menu_id))
+    i32 window_id = -1;
+    if (auto* menu = find_menu(menu_id)) {
         menu->is_open = false;
+        window_id = menu->window_id;
+    }
     m_open_menu_id = -1;
+    m_hovered_menubar_menu = -1;
     if (visibility_changed)
         visibility_changed(menu_id, false);
+    if (window_id != -1 && menubar_changed)
+        menubar_changed(window_id);
 }
 
 }
