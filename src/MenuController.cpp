@@ -27,6 +27,21 @@ static Gfx::Palette system_palette()
     return Gfx::Palette { Gfx::PaletteImpl::create_with_anonymous_buffer(Gfx::current_system_theme_buffer()) };
 }
 
+static u32 menu_accelerator(ByteString const& name)
+{
+    for (size_t i = 0; i < name.length(); ++i) {
+        if (name[i] != '&')
+            continue;
+        if (i + 1 < name.length() && name[i + 1] == '&') {
+            ++i;
+            continue;
+        }
+        if (i + 1 < name.length())
+            return static_cast<u32>(to_ascii_lowercase(name[i + 1]));
+    }
+    return 0;
+}
+
 MenuController::Menu* MenuController::find_menu(i32 menu_id)
 {
     auto it = m_menus.find(menu_id);
@@ -65,8 +80,7 @@ void MenuController::set_menu_minimum_width(i32 menu_id, i32 minimum_width)
 
 void MenuController::destroy_menu(i32 menu_id)
 {
-    if (m_open_menu_id == menu_id)
-        close_open_menu();
+    close_menu(menu_id);
     m_menus.remove(menu_id);
     m_menubar_order.remove_first_matching([&](auto id) { return id == menu_id; });
 }
@@ -190,7 +204,7 @@ void MenuController::render_menubar(i32 window_id, Gfx::Painter& painter, Gfx::I
         if (!menu || menu->window_id != window_id)
             continue;
         auto item_rect = menu->menubar_rect;
-        bool active = (m_hovered_menubar_menu == menu_id) || (m_open_menu_id != -1 && menu->is_open);
+        bool active = (m_hovered_menubar_menu == menu_id) || (menu->is_open);
         auto text_color = palette.menu_base_text();
         if (active) {
             painter.fill_rect(item_rect, palette.menu_selection());
@@ -239,38 +253,6 @@ i32 MenuController::menu_window(i32 menu_id) const
 {
     auto* menu = find_menu(menu_id);
     return menu ? menu->window_id : -1;
-}
-
-void MenuController::open_popup(i32 menu_id, i32 window_id, Gfx::IntRect anchor)
-{
-    auto* menu = find_menu(menu_id);
-    if (!menu)
-        return;
-    close_open_menu();
-    menu->window_id = window_id;
-    layout_popup(*menu);
-    menu->is_open = true;
-    menu->hovered_valid = false;
-    m_open_menu_id = menu_id;
-    if (show_popup)
-        show_popup(menu_id, window_id, anchor, menu->popup_size);
-    if (visibility_changed)
-        visibility_changed(menu_id, true);
-}
-
-void MenuController::close_menu(i32 menu_id)
-{
-    if (m_open_menu_id != menu_id)
-        return;
-    if (auto* menu = find_menu(menu_id)) {
-        menu->is_open = false;
-        menu->hovered_valid = false;
-    }
-    m_open_menu_id = -1;
-    if (hide_popup)
-        hide_popup(menu_id);
-    if (visibility_changed)
-        visibility_changed(menu_id, false);
 }
 
 void MenuController::render_popup(i32 menu_id, Gfx::Painter& painter) const
@@ -326,26 +308,135 @@ int MenuController::item_index_at(Menu const& menu, Gfx::IntPoint position) cons
     return -1;
 }
 
-void MenuController::close_open_menu()
+// --- open/close -----------------------------------------------------------------
+
+void MenuController::close_all_menus()
 {
-    if (m_open_menu_id == -1)
+    if (m_open_menus.is_empty())
         return;
-    auto menu_id = m_open_menu_id;
     i32 window_id = -1;
-    if (auto* menu = find_menu(menu_id)) {
-        menu->is_open = false;
-        menu->hovered_valid = false;
-        window_id = menu->window_id;
+    for (auto menu_id : m_open_menus) {
+        if (auto* menu = find_menu(menu_id)) {
+            menu->is_open = false;
+            menu->hovered_valid = false;
+            if (window_id == -1)
+                window_id = menu->window_id;
+        }
+        if (hide_popup)
+            hide_popup(menu_id);
+        if (visibility_changed)
+            visibility_changed(menu_id, false);
     }
-    m_open_menu_id = -1;
+    m_open_menus.clear();
     m_hovered_menubar_menu = -1;
-    if (hide_popup)
-        hide_popup(menu_id);
-    if (visibility_changed)
-        visibility_changed(menu_id, false);
     if (window_id != -1 && menubar_changed)
         menubar_changed(window_id);
 }
+
+void MenuController::close_deeper_than(i32 menu_id)
+{
+    int index = -1;
+    for (size_t i = 0; i < m_open_menus.size(); ++i) {
+        if (m_open_menus[i] == menu_id) {
+            index = static_cast<int>(i);
+            break;
+        }
+    }
+    if (index == -1)
+        return;
+    for (size_t i = m_open_menus.size(); i-- > static_cast<size_t>(index + 1);) {
+        auto id = m_open_menus[i];
+        if (auto* menu = find_menu(id)) {
+            menu->is_open = false;
+            menu->hovered_valid = false;
+        }
+        if (hide_popup)
+            hide_popup(id);
+        if (visibility_changed)
+            visibility_changed(id, false);
+    }
+    m_open_menus.resize(index + 1);
+}
+
+void MenuController::open_root(i32 menu_id, i32 window_id, Gfx::IntRect anchor)
+{
+    auto* menu = find_menu(menu_id);
+    if (!menu)
+        return;
+    close_all_menus();
+    if (menu->window_id == -1)
+        menu->window_id = window_id;
+    layout_popup(*menu);
+    menu->is_open = true;
+    menu->hovered_valid = false;
+    m_open_menus.append(menu_id);
+    if (show_popup)
+        show_popup(menu_id, window_id, -1, anchor, menu->popup_size, false);
+    if (visibility_changed)
+        visibility_changed(menu_id, true);
+}
+
+void MenuController::close_menu(i32 menu_id)
+{
+    if (m_open_menus.is_empty())
+        return;
+    int index = -1;
+    for (size_t i = 0; i < m_open_menus.size(); ++i) {
+        if (m_open_menus[i] == menu_id) {
+            index = static_cast<int>(i);
+            break;
+        }
+    }
+    if (index == -1)
+        return;
+    if (index == 0) {
+        close_all_menus();
+        return;
+    }
+    // Close this menu and anything deeper, keeping the ancestors open.
+    i32 window_id = -1;
+    for (size_t i = m_open_menus.size(); i-- > static_cast<size_t>(index);) {
+        auto id = m_open_menus[i];
+        if (auto* menu = find_menu(id)) {
+            menu->is_open = false;
+            menu->hovered_valid = false;
+            window_id = menu->window_id;
+        }
+        if (hide_popup)
+            hide_popup(id);
+        if (visibility_changed)
+            visibility_changed(id, false);
+    }
+    m_open_menus.resize(index);
+    if (window_id != -1 && menubar_changed)
+        menubar_changed(window_id);
+}
+
+void MenuController::open_submenu_for(Menu& parent, int index)
+{
+    if (index < 0 || index >= static_cast<int>(parent.items.size()))
+        return;
+    auto& item = parent.items[index];
+    if (item.submenu_id == -1)
+        return;
+    auto* submenu = find_menu(item.submenu_id);
+    if (!submenu || submenu->items.is_empty())
+        return;
+    if (open_menu_id() == submenu->id && submenu->is_open)
+        return;
+    close_deeper_than(parent.id);
+    submenu->window_id = parent.window_id;
+    layout_popup(*submenu);
+    submenu->is_open = true;
+    submenu->hovered_valid = false;
+    m_open_menus.append(submenu->id);
+    if (show_popup)
+        show_popup(submenu->id, parent.window_id, parent.id, item.rect, submenu->popup_size, true);
+    if (visibility_changed)
+        visibility_changed(submenu->id, true);
+}
+
+// --- interaction ----------------------------------------------------------------
 
 void MenuController::on_menubar_motion(i32 window_id, Gfx::IntPoint position)
 {
@@ -361,8 +452,7 @@ void MenuController::on_menubar_motion(i32 window_id, Gfx::IntPoint position)
     if (menubar_changed)
         menubar_changed(window_id);
 
-    // With a menu already open, sliding across the menubar switches menus.
-    if (m_open_menu_id != -1 && hovered != -1 && hovered != m_open_menu_id)
+    if (open_menu_id() != -1 && hovered != -1 && hovered != m_open_menus.first())
         on_menubar_press(window_id, position);
 }
 
@@ -381,15 +471,14 @@ void MenuController::on_menubar_press(i32 window_id, Gfx::IntPoint position)
         auto* menu = find_menu(menu_id);
         if (!menu || menu->window_id != window_id || !menu->menubar_rect.contains(position))
             continue;
-
-        if (m_open_menu_id == menu_id) {
-            close_open_menu();
+        if (open_menu_id() == menu_id) {
+            close_all_menus();
             return;
         }
-        open_popup(menu_id, window_id, menu->menubar_rect);
+        open_root(menu_id, window_id, menu->menubar_rect);
         return;
     }
-    close_open_menu();
+    close_all_menus();
 }
 
 void MenuController::on_popup_motion(i32 menu_id, Gfx::IntPoint position)
@@ -399,16 +488,21 @@ void MenuController::on_popup_motion(i32 menu_id, Gfx::IntPoint position)
         return;
     int index = item_index_at(*menu, position);
     int previous = menu->hovered_valid ? menu->hovered : -1;
-    if (index == previous)
-        return;
-    menu->hovered = index;
-    menu->hovered_valid = true;
-    if (previous >= 0 && previous < static_cast<int>(menu->items.size()) && item_left)
-        item_left(menu_id, menu->items[previous].identifier);
-    if (index >= 0 && index < static_cast<int>(menu->items.size()) && menu->items[index].enabled && item_entered)
-        item_entered(menu_id, menu->items[index].identifier);
-    if (redraw_popup)
-        redraw_popup(menu_id);
+    if (index != previous) {
+        menu->hovered = index;
+        menu->hovered_valid = true;
+        if (previous >= 0 && previous < static_cast<int>(menu->items.size()) && item_left)
+            item_left(menu_id, menu->items[previous].identifier);
+        if (index >= 0 && index < static_cast<int>(menu->items.size()) && menu->items[index].enabled && item_entered)
+            item_entered(menu_id, menu->items[index].identifier);
+        if (redraw_popup)
+            redraw_popup(menu_id);
+    }
+    // Opening a submenu on hover; moving off a submenu item closes it.
+    if (index >= 0 && index < static_cast<int>(menu->items.size()) && menu->items[index].submenu_id != -1)
+        open_submenu_for(*menu, index);
+    else
+        close_deeper_than(menu_id);
 }
 
 void MenuController::on_popup_button(i32 menu_id, Gfx::IntPoint position, bool pressed)
@@ -419,29 +513,38 @@ void MenuController::on_popup_button(i32 menu_id, Gfx::IntPoint position, bool p
     if (!menu)
         return;
     int index = item_index_at(*menu, position);
-    if (index >= 0 && index < static_cast<int>(menu->items.size())) {
-        auto& item = menu->items[index];
-        if (item.enabled && !item.is_separator && item_activated)
-            item_activated(menu_id, item.identifier);
+    if (index < 0 || index >= static_cast<int>(menu->items.size()))
+        return;
+    auto& item = menu->items[index];
+    if (!item.enabled || item.is_separator)
+        return;
+    if (item.submenu_id != -1) {
+        open_submenu_for(*menu, index);
+        return;
     }
-    close_open_menu();
+    if (item_activated)
+        item_activated(menu_id, item.identifier);
+    close_all_menus();
 }
 
 void MenuController::on_popup_closed(i32 menu_id)
 {
-    if (m_open_menu_id != menu_id)
+    close_menu(menu_id);
+}
+
+void MenuController::select_index(Menu& menu, int index)
+{
+    int previous = menu.hovered_valid ? menu.hovered : -1;
+    if (index == previous)
         return;
-    i32 window_id = -1;
-    if (auto* menu = find_menu(menu_id)) {
-        menu->is_open = false;
-        window_id = menu->window_id;
-    }
-    m_open_menu_id = -1;
-    m_hovered_menubar_menu = -1;
-    if (visibility_changed)
-        visibility_changed(menu_id, false);
-    if (window_id != -1 && menubar_changed)
-        menubar_changed(window_id);
+    if (previous >= 0 && previous < static_cast<int>(menu.items.size()) && item_left)
+        item_left(menu.id, menu.items[previous].identifier);
+    menu.hovered = index;
+    menu.hovered_valid = true;
+    if (index >= 0 && index < static_cast<int>(menu.items.size()) && menu.items[index].enabled && item_entered)
+        item_entered(menu.id, menu.items[index].identifier);
+    if (redraw_popup)
+        redraw_popup(menu.id);
 }
 
 void MenuController::move_selection(Menu& menu, int delta)
@@ -455,15 +558,8 @@ void MenuController::move_selection(Menu& menu, int delta)
         auto& item = menu.items[index];
         if (item.is_separator || !item.enabled)
             continue;
-        int previous = menu.hovered_valid ? menu.hovered : -1;
-        if (previous >= 0 && previous < count && item_left)
-            item_left(menu.id, menu.items[previous].identifier);
-        menu.hovered = index;
-        menu.hovered_valid = true;
-        if (item_entered)
-            item_entered(menu.id, item.identifier);
-        if (redraw_popup)
-            redraw_popup(menu.id);
+        select_index(menu, index);
+        close_deeper_than(menu.id);
         return;
     }
 }
@@ -473,9 +569,18 @@ void MenuController::activate_selected(Menu& menu)
     if (!menu.hovered_valid || menu.hovered < 0 || menu.hovered >= static_cast<int>(menu.items.size()))
         return;
     auto& item = menu.items[menu.hovered];
-    if (item.enabled && !item.is_separator && item_activated)
+    if (!item.enabled || item.is_separator)
+        return;
+    if (item.submenu_id != -1) {
+        open_submenu_for(menu, menu.hovered);
+        auto* submenu = find_menu(item.submenu_id);
+        if (submenu)
+            move_selection(*submenu, 1);
+        return;
+    }
+    if (item_activated)
         item_activated(menu.id, item.identifier);
-    close_open_menu();
+    close_all_menus();
 }
 
 void MenuController::switch_menubar(i32 window_id, int direction)
@@ -488,26 +593,12 @@ void MenuController::switch_menubar(i32 window_id, int direction)
     }
     if (menus.is_empty())
         return;
-    auto current = menus.find_first_index(m_open_menu_id);
-    int index = current.has_value() ? static_cast<int>(current.value()) : 0;
+    i32 current = open_menu_id();
+    auto current_index = menus.find_first_index(current);
+    int index = current_index.has_value() ? static_cast<int>(current_index.value()) : 0;
     int next = (index + direction + static_cast<int>(menus.size())) % static_cast<int>(menus.size());
     if (auto* menu = find_menu(menus[next]))
-        open_popup(menus[next], window_id, menu->menubar_rect);
-}
-
-static u32 menu_accelerator(ByteString const& name)
-{
-    for (size_t i = 0; i < name.length(); ++i) {
-        if (name[i] != '&')
-            continue;
-        if (i + 1 < name.length() && name[i + 1] == '&') {
-            ++i;
-            continue;
-        }
-        if (i + 1 < name.length())
-            return static_cast<u32>(to_ascii_lowercase(name[i + 1]));
-    }
-    return 0;
+        open_root(menus[next], window_id, menu->menubar_rect);
 }
 
 bool MenuController::handle_key(i32 window_id, u32 key_code, u32 code_point, u32 modifiers, bool is_press)
@@ -515,7 +606,7 @@ bool MenuController::handle_key(i32 window_id, u32 key_code, u32 code_point, u32
     // Alt+letter opens (or switches to) the matching menubar menu.
     if (modifiers & Mod_Alt) {
         if (!is_press)
-            return m_open_menu_id != -1;
+            return open_menu_id() != -1;
         if (code_point != 0 && code_point < 128) {
             u32 wanted = static_cast<u32>(to_ascii_lowercase(static_cast<char>(code_point)));
             for (auto menu_id : m_menubar_order) {
@@ -523,21 +614,20 @@ bool MenuController::handle_key(i32 window_id, u32 key_code, u32 code_point, u32
                 if (!menu || menu->window_id != window_id || menu->items.is_empty())
                     continue;
                 if (menu_accelerator(menu->name) == wanted) {
-                    open_popup(menu_id, window_id, menu->menubar_rect);
+                    open_root(menu_id, window_id, menu->menubar_rect);
                     return true;
                 }
             }
         }
-        return m_open_menu_id != -1;
+        return open_menu_id() != -1;
     }
 
-    if (m_open_menu_id == -1) {
-        // F10 opens the first menubar menu of the focused window.
+    if (open_menu_id() == -1) {
         if (is_press && key_code == Key_F10 && window_id != -1) {
             for (auto menu_id : m_menubar_order) {
                 auto* menu = find_menu(menu_id);
                 if (menu && menu->window_id == window_id && !menu->items.is_empty()) {
-                    open_popup(menu_id, window_id, menu->menubar_rect);
+                    open_root(menu_id, window_id, menu->menubar_rect);
                     return true;
                 }
             }
@@ -545,11 +635,9 @@ bool MenuController::handle_key(i32 window_id, u32 key_code, u32 code_point, u32
         return false;
     }
 
-    // A menu is open: consume every key so the client doesn't react, and
-    // navigate on press.
     if (!is_press)
         return true;
-    auto* menu = find_menu(m_open_menu_id);
+    auto* menu = find_menu(open_menu_id());
     if (!menu)
         return false;
     switch (key_code) {
@@ -563,13 +651,23 @@ bool MenuController::handle_key(i32 window_id, u32 key_code, u32 code_point, u32
         activate_selected(*menu);
         return true;
     case Key_Escape:
-        close_open_menu();
-        return true;
-    case Key_Left:
-        switch_menubar(menu->window_id, -1);
+        close_all_menus();
         return true;
     case Key_Right:
-        switch_menubar(menu->window_id, 1);
+        if (menu->hovered_valid && menu->hovered >= 0 && menu->hovered < static_cast<int>(menu->items.size())
+            && menu->items[menu->hovered].submenu_id != -1) {
+            open_submenu_for(*menu, menu->hovered);
+            if (auto* submenu = find_menu(menu->items[menu->hovered].submenu_id))
+                move_selection(*submenu, 1);
+        } else if (m_open_menus.size() == 1) {
+            switch_menubar(menu->window_id, 1);
+        }
+        return true;
+    case Key_Left:
+        if (m_open_menus.size() > 1)
+            close_menu(open_menu_id());
+        else
+            switch_menubar(menu->window_id, -1);
         return true;
     default:
         return true;

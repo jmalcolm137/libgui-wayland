@@ -11,7 +11,6 @@
 #include <AK/HashMap.h>
 #include <AK/NonnullOwnPtr.h>
 #include <AK/Vector.h>
-#include <LibGfx/Forward.h>
 #include <LibGfx/Point.h>
 #include <LibGfx/Rect.h>
 #include <LibGfx/Size.h>
@@ -24,10 +23,11 @@ namespace LibWM {
 
 // Owns the WindowServer's server-side menu model and draws menus.
 //
-// In SerenityOS the menubar and dropdown menus are drawn by the WindowServer,
-// not the client: LibGUI only sends the menu model and, for context menus, a
-// popup request. LibWM therefore renders the menubar into the top of each
-// window's surface and the dropdown into an xdg_popup.
+// In SerenityOS the menubar and dropdown menus (including submenus) are drawn
+// by the WindowServer, not the client: LibGUI only sends the menu model and, for
+// context menus, a popup request. LibWM renders the menubar into the top of each
+// window's surface and each open menu into its own xdg_popup; a submenu is an
+// xdg_popup parented to the popup of its parent menu.
 class MenuController {
 public:
     struct Item {
@@ -78,7 +78,7 @@ public:
     Gfx::IntSize popup_size(i32 menu_id) const;
     void render_popup(i32 menu_id, Gfx::Painter&) const;
     i32 menu_window(i32 menu_id) const;
-    void open_popup(i32 menu_id, i32 window_id, Gfx::IntRect anchor);
+    void open_root(i32 menu_id, i32 window_id, Gfx::IntRect anchor);
     void close_menu(i32 menu_id);
 
     // --- interaction (coordinates are surface-local) ---
@@ -93,7 +93,7 @@ public:
     bool handle_key(i32 window_id, u32 key_code, u32 code_point, u32 modifiers, bool is_press);
 
     // --- callbacks (wired by WindowServerConnection) ---
-    Function<void(i32 menu_id, i32 window_id, Gfx::IntRect anchor, Gfx::IntSize size)> show_popup;
+    Function<void(i32 menu_id, i32 window_id, i32 parent_popup_id, Gfx::IntRect anchor, Gfx::IntSize size, bool is_submenu)> show_popup;
     Function<void(i32 menu_id)> hide_popup;
     Function<void(i32 menu_id, u32 identifier)> item_activated;
     Function<void(i32 menu_id, u32 identifier)> item_entered;
@@ -108,14 +108,18 @@ private:
     void layout_menubar(i32 window_id);
     void layout_popup(Menu&);
     int item_index_at(Menu const&, Gfx::IntPoint) const;
-    void close_open_menu();
+    i32 open_menu_id() const { return m_open_menus.is_empty() ? -1 : m_open_menus.last(); }
+    void close_all_menus();
+    void close_deeper_than(i32 menu_id);
+    void open_submenu_for(Menu& parent, int index);
     void move_selection(Menu&, int delta);
+    void select_index(Menu&, int index);
     void activate_selected(Menu&);
     void switch_menubar(i32 window_id, int direction);
 
     HashMap<i32, NonnullOwnPtr<Menu>> m_menus;
     Vector<i32> m_menubar_order;
-    i32 m_open_menu_id { -1 };
+    Vector<i32> m_open_menus; // root .. deepest
     i32 m_hovered_menubar_menu { -1 };
 };
 

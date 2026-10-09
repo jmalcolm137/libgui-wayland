@@ -121,8 +121,9 @@ public:
     // with the client's content shifted down by `inset` pixels.
     void set_window_inset(i32 window_id, int inset, Function<void(Gfx::Bitmap&, Gfx::IntRect)> draw);
 
-    // Popup surfaces for server-rendered menus.
-    void create_popup(i32 popup_id, i32 parent_window_id, Gfx::IntRect anchor, Gfx::IntSize size);
+    // Popup surfaces for server-rendered menus. A submenu is parented to the
+    // parent popup's surface and anchored at its item's right edge.
+    void create_popup(i32 popup_id, i32 parent_window_id, i32 parent_popup_id, Gfx::IntRect anchor, Gfx::IntSize size, bool is_submenu);
     void present_popup(i32 popup_id, Gfx::Bitmap const& bitmap);
     void destroy_popup(i32 popup_id);
 

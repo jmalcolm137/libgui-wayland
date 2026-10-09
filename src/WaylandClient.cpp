@@ -1012,11 +1012,23 @@ void WaylandClient::set_window_inset(i32 window_id, int inset, Function<void(Gfx
     }
 }
 
-void WaylandClient::create_popup(i32 popup_id, i32 parent_window_id, Gfx::IntRect anchor, Gfx::IntSize size)
+void WaylandClient::create_popup(i32 popup_id, i32 parent_window_id, i32 parent_popup_id, Gfx::IntRect anchor, Gfx::IntSize size, bool is_submenu)
 {
-    auto* parent = find(parent_window_id);
-    if (!parent || !m_compositor || !m_wm_base || size.is_empty())
+    if (!m_compositor || !m_wm_base || size.is_empty())
         return;
+
+    xdg_surface* parent_xdg = nullptr;
+    if (parent_popup_id != -1) {
+        auto* parent_popup = find_popup(parent_popup_id);
+        if (!parent_popup)
+            return;
+        parent_xdg = parent_popup->xdg_surface_object;
+    } else {
+        auto* parent_window = find(parent_window_id);
+        if (!parent_window)
+            return;
+        parent_xdg = parent_window->xdg_surface_object;
+    }
 
     auto* surface = wl_compositor_create_surface(m_compositor);
     auto* xdg_surface = xdg_wm_base_get_xdg_surface(m_wm_base, surface);
@@ -1025,14 +1037,15 @@ void WaylandClient::create_popup(i32 popup_id, i32 parent_window_id, Gfx::IntRec
     auto* positioner = xdg_wm_base_create_positioner(m_wm_base);
     xdg_positioner_set_size(positioner, size.width(), size.height());
     xdg_positioner_set_anchor_rect(positioner, anchor.x(), anchor.y(), anchor.width(), anchor.height());
-    xdg_positioner_set_anchor(positioner, XDG_POSITIONER_ANCHOR_BOTTOM_LEFT);
+    xdg_positioner_set_anchor(positioner, is_submenu ? XDG_POSITIONER_ANCHOR_TOP_RIGHT : XDG_POSITIONER_ANCHOR_BOTTOM_LEFT);
     xdg_positioner_set_gravity(positioner, XDG_POSITIONER_GRAVITY_BOTTOM_RIGHT);
     xdg_positioner_set_constraint_adjustment(positioner, XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_X | XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_Y);
 
-    auto* popup = xdg_surface_get_popup(xdg_surface, parent->xdg_surface_object, positioner);
+    auto* popup = xdg_surface_get_popup(xdg_surface, parent_xdg, positioner);
     xdg_positioner_destroy(positioner);
     xdg_popup_add_listener(popup, &s_popup_listener, this);
-    if (m_seat)
+    // Only the root popup grabs; nested popups inherit the grab.
+    if (!is_submenu && m_seat)
         xdg_popup_grab(popup, m_seat, m_last_input_serial);
     wl_surface_commit(surface);
 
@@ -1043,7 +1056,7 @@ void WaylandClient::create_popup(i32 popup_id, i32 parent_window_id, Gfx::IntRec
     p->popup = popup;
     m_popups.set(popup_id, move(p));
     wl_display_flush(m_display);
-    dbgln("LibWM/Wayland: popup {} created ({}x{}) at {},{}", popup_id, size.width(), size.height(), anchor.x(), anchor.y());
+    dbgln("LibWM/Wayland: popup {} created ({}x{}) at {},{} submenu={}", popup_id, size.width(), size.height(), anchor.x(), anchor.y(), is_submenu);
 }
 
 void WaylandClient::present_popup(i32 popup_id, Gfx::Bitmap const& source)

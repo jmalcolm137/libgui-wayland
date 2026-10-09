@@ -39,9 +39,10 @@ The shim is called **LibWM**. It sits between `LibGUI`'s WindowServer IPC protoc
 - **M6 (partly)** — clipboard and menus: done for `text/plain`, `text/uri-list`, and
   `image/png` ↔ `image/x-serenityos` (all verified headlessly in both directions), plus a
   server-rendered **menubar and dropdown menus** with hover highlighting (clicking `File → Quit`
-  works; `Help → About` opens the dialog). Window state (`fullscreen`/`maximize`/`minimize`)
-  and SerenityOS `/res/...` path redirection are in. Submenus, keyboard menu navigation and
-  config persistence remain.
+  works; `Help → About` opens the dialog) and **nested submenus** with full keyboard navigation
+  (`F10`/`Alt`+accelerator, arrows, `Enter`, `Escape`). Window state
+  (`fullscreen`/`maximize`/`minimize`) and SerenityOS `/res/...` path redirection are in. Long-menu
+  scrolling, menu item icons and config persistence remain.
 
 ```sh
 scripts/fetch-serenity.sh              # pinned, blobless, sparse checkout

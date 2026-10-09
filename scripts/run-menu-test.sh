@@ -63,7 +63,7 @@ check() { if eval "$2"; then printf '%-50s PASS\n' "$1"; else printf '%-50s FAIL
 # File (x~16) -> Quit (first item, y~13).
 run_case quit 16 13 8
 check "File: menubar click opened a popup"        "grep -q 'popup .* created' '$RUNTIME/quit.app.log'"
-check "File: popup anchored at the item (x=0)"    "grep -qE 'popup [0-9]+ created .* at 0,0$' '$RUNTIME/quit.app.log'"
+check "File: popup anchored at the item (x=0)"    "grep -qE 'popup [0-9]+ created .* at 0,0( |$)' '$RUNTIME/quit.app.log'"
 check "File: no attach-before-configure error"    "! grep -q 'attached a buffer before configure' '$RUNTIME/quit.hc.log'"
 check "File: Quit activated an item"              "grep -q 'menu item activated' '$RUNTIME/quit.app.log'"
 check "File: app exited after Quit"               "[[ $CASE_EXIT -eq 0 ]]"
@@ -104,6 +104,42 @@ HC_PID=""
 check "keyboard: F10 opened a menu"               "grep -q 'popup .* created' '$RUNTIME/kbd.app.log'"
 check "keyboard: Enter activated an item"         "grep -q 'menu item activated' '$RUNTIME/kbd.app.log'"
 check "keyboard: app exited after activation"     "[[ $KBD_EXIT -eq 0 ]]"
+
+# Nested submenu: F10 opens File, Down selects the "New" submenu item, Right
+# opens the submenu as a child popup, Enter activates its first item.
+ninja -C "$BUILD_DIR" libwm-submenu-test >/dev/null
+cat > "$RUNTIME/sub.input" <<'EOF'
+sleep 1200
+key PRESS 68
+key RELEASE 68
+sleep 300
+key PRESS 108
+key RELEASE 108
+sleep 300
+key PRESS 106
+key RELEASE 106
+sleep 300
+key PRESS 28
+key RELEASE 28
+sleep 1200
+EOF
+"$HC" --socket menu-sub --size 800x600 --timeout 8 \
+    --output "$RUNTIME/sub.png" --input "$RUNTIME/sub.input" > "$RUNTIME/sub.hc.log" 2>&1 &
+HC_PID=$!
+for _ in $(seq 1 100); do [[ -e "$RUNTIME/menu-sub" ]] && break; sleep 0.1; done
+set +e
+env XDG_RUNTIME_DIR="$RUNTIME" WAYLAND_DISPLAY="menu-sub" \
+    SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
+    LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    timeout 10 "$BUILD_DIR/bin/libwm-submenu-test" > "$RUNTIME/sub.app.log" 2>&1
+SUB_EXIT=$?
+set -e
+wait "$HC_PID" 2>/dev/null || true
+HC_PID=""
+check "submenu: F10 opened the root menu"         "grep -q 'popup .* created' '$RUNTIME/sub.app.log'"
+check "submenu: child popup was created"          "grep -q 'submenu=true' '$RUNTIME/sub.app.log'"
+check "submenu: item activated"                   "grep -q 'SUBMENU-TEST: activated Project' '$RUNTIME/sub.app.log'"
+check "submenu: app exited after activation"      "[[ $SUB_EXIT -eq 0 ]]"
 
 # About dialog regression: run it directly so we exercise the GML bitmap load
 # (which hardcodes /res/... and used to abort before the path redirect).

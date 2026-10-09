@@ -130,8 +130,8 @@ void WindowServerConnection::install_input_callbacks()
 
 void WindowServerConnection::install_menu_callbacks()
 {
-    m_menu.show_popup = [this](i32 menu_id, i32 window_id, Gfx::IntRect anchor, Gfx::IntSize size) {
-        WaylandClient::the().create_popup(menu_id, window_id, anchor, size);
+    m_menu.show_popup = [this](i32 menu_id, i32 window_id, i32 parent_popup_id, Gfx::IntRect anchor, Gfx::IntSize size, bool is_submenu) {
+        WaylandClient::the().create_popup(menu_id, window_id, parent_popup_id, anchor, size, is_submenu);
         present_menu_popup(menu_id);
     };
     m_menu.hide_popup = [](i32 menu_id) { WaylandClient::the().destroy_popup(menu_id); };
@@ -485,7 +485,7 @@ void WindowServerConnection::popup_menu(i32 menu_id, Gfx::IntPoint screen_positi
     if (parent < 0)
         return;
     auto anchor = button_rect.is_empty() ? Gfx::IntRect { screen_position, { 1, 1 } } : button_rect;
-    m_menu.open_popup(menu_id, parent, anchor);
+    m_menu.open_root(menu_id, parent, anchor);
 }
 
 void WindowServerConnection::dismiss_menu(i32 menu_id)

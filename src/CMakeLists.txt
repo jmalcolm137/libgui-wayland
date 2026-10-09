@@ -87,6 +87,12 @@ target_include_directories(libwm-fullscreen-test PRIVATE "${CMAKE_CURRENT_SOURCE
 target_link_options(libwm-fullscreen-test PRIVATE "-Wl,--no-as-needed")
 target_link_libraries(libwm-fullscreen-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC wm)
 
+# A menubar with a nested submenu, to verify submenu navigation.
+add_executable(libwm-submenu-test test/SubmenuTest.cpp)
+target_include_directories(libwm-submenu-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_options(libwm-submenu-test PRIVATE "-Wl,--no-as-needed")
+target_link_libraries(libwm-submenu-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC wm)
+
 # --- Unmodified SerenityOS applications ---------------------------------------
 # Built directly from their upstream sources. No source is edited; only the GML
 # is precompiled (the app's own CMakeLists uses compile_gml, which requires a

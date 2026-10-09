@@ -596,10 +596,20 @@ LibWM therefore renders them itself with LibGfx:
   the menubar item), with an input grab. Hover highlights items and sends
   `menu_item_entered`/`menu_item_left`; clicking sends `menu_item_activated`; dismissal sends
   `menu_visibility_did_change`. Context menus (`popup_menu`) use the active window as the parent.
+* **Submenus.** An item with a `submenu_id` shows a right-pointing arrow; hovering it (mouse) or
+  pressing `Right`/`Enter` on it (keyboard) opens the child menu as another `xdg_popup` parented to
+  the parent popup's `xdg_surface`, anchored at the item's right edge. `MenuController` keeps a
+  *stack* of open menus (`m_open_menus`, root → deepest) so ancestor menus stay open and only the
+  deepest one receives navigation; `Left` closes the deepest and returns to its parent. Only the
+  root popup grabs input (nested popups inherit it).
+* **Keyboard.** `F10` opens the first menubar menu; `Alt`+accelerator opens/switches to a menu;
+  `Up`/`Down` move within the deepest menu; `Left`/`Right` close/open submenus (or move between
+  menubar menus at the root); `Enter` activates a leaf or opens a submenu; `Escape` closes all.
 
-Verified headlessly: clicking `File` opens a popup, and clicking `Quit` in it activates the
-item (the app exits) — `scripts/run-menu-test.sh`. Known gaps: submenus, keyboard navigation
-and scrolling long menus are not implemented yet, and menu item icons are not drawn.
+Verified headlessly: clicking `File` opens a popup, clicking `Quit` in it activates the item (the
+app exits), and `F10 → Down → Right → Enter` navigates into the nested `New` submenu and activates
+its item — `scripts/run-menu-test.sh`. Known gaps: scrolling long menus is not implemented yet,
+and menu item icons are not drawn.
 
 ### 4.7 Building the applications
 
@@ -719,7 +729,7 @@ open menus, copy/paste, resize/maximise, HiDPI.
 | M3 | Pointer/keyboard input from `wl_seat`, focus/activation, close request; then **Calculator** | ✅ input + unmodified **Calculator** renders & runs on Plasma (§4.3) |
 | M4 | Theme/font parity; decorations; icons; alpha | ⬜ |
 | M5 | **PDFViewer** (LibPDF, scrolling, toolbars, file access) | ⬜ |
-| M6 | Menus/popups, clipboard, config persistence | 🟡 native clipboard + server-rendered menubar/popups done (§4.5, §4.6); submenus/keyboard/config pending |
+| M6 | Menus/popups, clipboard, config persistence | 🟡 native clipboard + server-rendered menubar/popups/submenus + keyboard nav done (§4.5, §4.6); config pending |
 | M7 | Live Plasma session, headless test harness, CI matrix | 🟡 headless compositor + input test integrated (§5.2); CI matrix pending |
 | M8 | Crisp HiDPI (plumb an output scale into LibGUI's backing store) | ⬜ |
 
