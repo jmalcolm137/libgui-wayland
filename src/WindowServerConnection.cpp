@@ -10,6 +10,7 @@
 #include <LibGfx/ImageFormats/PNGWriter.h>
 #include <LibGfx/Painter.h>
 #include <LibGfx/SystemTheme.h>
+#include <WindowServer/SystemEffects.h>
 #include <fcntl.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -45,7 +46,14 @@ void WindowServerConnection::send_fast_greet()
 
     Vector<Gfx::IntRect> screen_rects;
     screen_rects.append({ 0, 0, screen.width(), screen.height() });
+
+    // The client indexes this vector by SystemEffects::Effects, so it must have
+    // exactly __Count entries (an empty vector causes an out-of-bounds crash on
+    // the first system_effects() access). We disable the animated effects.
     Vector<bool> effects;
+    for (size_t i = 0; i < to_underlying(WindowServer::Effects::__Count); ++i)
+        effects.append(false);
+
     async_fast_greet(
         move(screen_rects),
         0, 1, 1,
@@ -369,6 +377,7 @@ void WindowServerConnection::set_window_progress(i32, Optional<i32> const&)
 
 void WindowServerConnection::set_fullscreen(i32 window_id, bool fullscreen)
 {
+    dbgln("LibWM: set_fullscreen({}, {})", window_id, fullscreen);
     WaylandClient::the().set_fullscreen(window_id, fullscreen);
 }
 

@@ -24,9 +24,25 @@
 
 namespace LibWM {
 
-static RefPtr<WindowServerConnection> s_window_server;
-static RefPtr<LaunchServerConnection> s_launch_server;
-static RefPtr<ClipboardServerConnection> s_clipboard_server;
+// These keep the in-process server connections alive for the whole process.
+// They are intentionally never destroyed: the servers run on their own thread,
+// and tearing the IPC connections down during static destruction (__cxa_finalize)
+// races that thread and the event loop, aborting at exit.
+static RefPtr<WindowServerConnection>& window_server_slot()
+{
+    static auto* slot = new RefPtr<WindowServerConnection>;
+    return *slot;
+}
+static RefPtr<LaunchServerConnection>& launch_server_slot()
+{
+    static auto* slot = new RefPtr<LaunchServerConnection>;
+    return *slot;
+}
+static RefPtr<ClipboardServerConnection>& clipboard_server_slot()
+{
+    static auto* slot = new RefPtr<ClipboardServerConnection>;
+    return *slot;
+}
 
 // Client ends of the portal socketpairs, handed out on connect.
 static HashMap<ByteString, int> s_client_fds;
@@ -109,13 +125,13 @@ static void start_server_thread()
         // callbacks the clipboard also relies on.
         if (auto socket = Core::LocalSocket::adopt_fd(window_server); !socket.is_error()) {
             auto connection = WindowServerConnection::create(socket.release_value());
-            s_window_server = connection;
+            window_server_slot() = connection;
             connection->send_fast_greet();
         }
         if (auto socket = Core::LocalSocket::adopt_fd(clipboard_server); !socket.is_error())
-            s_clipboard_server = ClipboardServerConnection::create(socket.release_value());
+            clipboard_server_slot() = ClipboardServerConnection::create(socket.release_value());
         if (auto socket = Core::LocalSocket::adopt_fd(launch_server); !socket.is_error())
-            s_launch_server = LaunchServerConnection::create(socket.release_value());
+            launch_server_slot() = LaunchServerConnection::create(socket.release_value());
 
         loop.exec();
         return 0;
