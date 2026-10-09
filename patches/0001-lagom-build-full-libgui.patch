@@ -1,5 +1,5 @@
 diff --git a/Meta/Lagom/CMakeLists.txt b/Meta/Lagom/CMakeLists.txt
-index 213a1e77..62736360 100644
+index 213a1e77..6a273e82 100644
 --- a/Meta/Lagom/CMakeLists.txt
 +++ b/Meta/Lagom/CMakeLists.txt
 @@ -545,18 +545,9 @@ if (BUILD_LAGOM)
@@ -24,7 +24,7 @@ index 213a1e77..62736360 100644
  
      # FIXME: How about we don't include Kernel/API from random high-level libraries?
      install(FILES ${SERENITY_PROJECT_ROOT}/Kernel/API/KeyCode.h DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/Kernel/API")
-@@ -569,6 +560,33 @@ if (BUILD_LAGOM)
+@@ -569,6 +560,43 @@ if (BUILD_LAGOM)
          # Lagom Services
          add_serenity_subdirectory(Userland/Services)
  
@@ -47,10 +47,20 @@ index 213a1e77..62736360 100644
 +        compile_ipc(${SERENITY_PROJECT_ROOT}/Userland/Services/NotificationServer/NotificationServer.ipc Userland/Services/NotificationServer/NotificationServerEndpoint.h)
 +        compile_ipc(${SERENITY_PROJECT_ROOT}/Userland/Services/LaunchServer/LaunchClient.ipc Userland/Services/LaunchServer/LaunchClientEndpoint.h)
 +        compile_ipc(${SERENITY_PROJECT_ROOT}/Userland/Services/LaunchServer/LaunchServer.ipc Userland/Services/LaunchServer/LaunchServerEndpoint.h)
++        compile_ipc(${SERENITY_PROJECT_ROOT}/Userland/Services/FileSystemAccessServer/FileSystemAccessClient.ipc Userland/Services/FileSystemAccessServer/FileSystemAccessClientEndpoint.h)
++        compile_ipc(${SERENITY_PROJECT_ROOT}/Userland/Services/FileSystemAccessServer/FileSystemAccessServer.ipc Userland/Services/FileSystemAccessServer/FileSystemAccessServerEndpoint.h)
 +
 +        add_serenity_subdirectory(Userland/Libraries/LibConfig)
 +        add_serenity_subdirectory(Userland/Libraries/LibGUI)
 +        add_serenity_subdirectory(Userland/Libraries/LibDesktop)
++
++        # LibFileSystemAccessClient orders itself after the WindowServer target,
++        # which does not exist in a Lagom build; provide a no-op placeholder so
++        # its add_dependencies() line is satisfied.
++        if (NOT TARGET WindowServer)
++            add_custom_target(WindowServer)
++        endif()
++        add_serenity_subdirectory(Userland/Libraries/LibFileSystemAccessClient)
 +
 +        # libgui-wayland: LibWM (the Wayland <-> LibGUI compatibility layer).
 +        add_subdirectory("${SERENITY_PROJECT_ROOT}/../src" "${CMAKE_CURRENT_BINARY_DIR}/libwm")

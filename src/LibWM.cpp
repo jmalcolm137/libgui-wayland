@@ -6,6 +6,8 @@
 
 #include "LibWM.h"
 #include "ClipboardServerConnection.h"
+#include "ConfigServerConnection.h"
+#include "FileSystemAccessServerConnection.h"
 #include "LaunchServerConnection.h"
 #include "WindowServerConnection.h"
 #include <AK/NonnullOwnPtr.h>
@@ -41,6 +43,16 @@ static RefPtr<LaunchServerConnection>& launch_server_slot()
 static RefPtr<ClipboardServerConnection>& clipboard_server_slot()
 {
     static auto* slot = new RefPtr<ClipboardServerConnection>;
+    return *slot;
+}
+static RefPtr<ConfigServerConnection>& config_server_slot()
+{
+    static auto* slot = new RefPtr<ConfigServerConnection>;
+    return *slot;
+}
+static RefPtr<FileSystemAccessServerConnection>& file_system_access_server_slot()
+{
+    static auto* slot = new RefPtr<FileSystemAccessServerConnection>;
     return *slot;
 }
 
@@ -106,10 +118,14 @@ static void start_server_thread()
     int window_server = -1;
     int clipboard_server = -1;
     int launch_server = -1;
+    int config_server = -1;
+    int file_system_access_server = -1;
     int window_client = make_socketpair(window_server);
     int clipboard_client = make_socketpair(clipboard_server);
     int launch_client = make_socketpair(launch_server);
-    if (window_client < 0 || clipboard_client < 0 || launch_client < 0) {
+    int config_client = make_socketpair(config_server);
+    int file_system_access_client = make_socketpair(file_system_access_server);
+    if (window_client < 0 || clipboard_client < 0 || launch_client < 0 || config_client < 0 || file_system_access_client < 0) {
         dbgln("LibWM: failed to create portal socketpairs");
         return;
     }
@@ -117,8 +133,10 @@ static void start_server_thread()
     s_client_fds.set("/tmp/portal/window"sv, window_client);
     s_client_fds.set(expanded_portal_path("/tmp/session/%sid/portal/clipboard"sv), clipboard_client);
     s_client_fds.set(expanded_portal_path("/tmp/session/%sid/portal/launch"sv), launch_client);
+    s_client_fds.set(expanded_portal_path("/tmp/session/%sid/portal/config"sv), config_client);
+    s_client_fds.set(expanded_portal_path("/tmp/session/%sid/portal/filesystemaccess"sv), file_system_access_client);
 
-    auto thread = Threading::Thread::try_create([window_server, clipboard_server, launch_server]() -> intptr_t {
+    auto thread = Threading::Thread::try_create([window_server, clipboard_server, launch_server, config_server, file_system_access_server]() -> intptr_t {
         Core::EventLoop loop;
 
         // WindowServer first: this connects to Wayland and installs the input
@@ -132,6 +150,10 @@ static void start_server_thread()
             clipboard_server_slot() = ClipboardServerConnection::create(socket.release_value());
         if (auto socket = Core::LocalSocket::adopt_fd(launch_server); !socket.is_error())
             launch_server_slot() = LaunchServerConnection::create(socket.release_value());
+        if (auto socket = Core::LocalSocket::adopt_fd(config_server); !socket.is_error())
+            config_server_slot() = ConfigServerConnection::create(socket.release_value());
+        if (auto socket = Core::LocalSocket::adopt_fd(file_system_access_server); !socket.is_error())
+            file_system_access_server_slot() = FileSystemAccessServerConnection::create(socket.release_value());
 
         loop.exec();
         return 0;
@@ -142,6 +164,8 @@ static void start_server_thread()
         ::close(window_server);
         ::close(clipboard_server);
         ::close(launch_server);
+        ::close(config_server);
+        ::close(file_system_access_server);
         s_client_fds.clear();
         return;
     }

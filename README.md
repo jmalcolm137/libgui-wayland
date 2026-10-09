@@ -36,6 +36,12 @@ The shim is called **LibWM**. It sits between `LibGUI`'s WindowServer IPC protoc
   Serenity `KeyCode`/modifiers), focus/activation/close handled, and the full input path is
   verified headlessly (the compositor injects a click; the widget receives it). The
   **unmodified Calculator** builds and runs, decorated and movable, on KDE Plasma.
+- **M5 (partly)** — PDFViewer: done. The **unmodified SerenityOS PDFViewer** builds under
+  Lagom and renders PDFs on the host. Opening a file goes through an in-process
+  **FileSystemAccess** portal, and it reads/writes its preferences through an in-process
+  **Config** portal; both are served by LibWM without touching library source. Verified
+  headlessly against `Tests/LibPDF/complex.pdf` (window, menubar, page toolbar and the
+  rendered page; `scripts/run-pdfviewer-test.sh`). Scroll/animation polish remains.
 - **M6 (partly)** — clipboard and menus: done for `text/plain`, `text/uri-list`, and
   `image/png` ↔ `image/x-serenityos` (all verified headlessly in both directions), plus a
   server-rendered **menubar and dropdown menus** with hover highlighting (clicking `File → Quit`

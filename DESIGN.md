@@ -611,7 +611,34 @@ app exits), and `F10 → Down → Right → Enter` navigates into the nested `Ne
 its item — `scripts/run-menu-test.sh`. Known gaps: scrolling long menus is not implemented yet,
 and menu item icons are not drawn.
 
-### 4.7 Building the applications
+### 4.7 PDFViewer
+
+The unmodified **PDFViewer** (LibPDF + LibGUI) builds under Lagom and renders PDFs on the
+host. `main.cpp` opens a path from the command line through
+`FileSystemAccessClient::Client::request_file_read_only_approved`, then
+`PDFViewerWidget::open_file` rasterises pages with LibPDF into an
+`AbstractScrollableWidget`. Verified headlessly against `Tests/LibPDF/complex.pdf`
+(3 pages): the window, the `File View Debug Help` menubar, the page toolbar and the
+rendered "Page One" all appear — `scripts/run-pdfviewer-test.sh`, which also dumps the
+rendered window to `build/pdfviewer-window.png`.
+
+### 4.8 Config and FileSystemAccess portals
+
+PDFViewer touches two more SERENITYOS services that Lagom does not build. Both are served
+in-process by LibWM, so the app stays unmodified:
+
+* **ConfigServer** — `Config::pledge_domain` and `read_*`/`write_*` back window geometry,
+  recent files and the render-preference toggles. `ConfigServerConnection` keeps an
+  in-memory `domain → group → key` store (persistence to disk is still pending).
+* **FileSystemAccessServer** — `request_file_read_only_approved` asks for access to a
+  named file and receives its fd over IPC. `FileSystemAccessServerConnection` opens the
+  path directly; there is no interactive picker on the host.
+
+Both are enabled by generating their IPC endpoints in the Lagom build and building
+`LibFileSystemAccessClient`; its `add_dependencies(... WindowServer)` line is satisfied by
+a no-op placeholder target. No library source is modified.
+
+### 4.9 Building the applications
 
 Serenity app `CMakeLists.txt` use `serenity_app`, `serenity_component`, `compile_gml`,
 `serenity_bin`, and `embed_resource`. Under Lagom these resolve through `Meta/CMake/`, so
@@ -622,7 +649,7 @@ embed). Any such accommodation is a *build flag or shim macro*, never an app sou
 `Calculator` needs `LibCore LibCrypto LibDesktop LibGfx LibGUI LibMain LibURL`.
 `PDFViewer` adds `LibPDF LibFileSystemAccessClient LibConfig`.
 
-### 4.8 Prefixes and running
+### 4.10 Prefixes and running
 
 Two user-local prefixes, no root (mirroring the sibling project):
 
@@ -728,8 +755,8 @@ open menus, copy/paste, resize/maximise, HiDPI.
 | M2 | `LibWM` skeleton: portal registry, socketpair transport, `fast_greet`, one `xdg_toplevel`, backing-store blit — headless | ✅ done (in-process transport; live Plasma toplevel, §4.2) |
 | M3 | Pointer/keyboard input from `wl_seat`, focus/activation, close request; then **Calculator** | ✅ input + unmodified **Calculator** renders & runs on Plasma (§4.3) |
 | M4 | Theme/font parity; decorations; icons; alpha | ⬜ |
-| M5 | **PDFViewer** (LibPDF, scrolling, toolbars, file access) | ⬜ |
-| M6 | Menus/popups, clipboard, config persistence | 🟡 native clipboard + server-rendered menubar/popups/submenus + keyboard nav done (§4.5, §4.6); config pending |
+| M5 | **PDFViewer** (LibPDF, scrolling, toolbars, file access) | 🟡 unmodified **PDFViewer** builds and renders a PDF on the host (§4.7); toolbar + menubar work, file access via a stub portal |
+| M6 | Menus/popups, clipboard, config persistence | 🟡 native clipboard + server-rendered menubar/popups/submenus + keyboard nav done (§4.5, §4.6); Config + FileSystemAccess portals in-process (§4.8); config persistence pending |
 | M7 | Live Plasma session, headless test harness, CI matrix | 🟡 headless compositor + input test integrated (§5.2); CI matrix pending |
 | M8 | Crisp HiDPI (plumb an output scale into LibGUI's backing store) | ⬜ |
 

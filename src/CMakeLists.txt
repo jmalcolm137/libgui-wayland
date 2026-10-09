@@ -62,7 +62,7 @@ target_include_directories(wm PRIVATE
 target_compile_definitions(wm PRIVATE "LIBWM_DEFAULT_RES=\"${SERENITY_PROJECT_ROOT}/Base/res\"")
 # The generated Wayland protocol code drops const in its listener trampolines.
 target_compile_options(wm PRIVATE -Wno-cast-qual)
-target_link_libraries(wm PRIVATE LibCore LibGfx LibIPC LibGUI LibThreading ${WAYLAND_CLIENT_LIBRARIES} ${XKBCOMMON_LIBRARIES})
+target_link_libraries(wm PRIVATE LibCore LibGfx LibIPC LibGUI LibThreading LibURL ${WAYLAND_CLIENT_LIBRARIES} ${XKBCOMMON_LIBRARIES})
 
 # A minimal unmodified-style LibGUI application used to exercise the shim.
 add_executable(libwm-test-window test/TestWindow.cpp)
@@ -120,3 +120,17 @@ target_include_directories(Calculator PRIVATE "${CALCULATOR_SRC}")
 # LibWM registers its portals from a static initializer; keep the library loaded.
 target_link_options(Calculator PRIVATE "-Wl,--no-as-needed")
 target_link_libraries(Calculator PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibCrypto LibDesktop LibURL wm)
+
+set(PDFVIEWER_SRC "${SERENITY_PROJECT_ROOT}/Userland/Applications/PDFViewer")
+add_executable(PDFViewer
+    "${PDFVIEWER_SRC}/main.cpp"
+    "${PDFVIEWER_SRC}/OutlineModel.cpp"
+    "${PDFVIEWER_SRC}/PDFViewer.cpp"
+    "${PDFVIEWER_SRC}/PDFViewerWidget.cpp"
+    "${PDFVIEWER_SRC}/SidebarWidget.cpp"
+    "${PDFVIEWER_SRC}/ThumbnailsListView.cpp"
+    "${PDFVIEWER_SRC}/ThumbnailsModel.cpp"
+)
+target_include_directories(PDFViewer PRIVATE "${PDFVIEWER_SRC}")
+target_link_options(PDFViewer PRIVATE "-Wl,--no-as-needed")
+target_link_libraries(PDFViewer PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibPDF LibFileSystemAccessClient LibConfig LibURL wm)

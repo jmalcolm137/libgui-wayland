@@ -5,8 +5,9 @@
 # The only change we make to upstream is a build-system patch that teaches Lagom
 # to compile all of LibGUI (instead of its historical 6-file stub) and to
 # generate the IPC endpoint headers for the SERENITYOS-gated services
-# (WindowServer, Clipboard, LaunchServer, NotificationServer) that LibGUI and
-# its friends need. No library or application source is modified.
+# (WindowServer, Clipboard, LaunchServer, NotificationServer,
+# FileSystemAccessServer) that LibGUI and its friends need. No library or
+# application source is modified.
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -23,7 +24,7 @@ for arg in "$@"; do
     esac
 done
 if [[ ${#TARGETS[@]} -eq 0 ]]; then
-    TARGETS=(LibGfx LibGUI wm libwm-test-window)
+    TARGETS=(LibGfx LibGUI wm Calculator PDFViewer libwm-test-window)
 fi
 
 if [[ ! -d "$SERENITY_SRC/.git" ]]; then
@@ -64,6 +65,8 @@ if [[ "$RUN_TESTS" == "1" ]]; then
     SERENITY_SRC="$SERENITY_SRC" BUILD_DIR="$BUILD_DIR" "$PROJECT_ROOT/scripts/run-clipboard-test.sh"
     echo "==> Running menu integration test"
     SERENITY_SRC="$SERENITY_SRC" BUILD_DIR="$BUILD_DIR" "$PROJECT_ROOT/scripts/run-menu-test.sh"
+    echo "==> Running PDFViewer integration test"
+    SERENITY_SRC="$SERENITY_SRC" BUILD_DIR="$BUILD_DIR" "$PROJECT_ROOT/scripts/run-pdfviewer-test.sh"
 fi
 
 echo "==> Done. Libraries in $BUILD_DIR/lib"
