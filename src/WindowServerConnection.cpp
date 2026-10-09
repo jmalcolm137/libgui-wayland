@@ -252,7 +252,7 @@ void WindowServerConnection::present(Window& window)
         window.id, window.bitmap->width(), window.bitmap->height(), window.last_serial, window.has_alpha_channel);
 }
 
-void WindowServerConnection::create_window(i32 window_id, i32, Gfx::IntRect const& rect, bool, bool has_alpha_channel, bool, bool, bool resizable, bool, bool, bool, float, Gfx::IntSize, Gfx::IntSize, Gfx::IntSize minimum_size, Optional<Gfx::IntSize> const&, i32, i32, ByteString const& title, i32, Gfx::IntRect const&)
+void WindowServerConnection::create_window(i32 window_id, i32, Gfx::IntRect const& rect, bool, bool has_alpha_channel, bool, bool, bool resizable, bool fullscreen, bool, bool, float, Gfx::IntSize, Gfx::IntSize, Gfx::IntSize minimum_size, Optional<Gfx::IntSize> const&, i32, i32, ByteString const& title, i32, Gfx::IntRect const&)
 {
     auto window = make<Window>();
     window->id = window_id;
@@ -261,15 +261,26 @@ void WindowServerConnection::create_window(i32 window_id, i32, Gfx::IntRect cons
     window->has_alpha_channel = has_alpha_channel;
     window->title = title;
 
-    dbgln("LibWM: create_window id={} rect={},{},{}x{} title='{}'", window_id, rect.x(), rect.y(), rect.width(), rect.height(), title);
+    // A window created fullscreen starts at the output size; the compositor
+    // confirms it with a configure. Serenity's WindowServer sizes such windows
+    // synchronously, and apps query window->size() right after show() (e.g. the
+    // Tubes screensaver calls create_buffer(window->size())).
+    if (fullscreen) {
+        auto screen = WaylandClient::the().screen_size();
+        if (!screen.is_empty())
+            window->rect.set_size(screen);
+    }
+
+    dbgln("LibWM: create_window id={} rect={},{},{}x{} fullscreen={} title='{}'", window_id, window->rect.x(), window->rect.y(), window->rect.width(), window->rect.height(), fullscreen, title);
     m_windows.append(move(window));
 
-    WaylandClient::the().create_window(window_id, rect.size(), title, has_alpha_channel, resizable);
+    auto& created_window = *m_windows.last();
+    WaylandClient::the().create_window(window_id, created_window.rect.size(), title, has_alpha_channel, resizable);
 
     // Ask the client to paint the whole window.
     Vector<Gfx::IntRect> rects;
-    rects.append({ 0, 0, rect.width(), rect.height() });
-    send_paint(*m_windows.last(), move(rects));
+    rects.append({ 0, 0, created_window.rect.width(), created_window.rect.height() });
+    send_paint(created_window, move(rects));
 }
 
 void WindowServerConnection::set_window_title(i32 window_id, ByteString const& title)
