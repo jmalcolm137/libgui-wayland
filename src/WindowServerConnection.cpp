@@ -70,6 +70,41 @@ void WindowServerConnection::send_paint(Window& window, Vector<Gfx::IntRect> rec
     async_paint(window.id, window.rect.size(), move(rects));
 }
 
+void WindowServerConnection::request_window_resize(i32 window_id, Gfx::IntSize size)
+{
+    auto* w = window(window_id);
+    if (!w)
+        return;
+
+    // Keep at most one configure-driven repaint in flight; the next one is
+    // sent when the client finishes this one (see set_window_backing_store).
+    // A burst of compositor configures therefore collapses to one repaint per
+    // client frame instead of one per configure.
+    if (w->resize_in_flight) {
+        w->pending_resize = size;
+        w->has_pending_resize = true;
+        return;
+    }
+
+    w->resize_in_flight = true;
+    w->rect.set_size(size);
+    dbgln("LibWM: window_resized {} -> {}x{}", window_id, size.width(), size.height());
+    async_window_resized(window_id, w->rect);
+    Vector<Gfx::IntRect> rects;
+    rects.append({ 0, 0, size.width(), size.height() });
+    send_paint(*w, move(rects));
+}
+
+void WindowServerConnection::flush_pending_resize(Window& w)
+{
+    w.resize_in_flight = false;
+    if (!w.has_pending_resize)
+        return;
+    auto size = w.pending_resize;
+    w.has_pending_resize = false;
+    request_window_resize(w.id, size);
+}
+
 void WindowServerConnection::install_input_callbacks()
 {
     WaylandClient::InputCallbacks callbacks;
@@ -132,14 +167,7 @@ void WindowServerConnection::install_input_callbacks()
         }
     };
     callbacks.window_resize = [this](i32 window_id, Gfx::IntSize size) {
-        if (auto* w = window(window_id)) {
-            dbgln("LibWM: window_resized {} -> {}x{}", window_id, size.width(), size.height());
-            w->rect.set_size(size);
-            async_window_resized(window_id, w->rect);
-            Vector<Gfx::IntRect> rects;
-            rects.append({ 0, 0, size.width(), size.height() });
-            send_paint(*w, move(rects));
-        }
+        request_window_resize(window_id, size);
     };
     callbacks.menubar_motion = [this](i32 window_id, Gfx::IntPoint position) { m_menu.on_menubar_motion(window_id, position); };
     callbacks.menubar_left = [this](i32 window_id) { m_menu.on_menubar_left(window_id); };
@@ -331,6 +359,10 @@ void WindowServerConnection::set_window_backing_store(i32 window_id, i32, i32 pi
         dbgln("LibWM: backing store for unknown window {}", window_id);
         return;
     }
+
+    // The client has finished a paint (this store), so it's ready for the next
+    // size: release any resize we coalesced while it was busy.
+    flush_pending_resize(*w);
 
     if (w->bitmap && w->last_serial == serial) {
         present(*w);

@@ -20,6 +20,7 @@
 #include <LibGfx/Size.h>
 
 struct wl_buffer;
+struct wl_callback;
 struct wl_compositor;
 struct wl_data_device;
 struct wl_data_device_manager;
@@ -169,6 +170,7 @@ public:
     void on_source_cancelled(wl_data_source*);
     void on_popup_done(xdg_popup*);
     void on_surface_configured(xdg_surface*);
+    void on_frame_done(wl_callback*);
     void note_input_serial(u32 serial) { m_last_input_serial = serial; }
 
 private:
@@ -192,6 +194,16 @@ private:
         Function<void(Gfx::Bitmap&, Gfx::IntRect)> draw_inset;
         Core::AnonymousBuffer composed_buffer;
         RefPtr<Gfx::Bitmap> composed_bitmap;
+        // Compositor frame-callback pacing: while a frame is in flight we keep
+        // only the newest client content and attach it when the frame lands.
+        wl_callback* frame_callback { nullptr };
+        bool frame_in_flight { false };
+        int pending_fd { -1 };
+        Gfx::IntSize pending_size;
+        Gfx::IntSize pending_visible_size;
+        i32 pending_pitch { 0 };
+        bool pending_has_alpha { false };
+        bool has_pending { false };
     };
 
     struct Popup {
@@ -207,6 +219,7 @@ private:
     };
 
     WindowSurface* find(i32 window_id);
+    void commit_window_content(WindowSurface&, int client_fd, Gfx::IntSize size, Gfx::IntSize visible_size, i32 pitch, bool has_alpha);
     Popup* find_popup(i32 popup_id);
     i32 popup_id_for_surface(wl_surface*) const;
     void purge_released_buffers(WindowSurface&);

@@ -212,6 +212,17 @@ static wl_buffer_listener const s_buffer_listener = {
     .release = buffer_release,
 };
 
+// --- wl_callback (frame pacing) ----------------------------------------------
+
+static void frame_done(void* data, wl_callback* callback, uint32_t)
+{
+    static_cast<WaylandClient*>(data)->on_frame_done(callback);
+}
+
+static wl_callback_listener const s_frame_listener = {
+    .done = frame_done,
+};
+
 // --- wl_seat / wl_pointer / wl_keyboard --------------------------------------
 
 static KeyCode serenity_key_code_from_evdev(u32 key)
@@ -1346,37 +1357,67 @@ void WaylandClient::attach_and_commit(i32 window_id, int client_fd, Gfx::IntSize
     if (visible_size.is_empty())
         visible_size = size;
 
-    purge_released_buffers(*window_surface);
+    // Pace presents to the compositor: if a frame is still in flight, keep only
+    // the newest content and attach it when the frame callback lands. A resize
+    // that produces several configures/paints within one refresh interval thus
+    // collapses to a single present.
+    if (window_surface->frame_in_flight) {
+        if (window_surface->pending_fd >= 0)
+            ::close(window_surface->pending_fd);
+        window_surface->pending_fd = ::dup(client_fd);
+        if (window_surface->pending_fd < 0)
+            return;
+        window_surface->pending_size = size;
+        window_surface->pending_visible_size = visible_size;
+        window_surface->pending_pitch = pitch;
+        window_surface->pending_has_alpha = has_alpha;
+        window_surface->has_pending = true;
+        return;
+    }
+
+    commit_window_content(*window_surface, client_fd, size, visible_size, pitch, has_alpha);
+}
+
+void WaylandClient::commit_window_content(WindowSurface& window_surface, int client_fd, Gfx::IntSize size, Gfx::IntSize visible_size, i32 pitch, bool has_alpha)
+{
+    auto request_frame = [&] {
+        window_surface.frame_callback = wl_surface_frame(window_surface.surface);
+        wl_callback_add_listener(window_surface.frame_callback, &s_frame_listener, this);
+        window_surface.frame_in_flight = true;
+    };
+
+    purge_released_buffers(window_surface);
 
     // If the window has a top inset (menubar), compose it above the client's
     // content into a single buffer. Otherwise attach the client's buffer as-is.
-    if (window_surface->inset > 0 && window_surface->draw_inset) {
-        int total_height = visible_size.height() + window_surface->inset;
+    if (window_surface.inset > 0 && window_surface.draw_inset) {
+        int total_height = visible_size.height() + window_surface.inset;
         size_t bytes = static_cast<size_t>(visible_size.width()) * 4 * static_cast<size_t>(total_height);
         auto buffer = Core::AnonymousBuffer::create_with_size(bytes);
         if (buffer.is_error())
             return;
-        window_surface->composed_buffer = buffer.release_value();
-        auto composed = Gfx::Bitmap::create_with_anonymous_buffer(Gfx::BitmapFormat::BGRA8888, window_surface->composed_buffer, { visible_size.width(), total_height }, 1);
+        window_surface.composed_buffer = buffer.release_value();
+        auto composed = Gfx::Bitmap::create_with_anonymous_buffer(Gfx::BitmapFormat::BGRA8888, window_surface.composed_buffer, { visible_size.width(), total_height }, 1);
         if (composed.is_error())
             return;
-        window_surface->composed_bitmap = composed.release_value();
-        auto& destination = *window_surface->composed_bitmap;
+        window_surface.composed_bitmap = composed.release_value();
+        auto& destination = *window_surface.composed_bitmap;
 
         size_t client_bytes = static_cast<size_t>(pitch) * static_cast<size_t>(size.height());
         auto* source = static_cast<u8 const*>(mmap(nullptr, client_bytes, PROT_READ, MAP_SHARED, client_fd, 0));
         if (source == MAP_FAILED)
             return;
         for (int y = 0; y < visible_size.height(); ++y)
-            memcpy(destination.scanline(window_surface->inset + y), source + static_cast<size_t>(y) * pitch, static_cast<size_t>(visible_size.width()) * 4);
+            memcpy(destination.scanline(window_surface.inset + y), source + static_cast<size_t>(y) * pitch, static_cast<size_t>(visible_size.width()) * 4);
         munmap(const_cast<u8*>(source), client_bytes);
 
-        window_surface->draw_inset(destination, { 0, 0, visible_size.width(), window_surface->inset });
+        window_surface.draw_inset(destination, { 0, 0, visible_size.width(), window_surface.inset });
 
-        bind_bitmap(window_surface->surface, window_surface->composed_buffer, destination, window_surface->buffers);
-        wl_surface_commit(window_surface->surface);
+        request_frame();
+        bind_bitmap(window_surface.surface, window_surface.composed_buffer, destination, window_surface.buffers);
+        wl_surface_commit(window_surface.surface);
         wl_display_flush(m_display);
-        dbgln("LibWM/Wayland: presented window {} ({}x{} incl. {}px inset)", window_id, visible_size.width(), total_height, window_surface->inset);
+        dbgln("LibWM/Wayland: presented window {} ({}x{} incl. {}px inset)", window_surface.window_id, visible_size.width(), total_height, window_surface.inset);
         return;
     }
 
@@ -1400,9 +1441,10 @@ void WaylandClient::attach_and_commit(i32 window_id, int client_fd, Gfx::IntSize
         return;
     }
 
-    wl_surface_attach(window_surface->surface, buffer, 0, 0);
-    wl_surface_damage(window_surface->surface, 0, 0, visible_size.width(), visible_size.height());
-    wl_surface_commit(window_surface->surface);
+    request_frame();
+    wl_surface_attach(window_surface.surface, buffer, 0, 0);
+    wl_surface_damage(window_surface.surface, 0, 0, visible_size.width(), visible_size.height());
+    wl_surface_commit(window_surface.surface);
     wl_display_flush(m_display);
 
     // The pool's fd has been transferred by the flush above; buffers outlive it.
@@ -1412,9 +1454,36 @@ void WaylandClient::attach_and_commit(i32 window_id, int client_fd, Gfx::IntSize
     auto record = make<BufferRecord>();
     record->buffer = buffer;
     wl_buffer_add_listener(buffer, &s_buffer_listener, record.ptr());
-    window_surface->buffers.append(move(record));
+    window_surface.buffers.append(move(record));
 
-    dbgln("LibWM/Wayland: presented window {} ({}x{})", window_id, visible_size.width(), visible_size.height());
+    dbgln("LibWM/Wayland: presented window {} ({}x{})", window_surface.window_id, visible_size.width(), visible_size.height());
+}
+
+void WaylandClient::on_frame_done(wl_callback* callback)
+{
+    for (auto const& it : m_windows) {
+        auto& window_surface = *it.value;
+        if (window_surface.frame_callback != callback)
+            continue;
+        wl_callback_destroy(callback);
+        window_surface.frame_callback = nullptr;
+        window_surface.frame_in_flight = false;
+        if (window_surface.has_pending) {
+            int fd = window_surface.pending_fd;
+            auto size = window_surface.pending_size;
+            auto visible_size = window_surface.pending_visible_size;
+            auto pitch = window_surface.pending_pitch;
+            auto has_alpha = window_surface.pending_has_alpha;
+            window_surface.pending_fd = -1;
+            window_surface.has_pending = false;
+            if (fd >= 0) {
+                commit_window_content(window_surface, fd, size, visible_size, pitch, has_alpha);
+                ::close(fd);
+            }
+        }
+        return;
+    }
+    wl_callback_destroy(callback);
 }
 
 }

@@ -60,11 +60,18 @@ private:
         ByteString title;
         RefPtr<Gfx::Bitmap> bitmap;
         i32 last_serial { -1 };
+        // Coalesce configure-driven repaints: at most one resize+paint is in
+        // flight until the client sends the next backing store.
+        bool resize_in_flight { false };
+        bool has_pending_resize { false };
+        Gfx::IntSize pending_resize;
     };
 
     Window* window(i32 id);
     void remove_window(i32 id);
     void send_paint(Window&, Vector<Gfx::IntRect> rects);
+    void request_window_resize(i32 window_id, Gfx::IntSize size);
+    void flush_pending_resize(Window&);
     void present(Window&);
     void install_input_callbacks();
     void install_menu_callbacks();
