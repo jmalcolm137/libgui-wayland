@@ -30,7 +30,7 @@ if [[ ${#TARGETS[@]} -eq 0 ]]; then
     TARGETS=(
         LibGfx LibGUI wm serenity-audio
         Calculator PDFViewer Piano libwm-test-window
-        3DFileViewer About AnalogClock Assistant Browser BrowserSettings
+        3DFileViewer Tubes About AnalogClock Assistant Browser BrowserSettings
         Calendar CalendarSettings CharacterMap ClockSettings Escalator FileManager
         FontEditor GamesSettings Help HexEditor ImageViewer KeyboardMapper
         KeyboardSettings Mail MailSettings Maps MapsSettings NetworkSettings
@@ -79,6 +79,8 @@ if [[ "$RUN_TESTS" == "1" ]]; then
     SERENITY_SRC="$SERENITY_SRC" BUILD_DIR="$BUILD_DIR" "$PROJECT_ROOT/scripts/run-menu-test.sh"
     echo "==> Running PDFViewer integration test"
     SERENITY_SRC="$SERENITY_SRC" BUILD_DIR="$BUILD_DIR" "$PROJECT_ROOT/scripts/run-pdfviewer-test.sh"
+    echo "==> Running 3DFileViewer GL integration test"
+    SERENITY_SRC="$SERENITY_SRC" BUILD_DIR="$BUILD_DIR" "$PROJECT_ROOT/scripts/run-3dfileviewer-test.sh"
     echo "==> Running Piano integration test"
     SERENITY_SRC="$SERENITY_SRC" BUILD_DIR="$BUILD_DIR" "$PROJECT_ROOT/scripts/run-piano-test.sh"
 fi

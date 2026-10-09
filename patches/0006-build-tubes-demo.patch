@@ -1,0 +1,16 @@
+diff --git a/Meta/Lagom/CMakeLists.txt b/Meta/Lagom/CMakeLists.txt
+--- a/Meta/Lagom/CMakeLists.txt
++++ b/Meta/Lagom/CMakeLists.txt
+@@ -695,7 +695,12 @@
+                 # Serenity-specific mount flags and scheduler constant.
+                 target_compile_definitions(${app} PRIVATE THREAD_PRIORITY_MAX=99 MS_WXALLOWED=0 MS_AXALLOWED=0 MS_NOREGULAR=0)
+             endif()
+         endforeach()
++        # libgui-wayland: GL demo. Renders through the client-side LibGL/LibSoftGPU
++        # stack like 3DFileViewer; no GPU or compositor cooperation required.
++        add_serenity_subdirectory(Userland/Demos/Tubes)
++        target_link_options(Tubes PRIVATE "-Wl,--no-as-needed")
++        target_link_libraries(Tubes PRIVATE wm serenity-audio)
+ 
+         # Lagom Utilities
+         lagom_utility(abench SOURCES ../../Userland/Utilities/abench.cpp LIBS LibMain LibFileSystem LibAudio)

@@ -80,8 +80,11 @@ compositor, receive input events", the mapping onto Wayland is unusually direct:
   compositor. It is not based on `xlib-wayland` and links none of its code. We do reuse that
   project's **pure-Wayland headless compositor** strictly as a test harness (§5.2); it depends
   only on `libwayland-server`, never on X11.
-* **GPU/OpenGL.** `LibGL`, `LibSoftGPU`, `LibGPU` are out of scope. LibGfx's CPU painters are
-  the only rendering path.
+* **Accelerated GPU rendering.** The client-side software GL stack (`LibGL` → `LibGPU` →
+  `LibSoftGPU`) builds and runs on the host (§4.11); the only rendering path is in-process CPU
+  rasterisation into a `Gfx::Bitmap`. A hardware (EGL or Vulkan) backend and zero-copy
+  `zwp_linux_dmabuf_v1` presentation are out of scope. Note that this is *not* about the
+  compositor: a Wayland compositor can share buffers but cannot render GL for a client.
 * **Bit-exact core-font metrics vs. a Serenity framebuffer.** Glyph rasterisation is compared
   structurally (§5.3), not pixel-for-pixel, in the same spirit as the XForms project.
 * **Multi-application global window management.** Each application process is its own Wayland
@@ -398,6 +401,10 @@ Responsibilities:
   not mistaken for a rendering bug.
 * **Alpha.** `set_window_has_alpha_channel` / `set_window_alpha_hit_threshold` select
   `ARGB8888` and, where the compositor supports it, input-region masking for click-through.
+* **GL (OpenGL).** OpenGL is *client-side* and invisible to the WindowServer protocol: `LibGL`
+  renders through a `GPU::Device` (`LibSoftGPU` by default) into an app-owned `Gfx::Bitmap`,
+  which the widget then paints like any other bitmap. LibWM needs no GL knowledge at all
+  (§4.11).
 
 ### 3.6 Input
 
@@ -738,6 +745,44 @@ scripts/run-apps.sh
 
 No `DISPLAY` and no `xlib-wayland`. LibWM connects to `$WAYLAND_DISPLAY`.
 
+### 4.11 LibGL / LibSoftGPU — client-side GL
+
+SerenityOS's OpenGL implementation is not part of the WindowServer protocol and required no
+LibWM work. The stack is:
+
+* **`LibGPU`** — the abstract `GPU::Device` backend seam plus `GPU::Driver`, which `dlopen()`s a
+  backend and resolves `serenity_gpu_create_device()`.
+* **`LibSoftGPU`** — a concrete `GPU::Device`: the CPU rasterizer (clipper, sampler, SIMD,
+  shader compiler/processor).
+* **`LibGL`** / **`LibGLSL`** — an OpenGL 1.x API (`GL::GLContext`) over a `GPU::Device`, with
+  GLSL compiled by `LibGLSL`.
+
+`GL::create_context(Gfx::Bitmap&)` selects the backend from `$LIBGL_GPU_DRIVER` (default
+`softgpu`). Rendering targets an **app-owned `Gfx::Bitmap`**: `GLContext::present()` blits the
+device's colour buffer into it (`LibGL/GLContext.cpp:835`), and the widget's `paint_event` draws
+that bitmap with `GUI::Painter` — e.g. `3DFileViewer`'s `GLContextWidget::paint_event`. From
+there it is an ordinary client bitmap: window backing store → `wl_shm` → compositor. The
+WindowServer IPC (`WindowServer.ipc`) has no GL/GPU messages, which is why the GL stack "just
+works" through LibWM.
+
+**Host build (works today).** Lagom's `lagom_standard_libraries` already includes `GL`, `GLSL`,
+`GPU`, `SoftGPU` and `AccelGfx`, so `liblagom-gl.so`, `liblagom-glsl.so`, `liblagom-gpu.so` and
+`liblagom-softgpu.so` are built. On non-Serenity hosts `GPU::Driver` resolves the backend as
+`liblagom-softgpu.so.0` (`LibGPU/Driver.cpp`), and it is the only entry in the driver map.
+
+**Verified.** `scripts/run-3dfileviewer-test.sh` runs the unmodified **3DFileViewer** under the
+headless compositor with a bundled OBJ model: it loads the mesh, renders it with lighting and
+texturing through `LibSoftGPU`, and presents it over `wl_shm` as a real Wayland toplevel (frame
+dumped to PNG). The `Tubes` demo uses the same path.
+
+**Separate host GPU path.** `LibAccelGfx` is unrelated to `LibGL`: it is a 2D/GLES renderer that
+LibWeb uses when `HAS_ACCELERATED_GRAPHICS` is on (host EGL on Linux, CGL on macOS), including
+WebGL (`glReadPixels` back into the canvas bitmap). It is enabled in this build.
+
+**Not done.** There is no hardware `GPU::Device` (no EGL/Vulkan backend) and no `dmabuf`
+presentation; acceleration is out of scope (§1.2). Even with a GPU backend, LibWM's only added
+job would be importing a `zwp_linux_dmabuf_v1` buffer instead of (or alongside) `wl_shm`.
+
 ---
 
 ## 5. Test strategy
@@ -748,6 +793,7 @@ No `DISPLAY` and no `xlib-wayland`. LibWM connects to `$WAYLAND_DISPLAY`.
 |---|---|
 | `Calculator` | `Application`/`Window`, GML widget tree, buttons, keyboard input, theme, fonts, `LibConfig`, clipboard init |
 | `PDFViewer` | everything above + `LibPDF` rasterisation, `ImageWidget`/`AbstractScrollableWidget`, scrollbars, toolbars, `FileSystemAccess`, file I/O, larger window |
+| `3DFileViewer` | client-side **`LibGL`/`LibGPU`/`LibSoftGPU`**: GL context over an offscreen `Gfx::Bitmap`, per-frame animation, OBJ loading, depth/lighting/texture, presentation over `wl_shm` (§4.11) |
 
 ### 5.2 Headless, pixel-asserted
 
@@ -829,6 +875,7 @@ open menus, copy/paste, resize/maximise, HiDPI.
 | M7 | Live Plasma session, headless test harness, CI matrix | 🟡 headless compositor + input test integrated (§5.2); CI matrix pending |
 | M8 | Crisp HiDPI (plumb an output scale into LibGUI's backing store) | ⬜ |
 | M9 | Audio: **LibSerenityAudio** (LibAudio ↔ PipeWire) and **Piano** | ✅ unmodified **Piano** builds, renders and plays through PipeWire (§4.8.2) |
+| M10 | GPU: client-side **LibGL** / **LibSoftGPU** | ✅ unmodified **3DFileViewer** renders and animates through `LibSoftGPU` over `wl_shm` (§4.11); hardware acceleration deferred (§1.2) |
 
 The state column is kept honest as work proceeds; §6 records every gap found, whether fixed in
 LibWM or shown to be an upstream/host issue.

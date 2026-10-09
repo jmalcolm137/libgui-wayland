@@ -58,12 +58,19 @@ The shim is called **LibWM**. It sits between `LibGUI`'s WindowServer IPC protoc
   **unmodified SerenityOS Piano** builds and runs, with multi-client mixing, and is verified
   headlessly (window, AudioServer portal, PipeWire `streaming`, zero underruns) by
   `scripts/run-piano-test.sh`.
+- **GPU / OpenGL** — the client-side GL stack (`LibGL` → `LibGPU` → `LibSoftGPU`, plus
+  `LibGLSL`) builds on the host unchanged. GL renders into an **offscreen `Gfx::Bitmap`**; LibGUI
+  paints that bitmap and LibWM presents it as a `wl_shm` buffer, so the Wayland transport is
+  untouched (the WindowServer protocol carries no GL messages). The **unmodified `3DFileViewer`**
+  loads and animates an OBJ model, verified headlessly by `scripts/run-3dfileviewer-test.sh`; the
+  **`Tubes`** demo uses the same path. This is CPU rasterisation — see *Remaining work* for
+  hardware acceleration.
 - **Applications** — 44 of the 49 apps in `Userland/Applications` build and run on the host,
   including **Spreadsheet**, **TextEditor**, **PixelPaint**, **FileManager**, **Browser**,
-  **Mail**, **Maps**, **Piano**, **Calculator**, **PDFViewer**, and all the settings/utility
-  apps, with GML, icons, menus, dialogs and syntax highlighting intact. The web stack
-  (`LibWeb`/`LibWebView`) is built on the host too (`-DENABLE_LAGOM_LIBWEB=ON`). The five that
-  remain are Serenity service/kernel-facing and excluded (see below).
+  **Mail**, **Maps**, **Piano**, **Calculator**, **PDFViewer**, **3DFileViewer**, and all the
+  settings/utility apps, with GML, icons, menus, dialogs and syntax highlighting intact. The
+  web stack (`LibWeb`/`LibWebView`) is built on the host too (`-DENABLE_LAGOM_LIBWEB=ON`). The
+  five that remain are Serenity service/kernel-facing and excluded (see below).
 
 ## Remaining work
 
@@ -78,6 +85,10 @@ The shim is called **LibWM**. It sits between `LibGUI`'s WindowServer IPC protoc
   written to disk between runs.
 - **Audio polish.** `LibSerenityAudio` has no AudioManager portal (no system mixer/volume
   integration), and cross-rate clients use LibAudio's naive resampler.
+- **GPU acceleration.** GL is CPU-rasterised by `LibSoftGPU` and presented over `wl_shm`.
+  A hardware backend (host EGL/GLES or Vulkan) and zero-copy `zwp_linux_dmabuf_v1` presentation
+  are not implemented; LibWM would only ever add the buffer-sharing hop, since a Wayland
+  compositor cannot render GL on a client's behalf. See [DESIGN.md](DESIGN.md) §4.11.
 - **Serenity-only applications and settings (host exclusions).** A handful of apps and
   settings target SerenityOS *system services* rather than a portable protocol; they are
   deferred until a **Serenity Desktop Environment on Linux** exists — see
@@ -126,6 +137,7 @@ scripts/fetch-headless-compositor.sh   # pinned clone of xlib-wayland (pure-Wayl
 scripts/build-libgui.sh                # patches + LibGfx/LibGUI/LibWM/Calculator + all tests
 ```
 
-`build-libgui.sh` runs the upstream LibGfx test suite and the headless input integration test
-automatically; pass `--no-tests` to skip.
+`build-libgui.sh` runs the upstream LibGfx test suite and the headless integration tests
+(input, clipboard, menus, PDFViewer, 3DFileViewer GL, Piano) automatically; pass `--no-tests` to
+skip.
 
