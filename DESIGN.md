@@ -501,6 +501,13 @@ The first vertical slice is implemented and verified on a real KDE Plasma Waylan
 * **Presentation.** Each Serenity window maps to a `wl_surface` + `xdg_toplevel`; the client's
   shared memfd is exposed through `wl_shm` and attached as a `wl_buffer`. A minimal LibGUI
   window (a painted widget) renders and appears as a real Wayland window on Plasma.
+* **Host paths.** `Core::System::openat` redirects SerenityOS's absolute `/res/...` paths to
+  the bundled resource root (`SERENITY_RES_ROOT`), so GML assets and themes that hardcode
+  `/res/...` (e.g. the About dialog's brand banner) load unmodified. `Core::Version` reports
+  `Version 1.0 (Wayland)` on the host.
+* **Window state.** `set_fullscreen`/`set_maximized`/`set_minimized` map to the matching
+  `xdg_toplevel` requests; the compositor's resulting `configure` size resizes the client
+  content (accounting for the menubar inset), verified by `libwm-fullscreen-test`.
 
 Still deferred (next milestones): pointer/keyboard input (M3), CSD/decoration policy and DPI
 polish (M4), menus/popups and clipboard (M6).

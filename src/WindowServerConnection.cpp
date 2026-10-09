@@ -97,6 +97,15 @@ void WindowServerConnection::install_input_callbacks()
             async_window_deactivated(window_id);
         }
     };
+    callbacks.window_resize = [this](i32 window_id, Gfx::IntSize size) {
+        if (auto* w = window(window_id)) {
+            w->rect.set_size(size);
+            async_window_resized(window_id, w->rect);
+            Vector<Gfx::IntRect> rects;
+            rects.append({ 0, 0, size.width(), size.height() });
+            send_paint(*w, move(rects));
+        }
+    };
     callbacks.menubar_motion = [this](i32 window_id, Gfx::IntPoint position) { m_menu.on_menubar_motion(window_id, position); };
     callbacks.menubar_press = [this](i32 window_id, Gfx::IntPoint position) { m_menu.on_menubar_press(window_id, position); };
     callbacks.popup_motion = [this](i32 popup_id, Gfx::IntPoint position) { m_menu.on_popup_motion(popup_id, position); };
@@ -355,6 +364,22 @@ void WindowServerConnection::set_window_icon_bitmap(i32, Gfx::ShareableBitmap co
 
 void WindowServerConnection::set_window_progress(i32, Optional<i32> const&)
 {
+}
+
+void WindowServerConnection::set_fullscreen(i32 window_id, bool fullscreen)
+{
+    WaylandClient::the().set_fullscreen(window_id, fullscreen);
+}
+
+void WindowServerConnection::set_maximized(i32 window_id, bool maximized)
+{
+    WaylandClient::the().set_maximized(window_id, maximized);
+}
+
+void WindowServerConnection::set_minimized(i32 window_id, bool minimized)
+{
+    if (minimized)
+        WaylandClient::the().set_minimized(window_id);
 }
 
 void WindowServerConnection::move_window_to_front(i32)

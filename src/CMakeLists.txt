@@ -63,6 +63,18 @@ target_include_directories(libwm-clipboard-test PRIVATE "${CMAKE_CURRENT_SOURCE_
 target_link_options(libwm-clipboard-test PRIVATE "-Wl,--no-as-needed")
 target_link_libraries(libwm-clipboard-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC wm)
 
+# Shows the About dialog directly, to reproduce the About crash.
+add_executable(libwm-about-test test/AboutTest.cpp)
+target_include_directories(libwm-about-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_options(libwm-about-test PRIVATE "-Wl,--no-as-needed")
+target_link_libraries(libwm-about-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC wm)
+
+# Toggles fullscreen to verify xdg_toplevel fullscreen handling.
+add_executable(libwm-fullscreen-test test/FullscreenTest.cpp)
+target_include_directories(libwm-fullscreen-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_options(libwm-fullscreen-test PRIVATE "-Wl,--no-as-needed")
+target_link_libraries(libwm-fullscreen-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC wm)
+
 # --- Unmodified SerenityOS applications ---------------------------------------
 # Built directly from their upstream sources. No source is edited; only the GML
 # is precompiled (the app's own CMakeLists uses compile_gml, which requires a

@@ -70,6 +70,7 @@ public:
         Function<void(i32 window_id)> window_left;
         Function<void(i32 window_id)> window_close_request;
         Function<void(i32 window_id, bool activated)> window_activation;
+        Function<void(i32 window_id, Gfx::IntSize content_size)> window_resize;
         // Menubar (top inset) and popup (menu) input.
         Function<void(i32 window_id, Gfx::IntPoint position)> menubar_motion;
         Function<void(i32 window_id, Gfx::IntPoint position)> menubar_press;
@@ -102,6 +103,11 @@ public:
     void create_window(i32 window_id, Gfx::IntSize, ByteString const& title, bool has_alpha);
     void destroy_window(i32 window_id);
     void set_title(i32 window_id, ByteString const& title);
+
+    // Window state (maps to xdg_toplevel).
+    void set_fullscreen(i32 window_id, bool fullscreen);
+    void set_maximized(i32 window_id, bool maximized);
+    void set_minimized(i32 window_id);
 
     // Attach the client's shared bitmap (given as an fd) and commit.
     void attach_and_commit(i32 window_id, int client_fd, Gfx::IntSize, i32 pitch, bool has_alpha);
@@ -145,7 +151,7 @@ public:
     void on_keyboard_modifiers(u32 depressed, u32 latched, u32 locked, u32 group, u32 serial);
     void on_keyboard_key(u32 key, bool pressed);
     void on_keyboard_focus(wl_surface*, bool entered);
-    void on_toplevel_configure(xdg_toplevel*, bool activated);
+    void on_toplevel_configure(xdg_toplevel*, Gfx::IntSize size, bool activated, bool fullscreen, bool maximized);
     void on_toplevel_close(xdg_toplevel*);
 
     void on_data_offer(wl_data_offer*);

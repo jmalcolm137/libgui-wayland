@@ -115,16 +115,22 @@ static xdg_surface_listener const s_xdg_surface_listener = {
 
 // --- xdg_toplevel -------------------------------------------------------------
 
-static void toplevel_configure(void* data, xdg_toplevel* toplevel, int32_t, int32_t, wl_array* states)
+static void toplevel_configure(void* data, xdg_toplevel* toplevel, int32_t width, int32_t height, wl_array* states)
 {
     auto& self = *static_cast<WaylandClient*>(data);
     bool activated = false;
+    bool fullscreen = false;
+    bool maximized = false;
     auto* state_data = static_cast<uint32_t const*>(states->data);
     for (size_t i = 0; i < states->size / sizeof(uint32_t); ++i) {
-        if (state_data[i] == XDG_TOPLEVEL_STATE_ACTIVATED)
-            activated = true;
+        switch (state_data[i]) {
+        case XDG_TOPLEVEL_STATE_ACTIVATED: activated = true; break;
+        case XDG_TOPLEVEL_STATE_FULLSCREEN: fullscreen = true; break;
+        case XDG_TOPLEVEL_STATE_MAXIMIZED: maximized = true; break;
+        default: break;
+        }
     }
-    self.on_toplevel_configure(toplevel, activated);
+    self.on_toplevel_configure(toplevel, { width, height }, activated, fullscreen, maximized);
 }
 
 static void toplevel_close(void* data, xdg_toplevel* toplevel)
@@ -731,14 +737,25 @@ void WaylandClient::on_keyboard_focus(wl_surface* surface, bool entered)
     m_focused_window = entered ? window_id_for_surface(surface) : -1;
 }
 
-void WaylandClient::on_toplevel_configure(xdg_toplevel* toplevel, bool activated)
+void WaylandClient::on_toplevel_configure(xdg_toplevel* toplevel, Gfx::IntSize size, bool activated, bool fullscreen, bool maximized)
 {
     for (auto const& it : m_windows) {
-        if (it.value->toplevel == toplevel) {
-            if (m_input.window_activation)
-                m_input.window_activation(it.value->window_id, activated);
-            return;
+        auto& w = *it.value;
+        if (w.toplevel != toplevel)
+            continue;
+        if (m_input.window_activation)
+            m_input.window_activation(w.window_id, activated);
+        // The compositor dictates the size when fullscreen/maximized; the
+        // menubar inset is ours, so the client content excludes it.
+        if ((fullscreen || maximized) && size.width() > 0 && size.height() > w.inset) {
+            Gfx::IntSize content { size.width(), size.height() - w.inset };
+            if (content != w.size) {
+                w.size = content;
+                if (m_input.window_resize)
+                    m_input.window_resize(w.window_id, content);
+            }
         }
+        return;
     }
 }
 
@@ -1159,6 +1176,36 @@ void WaylandClient::set_title(i32 window_id, ByteString const& title)
     if (auto* window_surface = find(window_id)) {
         window_surface->title = title;
         xdg_toplevel_set_title(window_surface->toplevel, title.characters());
+        wl_display_flush(m_display);
+    }
+}
+
+void WaylandClient::set_fullscreen(i32 window_id, bool fullscreen)
+{
+    if (auto* window_surface = find(window_id)) {
+        if (fullscreen)
+            xdg_toplevel_set_fullscreen(window_surface->toplevel, nullptr);
+        else
+            xdg_toplevel_unset_fullscreen(window_surface->toplevel);
+        wl_display_flush(m_display);
+    }
+}
+
+void WaylandClient::set_maximized(i32 window_id, bool maximized)
+{
+    if (auto* window_surface = find(window_id)) {
+        if (maximized)
+            xdg_toplevel_set_maximized(window_surface->toplevel);
+        else
+            xdg_toplevel_unset_maximized(window_surface->toplevel);
+        wl_display_flush(m_display);
+    }
+}
+
+void WaylandClient::set_minimized(i32 window_id)
+{
+    if (auto* window_surface = find(window_id)) {
+        xdg_toplevel_set_minimized(window_surface->toplevel);
         wl_display_flush(m_display);
     }
 }

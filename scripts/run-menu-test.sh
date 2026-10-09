@@ -75,6 +75,27 @@ check "Help: About activated an item"             "grep -q 'menu item activated'
 check "Help: About opened a second window"        "[[ \$(grep -c 'create_window' '$RUNTIME/about.app.log') -ge 2 ]]"
 check "Help: app stayed running (dialog)"         "[[ $CASE_EXIT -ne 0 ]]"
 
+# About dialog regression: run it directly so we exercise the GML bitmap load
+# (which hardcodes /res/... and used to abort before the path redirect).
+ABOUT_APP="$BUILD_DIR/bin/libwm-about-test"
+ninja -C "$BUILD_DIR" libwm-about-test >/dev/null
+"$HC" --socket menu-aboutdlg --size 800x600 --timeout 5 \
+    --output "$RUNTIME/aboutdlg.png" > "$RUNTIME/aboutdlg.hc.log" 2>&1 &
+HC_PID=$!
+for _ in $(seq 1 100); do [[ -e "$RUNTIME/menu-aboutdlg" ]] && break; sleep 0.1; done
+set +e
+env XDG_RUNTIME_DIR="$RUNTIME" WAYLAND_DISPLAY="menu-aboutdlg" \
+    SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
+    LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    timeout 6 "$ABOUT_APP" > "$RUNTIME/aboutdlg.app.log" 2>&1
+ABOUT_EXIT=$?
+set -e
+wait "$HC_PID" 2>/dev/null || true
+HC_PID=""
+check "About: widget built (/res redirect works)" "grep -q 'AboutDialogWidget::try_create ok' '$RUNTIME/aboutdlg.app.log'"
+check "About: dialog window created"              "[[ \$(grep -c 'create_window' '$RUNTIME/aboutdlg.app.log') -ge 2 ]]"
+check "About: did not crash"                      "[[ $ABOUT_EXIT -ne 132 && $ABOUT_EXIT -ne 134 ]]"
+
 if [[ $failures -ne 0 ]]; then
     KEEP=1
     echo "==> $failures check(s) failed; logs in $RUNTIME"

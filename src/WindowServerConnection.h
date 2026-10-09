@@ -89,6 +89,9 @@ private:
     void set_window_alpha_hit_threshold(i32 window_id, float threshold) override;
     void set_window_icon_bitmap(i32 window_id, Gfx::ShareableBitmap const& icon) override;
     void set_window_progress(i32 window_id, Optional<i32> const& progress) override;
+    void set_fullscreen(i32 window_id, bool fullscreen) override;
+    void set_maximized(i32 window_id, bool maximized) override;
+    void set_minimized(i32 window_id, bool minimized) override;
     void move_window_to_front(i32 window_id) override;
     Messages::WindowServer::GetGlobalCursorPositionResponse get_global_cursor_position() override;
     Messages::WindowServer::GetColorUnderCursorResponse get_color_under_cursor() override;

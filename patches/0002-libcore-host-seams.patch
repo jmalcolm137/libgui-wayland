@@ -115,3 +115,34 @@ index 08f64ec6..3e7bdd92 100644
      auto socket = TRY(adopt_nonnull_own_or_enomem(new (nothrow) LocalSocket(prevent_sigpipe)));
  
      auto fd = TRY(create_fd(SocketDomain::Local, SocketType::Stream));
+diff --git a/Userland/Libraries/LibCore/System.cpp b/Userland/Libraries/LibCore/System.cpp
+index 1ff2626b..0b3f521a 100644
+--- a/Userland/Libraries/LibCore/System.cpp
++++ b/Userland/Libraries/LibCore/System.cpp
+@@ -607,6 +607,13 @@ ErrorOr<int> openat(int fd, StringView path, int options, mode_t mode)
+ #else
+     // NOTE: We have to ensure that the path is null-terminated.
+     ByteString path_string = path;
++    // Host build: redirect SerenityOS's absolute "/res/..." paths to the
++    // bundled resource root, so code that hardcodes "/res/..." (GML bitmaps,
++    // themes, emoji, ...) works unmodified.
++    if (fd == AT_FDCWD && path.starts_with("/res/"sv)) {
++        if (auto const* root = getenv("SERENITY_RES_ROOT"); root && *root)
++            path_string = ByteString::formatted("{}{}", root, path.substring_view(4));
++    }
+     int rc = ::openat(fd, path_string.characters(), options, mode);
+     if (rc < 0)
+         return Error::from_syscall("open"sv, -errno);
+diff --git a/Userland/Libraries/LibCore/Version.cpp b/Userland/Libraries/LibCore/Version.cpp
+index 2f7d3c0d..35fce12b 100644
+--- a/Userland/Libraries/LibCore/Version.cpp
++++ b/Userland/Libraries/LibCore/Version.cpp
+@@ -26,7 +26,7 @@ ErrorOr<String> read_long_version_string()
+ 
+     return String::formatted("Version {} revision {}", version, git_hash);
+ #else
+-    return "Version 1.0"_string;
++    return "Version 1.0 (Wayland)"_string;
+ #endif
+ }
+ 

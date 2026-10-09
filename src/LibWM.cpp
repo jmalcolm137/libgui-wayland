@@ -155,6 +155,14 @@ static Optional<NonnullOwnPtr<Core::LocalSocket>> make_portal(ByteString const& 
 void initialize()
 {
     ensure_theme_installed();
+
+    // Make SerenityOS's absolute "/res/..." paths resolve to our bundled tree
+    // for code that opens them directly (LibCore::System::openat redirects).
+    if (!getenv("SERENITY_RES_ROOT")) {
+        auto root = resource_root();
+        setenv("SERENITY_RES_ROOT", root.characters(), 0);
+    }
+
     Core::PortalServer::set_connector([](ByteString const& path) {
         return make_portal(path);
     });

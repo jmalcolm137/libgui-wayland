@@ -38,8 +38,10 @@ The shim is called **LibWM**. It sits between `LibGUI`'s WindowServer IPC protoc
   **unmodified Calculator** builds and runs, decorated and movable, on KDE Plasma.
 - **M6 (partly)** — clipboard and menus: done for `text/plain`, `text/uri-list`, and
   `image/png` ↔ `image/x-serenityos` (all verified headlessly in both directions), plus a
-  server-rendered **menubar and dropdown menus** (clicking `File → Quit` works). Submenus,
-  keyboard navigation and config persistence remain.
+  server-rendered **menubar and dropdown menus** with hover highlighting (clicking `File → Quit`
+  works; `Help → About` opens the dialog). Window state (`fullscreen`/`maximize`/`minimize`)
+  and SerenityOS `/res/...` path redirection are in. Submenus, keyboard menu navigation and
+  config persistence remain.
 
 ```sh
 scripts/fetch-serenity.sh              # pinned, blobless, sparse checkout
