@@ -53,6 +53,19 @@ The shim is called **LibWM**. It sits between `LibGUI`'s WindowServer IPC protoc
   (`fullscreen`/`maximize`/`minimize`) and SerenityOS `/res/...` path redirection are in. Long-menu
   scrolling, menu item icons and config persistence remain.
 
+## Remaining work
+
+- **Crisp fractional HiDPI (M8).** LibWM already binds `wp_viewporter` and takes the real
+  logical size from `zxdg_output_v1`. Rendering the client's backing store at the output's
+  device scale (and declaring it via `wp_viewport`/buffer scale) would remove the softness on
+  the fractional (1.75×) panel; today the logical buffer is presented 1:1 and the compositor
+  upscales it.
+- **Menus (M6 remainder).** Scrolling for long menus, and drawing menu-item icons (the model
+  already carries them; only the renderer ignores them).
+- **Config persistence.** The in-process Config portal is in memory only; values are not
+  written to disk between runs.
+- **Theme/font parity, decorations, icons, alpha (M4)** — remaining polish.
+
 ```sh
 scripts/fetch-serenity.sh              # pinned, blobless, sparse checkout
 scripts/fetch-headless-compositor.sh   # pinned clone of xlib-wayland (pure-Wayland compositor)
@@ -61,6 +74,4 @@ scripts/build-libgui.sh                # patches + LibGfx/LibGUI/LibWM/Calculato
 
 `build-libgui.sh` runs the upstream LibGfx test suite and the headless input integration test
 automatically; pass `--no-tests` to skip.
-
-Next: M4 — theme/font parity, decorations, icons, alpha.
 

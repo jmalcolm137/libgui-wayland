@@ -800,6 +800,21 @@ open menus, copy/paste, resize/maximise, HiDPI.
 The state column is kept honest as work proceeds; §6 records every gap found, whether fixed in
 LibWM or shown to be an upstream/host issue.
 
+### 7.1 Remaining work
+
+In rough priority order:
+
+* **Crisp fractional HiDPI (M8).** `wp_viewporter` is already bound and `zxdg_output_v1` gives
+  the real logical size; the remaining step is to render the client's backing store at the
+  output's device scale and declare it (`wp_viewport` / buffer scale), so text is sharp on the
+  1.75× panel instead of being upscaled by the compositor (§3.4, §4.2).
+* **Menus (M6 remainder).** Scrolling for long menus, and drawing menu-item icons (the model
+  already carries them; `MenuController::render_popup` ignores them).
+* **Config persistence.** The in-process Config portal (`ConfigServerConnection`) is an
+  in-memory store; it does not persist to disk between runs.
+* **M4 polish.** Theme/font parity, decorations, icons, alpha.
+* **M7.** A CI matrix around the headless suites.
+
 ---
 
 ## 8. Appendix
