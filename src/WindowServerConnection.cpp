@@ -223,6 +223,7 @@ void WindowServerConnection::create_window(i32 window_id, i32, Gfx::IntRect cons
 
 void WindowServerConnection::set_window_title(i32 window_id, ByteString const& title)
 {
+    dbgln("LibWM: set_window_title id={} title='{}'", window_id, title);
     if (auto* w = window(window_id)) {
         w->title = title;
         WaylandClient::the().set_title(window_id, title);

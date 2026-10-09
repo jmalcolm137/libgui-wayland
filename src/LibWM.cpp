@@ -9,6 +9,7 @@
 #include "ConfigServerConnection.h"
 #include "FileSystemAccessServerConnection.h"
 #include "LaunchServerConnection.h"
+#include "MainThreadInvoker.h"
 #include "WindowServerConnection.h"
 #include <AK/NonnullOwnPtr.h>
 #include <AK/Optional.h>
@@ -107,6 +108,10 @@ static ByteString expanded_portal_path(StringView template_path)
 // wl_data_device.set_selection requires a serial from a recent input event.
 static void start_server_thread()
 {
+    // The file picker runs on the main thread; the server thread needs a way to
+    // hand GUI work over to it. install_main() captures the main thread here.
+    MainThreadInvoker::install_main();
+
     auto make_socketpair = [](int& server_fd) -> int {
         int fds[2];
         if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds) != 0)
@@ -138,6 +143,7 @@ static void start_server_thread()
 
     auto thread = Threading::Thread::try_create([window_server, clipboard_server, launch_server, config_server, file_system_access_server]() -> intptr_t {
         Core::EventLoop loop;
+        MainThreadInvoker::install_server(loop);
 
         // WindowServer first: this connects to Wayland and installs the input
         // callbacks the clipboard also relies on.

@@ -632,11 +632,34 @@ in-process by LibWM, so the app stays unmodified:
   in-memory `domain → group → key` store (persistence to disk is still pending).
 * **FileSystemAccessServer** — `request_file_read_only_approved` asks for access to a
   named file and receives its fd over IPC. `FileSystemAccessServerConnection` opens the
-  path directly; there is no interactive picker on the host.
+  path directly, and for `prompt_open_file`/`prompt_save_file` it shows the real
+  `GUI::FilePicker`, so `File -> Open` works.
 
 Both are enabled by generating their IPC endpoints in the Lagom build and building
 `LibFileSystemAccessClient`; its `add_dependencies(... WindowServer)` line is satisfied by
 a no-op placeholder target. No library source is modified.
+
+### 4.8.1 Showing GUI from the server thread
+
+The picker needs GUI, which belongs to the main thread, but the FS server runs on the LibWM
+server thread — and the server thread must not block, because the picker it is waiting on
+talks back to the WindowServer that same thread owns. `MainThreadInvoker` therefore hands
+work across asynchronously in both directions (`EventLoop::deferred_invoke()` on the other
+thread's loop is thread-safe and wakes it): the FS handler posts "show the picker" to the
+main loop, and the picker's continuation posts "send the reply" back to the server loop.
+This needs the client to be pumping its loop, which it is: `Core::Promise::await()` pumps
+(whereas synchronous calls block on the socket). The sync `expose_window_server_client_id`
+call that precedes the picker request rules out simply moving the whole FS server to the
+main thread.
+
+`GUI::FilePicker::get_filepath` — the API the real FileSystemAccessServer uses — is gated by
+`Badge<FileSystemAccessServer::ConnectionFromClient>`, a private-constructor passkey that
+only that class can construct, so LibWM uses the public `get_open_filepath`/`get_save_filepath`
+instead (losing only automatic parent-centering).
+
+Headless testing this surfaced a compositor bug: the headless compositor sent
+`wl_keyboard.enter` only once, so after opening a dialog it kept routing keys to the old
+surface. That is fixed in xlib-wayland (pin bumped in `scripts/fetch-headless-compositor.sh`).
 
 ### 4.9 Building the applications
 

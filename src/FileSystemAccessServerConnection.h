@@ -12,12 +12,15 @@
 #include <AK/String.h>
 #include <LibCore/File.h>
 #include <LibCore/Socket.h>
+#include <LibGUI/Dialog.h>
+#include <LibGUI/FilePicker.h>
 #include <LibIPC/Connection.h>
 #include <LibIPC/File.h>
 #include <FileSystemAccessServer/FileSystemAccessClientEndpoint.h>
 #include <FileSystemAccessServer/FileSystemAccessServerEndpoint.h>
 
 #include "FileSystemAccessServerDefaultStub.h"
+#include "MainThreadInvoker.h"
 
 namespace LibWM {
 
@@ -65,17 +68,32 @@ private:
         open_and_reply(request_id, path, requested_access);
     }
 
-    void prompt_open_file(i32 request_id, i32, i32, ByteString const&, ByteString const& path_to_view, Core::File::OpenMode requested_access, Optional<Vector<GUI::FileTypeFilter>> const&) override
+    void prompt_open_file(i32 request_id, i32, i32, ByteString const& window_title, ByteString const& path_to_view, Core::File::OpenMode requested_access, Optional<Vector<GUI::FileTypeFilter>> const& allowed_file_types) override
     {
-        if (path_to_view.is_empty())
-            async_handle_prompt_end(request_id, ECANCELED, Optional<IPC::File> {}, Optional<ByteString> {});
-        else
-            open_and_reply(request_id, path_to_view, requested_access);
+        MainThreadInvoker::post_to_main([this, request_id, window_title, path_to_view, requested_access, allowed_file_types] {
+            auto chosen = GUI::FilePicker::get_open_filepath(nullptr, window_title, path_to_view, false, GUI::Dialog::ScreenPosition::Center, allowed_file_types);
+            MainThreadInvoker::post_to_server([this, request_id, chosen, requested_access] {
+                if (!chosen.has_value()) {
+                    async_handle_prompt_end(request_id, ECANCELED, Optional<IPC::File> {}, Optional<ByteString> {});
+                    return;
+                }
+                open_and_reply(request_id, *chosen, requested_access);
+            });
+        });
     }
 
-    void prompt_save_file(i32 request_id, i32, i32, ByteString const&, ByteString const&, ByteString const& path_to_view, Core::File::OpenMode requested_access) override
+    void prompt_save_file(i32 request_id, i32, i32, ByteString const& title, ByteString const& ext, ByteString const& path_to_view, Core::File::OpenMode requested_access) override
     {
-        open_and_reply(request_id, path_to_view, requested_access);
+        MainThreadInvoker::post_to_main([this, request_id, title, ext, path_to_view, requested_access] {
+            auto chosen = GUI::FilePicker::get_save_filepath(nullptr, title, ext, path_to_view, GUI::Dialog::ScreenPosition::Center);
+            MainThreadInvoker::post_to_server([this, request_id, chosen, requested_access] {
+                if (!chosen.has_value()) {
+                    async_handle_prompt_end(request_id, ECANCELED, Optional<IPC::File> {}, Optional<ByteString> {});
+                    return;
+                }
+                open_and_reply(request_id, *chosen, requested_access);
+            });
+        });
     }
 
     Messages::FileSystemAccessServer::ExposeWindowServerClientIdResponse expose_window_server_client_id() override
