@@ -1,0 +1,60 @@
+diff --git a/Userland/Libraries/LibCore/PortalServer.h b/Userland/Libraries/LibCore/PortalServer.h
+new file mode 100644
+index 00000000..2ede63a2
+--- /dev/null
++++ b/Userland/Libraries/LibCore/PortalServer.h
+@@ -0,0 +1,54 @@
++/*
++ * Copyright (c) 2026, libgui-wayland contributors
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#pragma once
++
++#include <AK/ByteString.h>
++#include <AK/Function.h>
++#include <AK/NonnullOwnPtr.h>
++#include <AK/Optional.h>
++#include <AK/Vector.h>
++
++namespace Core {
++
++class LocalSocket;
++
++// Lets an in-process component (LibWM, LibSerenityAudio, ...) answer
++// connections that would normally go to a SerenityOS system service over a
++// Unix socket. Each registered connector is asked in turn and may return an
++// in-process peer or an empty Optional to decline. When no connector handles a
++// path, LocalSocket::connect() falls back to a real filesystem socket, so
++// behaviour is unchanged whenever no connector is installed.
++class PortalServer {
++public:
++    using Connector = Function<Optional<NonnullOwnPtr<LocalSocket>>(ByteString const& path)>;
++
++    static void add_connector(Connector connector)
++    {
++        connectors().append(move(connector));
++    }
++
++    static Optional<NonnullOwnPtr<LocalSocket>> try_connect(ByteString const& path)
++    {
++        for (auto& connector : connectors()) {
++            if (auto socket = connector(path); socket.has_value())
++                return socket;
++        }
++        return {};
++    }
++
++private:
++    // Function-local static; STB_GNU_UNIQUE coalesces this single instance
++    // across the shared libraries that register connectors and the library that
++    // calls try_connect().
++    static Vector<Connector>& connectors()
++    {
++        static Vector<Connector> s_connectors;
++        return s_connectors;
++    }
++};
++
++}
