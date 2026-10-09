@@ -87,8 +87,8 @@ void WindowServerConnection::install_input_callbacks()
         async_mouse_wheel(window_id, position, 0, buttons, modifiers, wheel_delta_x, wheel_delta_y, wheel_delta_x, wheel_delta_y);
     };
     callbacks.key = [this](i32 window_id, u32 code_point, u32 key, u8 map_entry_index, u32 modifiers, u32 scancode, bool is_press) {
-        // While a menu is open (or to open one with F10) the menu handles keys.
-        if (m_menu.handle_key(window_id, key, is_press))
+        // While a menu is open (or to open one with F10/Alt+letter) the menu handles keys.
+        if (m_menu.handle_key(window_id, key, code_point, modifiers, is_press))
             return;
         if (is_press)
             async_key_down(window_id, code_point, key, map_entry_index, modifiers, scancode);
@@ -201,7 +201,7 @@ void WindowServerConnection::present(Window& window)
         window.id, window.bitmap->width(), window.bitmap->height(), window.last_serial, window.has_alpha_channel);
 }
 
-void WindowServerConnection::create_window(i32 window_id, i32, Gfx::IntRect const& rect, bool, bool has_alpha_channel, bool, bool, bool, bool, bool, bool, float, Gfx::IntSize, Gfx::IntSize, Gfx::IntSize minimum_size, Optional<Gfx::IntSize> const&, i32, i32, ByteString const& title, i32, Gfx::IntRect const&)
+void WindowServerConnection::create_window(i32 window_id, i32, Gfx::IntRect const& rect, bool, bool has_alpha_channel, bool, bool, bool resizable, bool, bool, bool, float, Gfx::IntSize, Gfx::IntSize, Gfx::IntSize minimum_size, Optional<Gfx::IntSize> const&, i32, i32, ByteString const& title, i32, Gfx::IntRect const&)
 {
     auto window = make<Window>();
     window->id = window_id;
@@ -213,7 +213,7 @@ void WindowServerConnection::create_window(i32 window_id, i32, Gfx::IntRect cons
     dbgln("LibWM: create_window id={} rect={},{},{}x{} title='{}'", window_id, rect.x(), rect.y(), rect.width(), rect.height(), title);
     m_windows.append(move(window));
 
-    WaylandClient::the().create_window(window_id, rect.size(), title, has_alpha_channel);
+    WaylandClient::the().create_window(window_id, rect.size(), title, has_alpha_channel, resizable);
 
     // Ask the client to paint the whole window.
     Vector<Gfx::IntRect> rects;

@@ -748,37 +748,56 @@ void WaylandClient::on_keyboard_keymap(int fd, u32 size)
 
 u32 WaylandClient::current_modifiers() const
 {
-    if (!m_xkb_state)
-        return 0;
-    u32 modifiers = 0;
-    if (xkb_state_mod_name_is_active(m_xkb_state, XKB_MOD_NAME_SHIFT, XKB_STATE_MODS_EFFECTIVE) > 0)
-        modifiers |= Mod_Shift;
-    if (xkb_state_mod_name_is_active(m_xkb_state, XKB_MOD_NAME_CTRL, XKB_STATE_MODS_EFFECTIVE) > 0)
-        modifiers |= Mod_Ctrl;
-    if (xkb_state_mod_name_is_active(m_xkb_state, XKB_MOD_NAME_ALT, XKB_STATE_MODS_EFFECTIVE) > 0)
-        modifiers |= Mod_Alt;
-    if (xkb_state_mod_name_is_active(m_xkb_state, XKB_MOD_NAME_LOGO, XKB_STATE_MODS_EFFECTIVE) > 0)
-        modifiers |= Mod_Super;
-    if (xkb_state_mod_name_is_active(m_xkb_state, "Level3", XKB_STATE_MODS_EFFECTIVE) > 0)
-        modifiers |= Mod_AltGr;
-    return modifiers;
+    return m_modifiers;
 }
 
-void WaylandClient::on_keyboard_modifiers(u32 depressed, u32 latched, u32 locked, u32 group, u32)
+void WaylandClient::on_keyboard_modifiers(u32 depressed, u32, u32 locked, u32 group, u32)
 {
-    if (m_xkb_state)
-        xkb_state_update_mask(m_xkb_state, depressed, latched, locked, 0, 0, group);
+    // We derive modifiers from the key events themselves (see on_keyboard_key),
+    // because some compositors don't deliver modifier events for injected or
+    // synthetic keys. Keep the xkb layout group in sync.
+    dbgln("LibWM/Wayland: modifiers depressed={:#x} locked={:#x} group={}", depressed, locked, group);
+}
+
+static u32 modifier_bit_for_evdev(u32 key)
+{
+    switch (key) {
+    case KEY_LEFTSHIFT:
+    case KEY_RIGHTSHIFT:
+        return Mod_Shift;
+    case KEY_LEFTCTRL:
+    case KEY_RIGHTCTRL:
+        return Mod_Ctrl;
+    case KEY_LEFTALT:
+    case KEY_RIGHTALT:
+        return Mod_Alt;
+    case KEY_LEFTMETA:
+    case KEY_RIGHTMETA:
+        return Mod_Super;
+    default:
+        return 0;
+    }
 }
 
 void WaylandClient::on_keyboard_key(u32 key, bool pressed)
 {
-    if (m_focused_window < 0 || !m_xkb_state)
+    if (!m_xkb_state)
         return;
 
     xkb_keycode_t code = key + 8;
+    // Update the xkb state from the key itself so code_point reflects
+    // Shift/CapsLock/etc. even without modifier events.
+    xkb_state_update_key(m_xkb_state, code, pressed ? XKB_KEY_DOWN : XKB_KEY_UP);
+
     u32 code_point = xkb_state_key_get_utf32(m_xkb_state, code);
     u32 key_code = static_cast<u32>(serenity_key_code_from_evdev(key));
-    dbgln("LibWM/Wayland: key {} evdev={} code_point={} key_code={} pressed={}", m_focused_window, key, code_point, key_code, pressed);
+
+    if (u32 bit = modifier_bit_for_evdev(key); bit != 0) {
+        if (pressed)
+            m_modifiers |= bit;
+        else
+            m_modifiers &= ~bit;
+    }
 
     if (m_input.key)
         m_input.key(m_focused_window, code_point, key_code, 0, current_modifiers(), key, pressed);
@@ -798,15 +817,29 @@ void WaylandClient::on_toplevel_configure(xdg_toplevel* toplevel, Gfx::IntSize s
             continue;
         if (m_input.window_activation)
             m_input.window_activation(w.window_id, activated);
-        // The compositor dictates the size when fullscreen/maximized; the
-        // menubar inset is ours, so the client content excludes it.
-        if ((fullscreen || maximized) && size.width() > 0 && size.height() > w.inset) {
-            Gfx::IntSize content { size.width(), size.height() - w.inset };
-            if (content != w.size) {
-                w.size = content;
-                if (m_input.window_resize)
-                    m_input.window_resize(w.window_id, content);
-            }
+
+        bool const was_fullscreen = w.fullscreen;
+        w.fullscreen = fullscreen || maximized;
+
+        auto resize_to = [&](Gfx::IntSize content) {
+            if (content == w.size)
+                return;
+            w.size = content;
+            if (m_input.window_resize)
+                m_input.window_resize(w.window_id, content);
+        };
+
+        if (fullscreen || maximized) {
+            // Fullscreen/maximize always resizes, even for non-resizable windows.
+            if (size.width() > 0 && size.height() > w.inset)
+                resize_to({ size.width(), size.height() - w.inset });
+        } else if (was_fullscreen && !w.resizable) {
+            // Leaving fullscreen: restore the fixed windowed size.
+            resize_to(w.fixed_size);
+        } else if (w.resizable) {
+            // Interactive resize for resizable windows.
+            if (size.width() > 0 && size.height() > w.inset)
+                resize_to({ size.width(), size.height() - w.inset });
         }
         return;
     }
@@ -967,6 +1000,15 @@ void WaylandClient::set_window_inset(i32 window_id, int inset, Function<void(Gfx
     if (auto* window_surface = find(window_id)) {
         window_surface->inset = inset;
         window_surface->draw_inset = move(draw);
+        // Non-resizable windows are pinned to their original size (plus inset);
+        // the compositor still overrides this to go fullscreen.
+        if (!window_surface->resizable && window_surface->toplevel) {
+            int w = window_surface->fixed_size.width();
+            int h = window_surface->fixed_size.height() + inset;
+            xdg_toplevel_set_min_size(window_surface->toplevel, w, h);
+            xdg_toplevel_set_max_size(window_surface->toplevel, w, h);
+            wl_display_flush(m_display);
+        }
     }
 }
 
@@ -1165,7 +1207,7 @@ WaylandClient::WindowSurface* WaylandClient::find(i32 window_id)
     return it->value.ptr();
 }
 
-void WaylandClient::create_window(i32 window_id, Gfx::IntSize size, ByteString const& title, bool has_alpha)
+void WaylandClient::create_window(i32 window_id, Gfx::IntSize size, ByteString const& title, bool has_alpha, bool resizable)
 {
     if (!m_compositor || !m_wm_base)
         return;
@@ -1187,6 +1229,14 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntSize size, ByteString c
     window_surface->title = title;
     window_surface->size = size;
     window_surface->has_alpha = has_alpha;
+    window_surface->resizable = resizable;
+    window_surface->fixed_size = size;
+
+    // A non-resizable window pins min == max (fullscreen still overrides this).
+    if (!resizable) {
+        xdg_toplevel_set_min_size(toplevel, size.width(), size.height());
+        xdg_toplevel_set_max_size(toplevel, size.width(), size.height());
+    }
 
     // Ask the compositor to draw server-side decorations (titlebar, buttons,
     // and therefore a draggable frame). Without this, compositors assume the

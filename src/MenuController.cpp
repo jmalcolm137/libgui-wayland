@@ -5,6 +5,7 @@
  */
 
 #include "MenuController.h"
+#include <AK/CharacterTypes.h>
 #include <AK/NonnullOwnPtr.h>
 #include <Kernel/API/KeyCode.h>
 #include <LibGfx/Font/Font.h>
@@ -494,15 +495,49 @@ void MenuController::switch_menubar(i32 window_id, int direction)
         open_popup(menus[next], window_id, menu->menubar_rect);
 }
 
-bool MenuController::handle_key(i32 active_window_id, u32 key_code, bool is_press)
+static u32 menu_accelerator(ByteString const& name)
 {
-    if (m_open_menu_id == -1) {
-        // F10 opens the first menubar menu of the active window.
-        if (is_press && key_code == Key_F10 && active_window_id != -1) {
+    for (size_t i = 0; i < name.length(); ++i) {
+        if (name[i] != '&')
+            continue;
+        if (i + 1 < name.length() && name[i + 1] == '&') {
+            ++i;
+            continue;
+        }
+        if (i + 1 < name.length())
+            return static_cast<u32>(to_ascii_lowercase(name[i + 1]));
+    }
+    return 0;
+}
+
+bool MenuController::handle_key(i32 window_id, u32 key_code, u32 code_point, u32 modifiers, bool is_press)
+{
+    // Alt+letter opens (or switches to) the matching menubar menu.
+    if (modifiers & Mod_Alt) {
+        if (!is_press)
+            return m_open_menu_id != -1;
+        if (code_point != 0 && code_point < 128) {
+            u32 wanted = static_cast<u32>(to_ascii_lowercase(static_cast<char>(code_point)));
             for (auto menu_id : m_menubar_order) {
                 auto* menu = find_menu(menu_id);
-                if (menu && menu->window_id == active_window_id && !menu->items.is_empty()) {
-                    open_popup(menu_id, active_window_id, menu->menubar_rect);
+                if (!menu || menu->window_id != window_id || menu->items.is_empty())
+                    continue;
+                if (menu_accelerator(menu->name) == wanted) {
+                    open_popup(menu_id, window_id, menu->menubar_rect);
+                    return true;
+                }
+            }
+        }
+        return m_open_menu_id != -1;
+    }
+
+    if (m_open_menu_id == -1) {
+        // F10 opens the first menubar menu of the focused window.
+        if (is_press && key_code == Key_F10 && window_id != -1) {
+            for (auto menu_id : m_menubar_order) {
+                auto* menu = find_menu(menu_id);
+                if (menu && menu->window_id == window_id && !menu->items.is_empty()) {
+                    open_popup(menu_id, window_id, menu->menubar_rect);
                     return true;
                 }
             }

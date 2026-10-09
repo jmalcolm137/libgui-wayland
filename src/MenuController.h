@@ -90,7 +90,7 @@ public:
     void on_popup_closed(i32 menu_id);
 
     // Keyboard navigation. Returns true if the key was consumed by a menu.
-    bool handle_key(i32 active_window_id, u32 key_code, bool is_press);
+    bool handle_key(i32 window_id, u32 key_code, u32 code_point, u32 modifiers, bool is_press);
 
     // --- callbacks (wired by WindowServerConnection) ---
     Function<void(i32 menu_id, i32 window_id, Gfx::IntRect anchor, Gfx::IntSize size)> show_popup;

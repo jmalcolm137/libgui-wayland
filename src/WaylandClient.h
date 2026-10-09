@@ -103,7 +103,7 @@ public:
     void write_clipboard(HashMap<ByteString, ByteBuffer> offers);
 
     // Window <-> xdg_toplevel lifecycle.
-    void create_window(i32 window_id, Gfx::IntSize, ByteString const& title, bool has_alpha);
+    void create_window(i32 window_id, Gfx::IntSize, ByteString const& title, bool has_alpha, bool resizable);
     void destroy_window(i32 window_id);
     void set_title(i32 window_id, ByteString const& title);
 
@@ -182,6 +182,9 @@ private:
         ByteString title;
         Gfx::IntSize size;
         bool has_alpha { false };
+        bool resizable { true };
+        bool fullscreen { false };
+        Gfx::IntSize fixed_size;
         Vector<NonnullOwnPtr<BufferRecord>> buffers;
         // Optional top strip (menubar) composited above the client content.
         int inset { 0 };
@@ -238,6 +241,7 @@ private:
     wl_data_source* m_data_source { nullptr };
     HashMap<ByteString, ByteBuffer> m_clipboard_offers;
     u32 m_last_input_serial { 0 };
+    u32 m_modifiers { 0 };
     Function<void(ByteString const&)> m_clipboard_changed;
 
     InputCallbacks m_input;
