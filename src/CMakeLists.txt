@@ -35,6 +35,7 @@ add_custom_command(
 
 add_library(wm SHARED
     LibWM.cpp
+    MenuController.cpp
     WaylandClient.cpp
     WindowServerConnection.cpp
     "${WM_WAYLAND_DIR}/xdg-shell-protocol.c"

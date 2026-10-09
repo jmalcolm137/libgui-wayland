@@ -10,6 +10,7 @@
 #include <Kernel/API/KeyCode.h>
 #include <LibCore/Notifier.h>
 #include <LibGUI/Event.h>
+#include <LibGfx/Painter.h>
 #include <errno.h>
 #include <linux/input-event-codes.h>
 #include <poll.h>
@@ -102,9 +103,10 @@ static wl_output_listener const s_output_listener = {
 
 // --- xdg_surface_object --------------------------------------------------------------
 
-static void xdg_surface_configure(void*, xdg_surface* surface, uint32_t serial)
+static void xdg_surface_configure(void* data, xdg_surface* surface, uint32_t serial)
 {
     xdg_surface_ack_configure(surface, serial);
+    static_cast<WaylandClient*>(data)->on_surface_configured(surface);
 }
 
 static xdg_surface_listener const s_xdg_surface_listener = {
@@ -149,6 +151,24 @@ static void decoration_configure(void*, zxdg_toplevel_decoration_v1*, uint32_t m
 
 static zxdg_toplevel_decoration_v1_listener const s_decoration_listener = {
     .configure = decoration_configure,
+};
+
+// --- xdg_popup ----------------------------------------------------------------
+
+static void popup_configure(void*, xdg_popup*, int32_t x, int32_t y, int32_t width, int32_t height)
+{
+    dbgln("LibWM/Wayland: popup configure at {},{} size {}x{}", x, y, width, height);
+}
+static void popup_done(void* data, xdg_popup* popup)
+{
+    static_cast<WaylandClient*>(data)->on_popup_done(popup);
+}
+static void popup_repositioned(void*, xdg_popup*, uint32_t) { }
+
+static xdg_popup_listener const s_popup_listener = {
+    .configure = popup_configure,
+    .popup_done = popup_done,
+    .repositioned = popup_repositioned,
 };
 
 // --- wl_buffer ----------------------------------------------------------------
@@ -540,15 +560,30 @@ i32 WaylandClient::window_id_for_surface(wl_surface* surface) const
 
 void WaylandClient::on_pointer_enter(wl_surface* surface, Gfx::IntPoint position)
 {
-    m_pointer_window = window_id_for_surface(surface);
+    m_pointer_popup = popup_id_for_surface(surface);
+    m_pointer_window = m_pointer_popup >= 0 ? -1 : window_id_for_surface(surface);
     m_pointer_position = position;
-    dbgln("LibWM/Wayland: pointer entered window {} at {},{}", m_pointer_window, position.x(), position.y());
+    dbgln("LibWM/Wayland: pointer entered {} {} at {},{}",
+        m_pointer_popup >= 0 ? "popup" : "window",
+        m_pointer_popup >= 0 ? m_pointer_popup : m_pointer_window,
+        position.x(), position.y());
+
+    if (m_pointer_popup >= 0) {
+        if (m_input.popup_motion)
+            m_input.popup_motion(m_pointer_popup, position);
+        return;
+    }
     if (m_pointer_window >= 0 && m_input.window_entered)
         m_input.window_entered(m_pointer_window);
 }
 
 void WaylandClient::on_pointer_leave()
 {
+    if (m_pointer_popup >= 0) {
+        m_pointer_popup = -1;
+        m_pointer_window = -1;
+        return;
+    }
     if (m_pointer_window >= 0 && m_input.window_left)
         m_input.window_left(m_pointer_window);
     m_pointer_window = -1;
@@ -557,15 +592,28 @@ void WaylandClient::on_pointer_leave()
 void WaylandClient::on_pointer_motion(Gfx::IntPoint position)
 {
     m_pointer_position = position;
-    if (m_pointer_window >= 0 && m_input.mouse_move)
-        m_input.mouse_move(m_pointer_window, position, m_pointer_buttons, current_modifiers());
+
+    if (m_pointer_popup >= 0) {
+        if (m_input.popup_motion)
+            m_input.popup_motion(m_pointer_popup, position);
+        return;
+    }
+    if (m_pointer_window < 0)
+        return;
+
+    auto* window_surface = find(m_pointer_window);
+    int inset = window_surface ? window_surface->inset : 0;
+    if (inset > 0 && position.y() < inset) {
+        if (m_input.menubar_motion)
+            m_input.menubar_motion(m_pointer_window, position);
+        return;
+    }
+    if (m_input.mouse_move)
+        m_input.mouse_move(m_pointer_window, position.translated(0, -inset), m_pointer_buttons, current_modifiers());
 }
 
 void WaylandClient::on_pointer_button(u32 button, bool pressed)
 {
-    if (m_pointer_window < 0)
-        return;
-
     u32 serenity_button = 0;
     switch (button) {
     case BTN_LEFT: serenity_button = static_cast<u32>(GUI::MouseButton::Primary); break;
@@ -576,25 +624,44 @@ void WaylandClient::on_pointer_button(u32 button, bool pressed)
     default: return;
     }
 
+    if (m_pointer_popup >= 0) {
+        if (m_input.popup_button)
+            m_input.popup_button(m_pointer_popup, m_pointer_position, pressed);
+        return;
+    }
+    if (m_pointer_window < 0)
+        return;
+
+    auto* window_surface = find(m_pointer_window);
+    int inset = window_surface ? window_surface->inset : 0;
+    if (inset > 0 && m_pointer_position.y() < inset) {
+        if (pressed && m_input.menubar_press)
+            m_input.menubar_press(m_pointer_window, m_pointer_position);
+        return;
+    }
+
+    auto position = m_pointer_position.translated(0, -inset);
     if (pressed) {
         m_pointer_buttons |= serenity_button;
-        dbgln("LibWM/Wayland: mouse down window {} at {},{} button={}", m_pointer_window, m_pointer_position.x(), m_pointer_position.y(), serenity_button);
+        dbgln("LibWM/Wayland: mouse down window {} at {},{} button={}", m_pointer_window, position.x(), position.y(), serenity_button);
         if (m_input.mouse_down)
-            m_input.mouse_down(m_pointer_window, m_pointer_position, serenity_button, m_pointer_buttons, current_modifiers());
+            m_input.mouse_down(m_pointer_window, position, serenity_button, m_pointer_buttons, current_modifiers());
     } else {
         m_pointer_buttons &= ~serenity_button;
-        dbgln("LibWM/Wayland: mouse up window {} at {},{} button={}", m_pointer_window, m_pointer_position.x(), m_pointer_position.y(), serenity_button);
+        dbgln("LibWM/Wayland: mouse up window {} at {},{} button={}", m_pointer_window, position.x(), position.y(), serenity_button);
         if (m_input.mouse_up)
-            m_input.mouse_up(m_pointer_window, m_pointer_position, serenity_button, m_pointer_buttons, current_modifiers());
+            m_input.mouse_up(m_pointer_window, position, serenity_button, m_pointer_buttons, current_modifiers());
     }
 }
 
 void WaylandClient::on_pointer_axis(i32 x, i32 y)
 {
-    if (m_pointer_window < 0)
+    if (m_pointer_popup >= 0 || m_pointer_window < 0)
         return;
+    auto* window_surface = find(m_pointer_window);
+    int inset = window_surface ? window_surface->inset : 0;
     if (m_input.mouse_wheel)
-        m_input.mouse_wheel(m_pointer_window, m_pointer_position, m_pointer_buttons, current_modifiers(), x, y);
+        m_input.mouse_wheel(m_pointer_window, m_pointer_position.translated(0, -inset), m_pointer_buttons, current_modifiers(), x, y);
 }
 
 void WaylandClient::on_keyboard_keymap(int fd, u32 size)
@@ -766,6 +833,187 @@ void WaylandClient::on_source_cancelled(wl_data_source* source)
         wl_data_source_destroy(source);
 }
 
+WaylandClient::Popup* WaylandClient::find_popup(i32 popup_id)
+{
+    auto it = m_popups.find(popup_id);
+    return it == m_popups.end() ? nullptr : it->value.ptr();
+}
+
+i32 WaylandClient::popup_id_for_surface(wl_surface* surface) const
+{
+    for (auto const& it : m_popups) {
+        if (it.value->surface == surface)
+            return it.value->id;
+    }
+    return -1;
+}
+
+void WaylandClient::purge_released_buffers(Popup& popup)
+{
+    Vector<NonnullOwnPtr<BufferRecord>> kept;
+    for (auto& record : popup.buffers) {
+        if (record->released)
+            wl_buffer_destroy(record->buffer);
+        else
+            kept.append(move(record));
+    }
+    popup.buffers = move(kept);
+}
+
+void WaylandClient::bind_bitmap(wl_surface* surface, Core::AnonymousBuffer const& buffer, Gfx::Bitmap const& bitmap, Vector<NonnullOwnPtr<BufferRecord>>& buffers)
+{
+    if (!m_shm)
+        return;
+    int fd = dup(buffer.fd());
+    if (fd < 0)
+        return;
+    int stride = bitmap.pitch();
+    auto* pool = wl_shm_create_pool(m_shm, fd, static_cast<int>(stride) * bitmap.height());
+    if (!pool) {
+        close(fd);
+        return;
+    }
+    auto format = bitmap.format() == Gfx::BitmapFormat::BGRA8888 ? WL_SHM_FORMAT_ARGB8888 : WL_SHM_FORMAT_XRGB8888;
+    auto* wl_buf = wl_shm_pool_create_buffer(pool, 0, bitmap.width(), bitmap.height(), stride, format);
+    if (!wl_buf) {
+        wl_shm_pool_destroy(pool);
+        close(fd);
+        return;
+    }
+    wl_surface_attach(surface, wl_buf, 0, 0);
+    wl_surface_damage(surface, 0, 0, bitmap.width(), bitmap.height());
+    // Flush so the pool's fd is transferred before we close our copy.
+    wl_display_flush(m_display);
+    wl_shm_pool_destroy(pool);
+    close(fd);
+
+    auto record = make<BufferRecord>();
+    record->buffer = wl_buf;
+    wl_buffer_add_listener(wl_buf, &s_buffer_listener, record.ptr());
+    buffers.append(move(record));
+}
+
+void WaylandClient::set_window_inset(i32 window_id, int inset, Function<void(Gfx::Bitmap&, Gfx::IntRect)> draw)
+{
+    if (auto* window_surface = find(window_id)) {
+        window_surface->inset = inset;
+        window_surface->draw_inset = move(draw);
+    }
+}
+
+void WaylandClient::create_popup(i32 popup_id, i32 parent_window_id, Gfx::IntRect anchor, Gfx::IntSize size)
+{
+    auto* parent = find(parent_window_id);
+    if (!parent || !m_compositor || !m_wm_base || size.is_empty())
+        return;
+
+    auto* surface = wl_compositor_create_surface(m_compositor);
+    auto* xdg_surface = xdg_wm_base_get_xdg_surface(m_wm_base, surface);
+    xdg_surface_add_listener(xdg_surface, &s_xdg_surface_listener, this);
+
+    auto* positioner = xdg_wm_base_create_positioner(m_wm_base);
+    xdg_positioner_set_size(positioner, size.width(), size.height());
+    xdg_positioner_set_anchor_rect(positioner, anchor.x(), anchor.y(), anchor.width(), anchor.height());
+    xdg_positioner_set_anchor(positioner, XDG_POSITIONER_ANCHOR_BOTTOM_LEFT);
+    xdg_positioner_set_gravity(positioner, XDG_POSITIONER_GRAVITY_BOTTOM_RIGHT);
+    xdg_positioner_set_constraint_adjustment(positioner, XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_X | XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_Y);
+
+    auto* popup = xdg_surface_get_popup(xdg_surface, parent->xdg_surface_object, positioner);
+    xdg_positioner_destroy(positioner);
+    xdg_popup_add_listener(popup, &s_popup_listener, this);
+    if (m_seat)
+        xdg_popup_grab(popup, m_seat, m_last_input_serial);
+    wl_surface_commit(surface);
+
+    auto p = make<Popup>();
+    p->id = popup_id;
+    p->surface = surface;
+    p->xdg_surface_object = xdg_surface;
+    p->popup = popup;
+    m_popups.set(popup_id, move(p));
+    wl_display_flush(m_display);
+    dbgln("LibWM/Wayland: popup {} created ({}x{}) at {},{}", popup_id, size.width(), size.height(), anchor.x(), anchor.y());
+}
+
+void WaylandClient::present_popup(i32 popup_id, Gfx::Bitmap const& source)
+{
+    auto* p = find_popup(popup_id);
+    if (!p || !m_shm || source.size().is_empty())
+        return;
+    purge_released_buffers(*p);
+
+    size_t bytes = source.pitch() * source.height();
+    auto buffer = Core::AnonymousBuffer::create_with_size(bytes);
+    if (buffer.is_error())
+        return;
+    p->buffer = buffer.release_value();
+
+    auto bitmap = Gfx::Bitmap::create_with_anonymous_buffer(Gfx::BitmapFormat::BGRA8888, p->buffer, source.size(), 1);
+    if (bitmap.is_error())
+        return;
+    p->bitmap = bitmap.release_value();
+    memcpy(p->bitmap->scanline(0), source.scanline(0), bytes);
+
+    // The compositor requires an xdg_surface to be configured before a buffer is
+    // attached; defer until the configure event arrives.
+    if (!p->configured) {
+        p->pending = p->bitmap;
+        return;
+    }
+
+    bind_bitmap(p->surface, p->buffer, *p->bitmap, p->buffers);
+    wl_surface_commit(p->surface);
+    wl_display_flush(m_display);
+}
+
+void WaylandClient::on_surface_configured(xdg_surface* surface)
+{
+    for (auto const& it : m_popups) {
+        auto& popup = *it.value;
+        if (popup.xdg_surface_object != surface)
+            continue;
+        popup.configured = true;
+        if (popup.pending) {
+            bind_bitmap(popup.surface, popup.buffer, *popup.bitmap, popup.buffers);
+            wl_surface_commit(popup.surface);
+            wl_display_flush(m_display);
+            popup.pending = nullptr;
+        }
+        return;
+    }
+}
+
+void WaylandClient::destroy_popup(i32 popup_id)
+{
+    auto it = m_popups.find(popup_id);
+    if (it == m_popups.end())
+        return;
+    auto& popup = *it->value;
+    for (auto& record : popup.buffers) {
+        if (record->buffer)
+            wl_buffer_destroy(record->buffer);
+    }
+    if (popup.popup)
+        xdg_popup_destroy(popup.popup);
+    if (popup.xdg_surface_object)
+        xdg_surface_destroy(popup.xdg_surface_object);
+    if (popup.surface)
+        wl_surface_destroy(popup.surface);
+    m_popups.remove(it);
+    wl_display_flush(m_display);
+}
+
+void WaylandClient::on_popup_done(xdg_popup* popup)
+{
+    for (auto const& it : m_popups) {
+        if (it.value->popup == popup) {
+            if (m_input.popup_closed)
+                m_input.popup_closed(it.value->id);
+            return;
+        }
+    }
+}
+
 ErrorOr<ByteBuffer> WaylandClient::read_clipboard(ByteString& out_mime_type)
 {
     out_mime_type = {};
@@ -935,6 +1183,38 @@ void WaylandClient::attach_and_commit(i32 window_id, int client_fd, Gfx::IntSize
         return;
 
     purge_released_buffers(*window_surface);
+
+    // If the window has a top inset (menubar), compose it above the client's
+    // content into a single buffer. Otherwise attach the client's buffer as-is.
+    if (window_surface->inset > 0 && window_surface->draw_inset) {
+        int total_height = size.height() + window_surface->inset;
+        size_t bytes = static_cast<size_t>(size.width()) * 4 * static_cast<size_t>(total_height);
+        auto buffer = Core::AnonymousBuffer::create_with_size(bytes);
+        if (buffer.is_error())
+            return;
+        window_surface->composed_buffer = buffer.release_value();
+        auto composed = Gfx::Bitmap::create_with_anonymous_buffer(Gfx::BitmapFormat::BGRA8888, window_surface->composed_buffer, { size.width(), total_height }, 1);
+        if (composed.is_error())
+            return;
+        window_surface->composed_bitmap = composed.release_value();
+        auto& destination = *window_surface->composed_bitmap;
+
+        size_t client_bytes = static_cast<size_t>(pitch) * static_cast<size_t>(size.height());
+        auto* source = static_cast<u8 const*>(mmap(nullptr, client_bytes, PROT_READ, MAP_SHARED, client_fd, 0));
+        if (source == MAP_FAILED)
+            return;
+        for (int y = 0; y < size.height(); ++y)
+            memcpy(destination.scanline(window_surface->inset + y), source + static_cast<size_t>(y) * pitch, static_cast<size_t>(size.width()) * 4);
+        munmap(const_cast<u8*>(source), client_bytes);
+
+        window_surface->draw_inset(destination, { 0, 0, size.width(), window_surface->inset });
+
+        bind_bitmap(window_surface->surface, window_surface->composed_buffer, destination, window_surface->buffers);
+        wl_surface_commit(window_surface->surface);
+        wl_display_flush(m_display);
+        dbgln("LibWM/Wayland: presented window {} ({}x{} incl. {}px inset)", window_id, size.width(), total_height, window_surface->inset);
+        return;
+    }
 
     int fd = dup(client_fd);
     if (fd < 0)

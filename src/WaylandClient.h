@@ -15,6 +15,7 @@
 #include <AK/Span.h>
 #include <AK/RefPtr.h>
 #include <AK/Vector.h>
+#include <LibCore/AnonymousBuffer.h>
 #include <LibGfx/Point.h>
 #include <LibGfx/Size.h>
 
@@ -32,6 +33,7 @@ struct wl_registry;
 struct wl_seat;
 struct wl_shm;
 struct wl_surface;
+struct xdg_popup;
 struct xdg_surface;
 struct xdg_toplevel;
 struct xdg_wm_base;
@@ -68,6 +70,12 @@ public:
         Function<void(i32 window_id)> window_left;
         Function<void(i32 window_id)> window_close_request;
         Function<void(i32 window_id, bool activated)> window_activation;
+        // Menubar (top inset) and popup (menu) input.
+        Function<void(i32 window_id, Gfx::IntPoint position)> menubar_motion;
+        Function<void(i32 window_id, Gfx::IntPoint position)> menubar_press;
+        Function<void(i32 popup_id, Gfx::IntPoint position)> popup_motion;
+        Function<void(i32 popup_id, Gfx::IntPoint position, bool pressed)> popup_button;
+        Function<void(i32 popup_id)> popup_closed;
     };
 
     static WaylandClient& the();
@@ -97,6 +105,15 @@ public:
 
     // Attach the client's shared bitmap (given as an fd) and commit.
     void attach_and_commit(i32 window_id, int client_fd, Gfx::IntSize, i32 pitch, bool has_alpha);
+
+    // Reserve a strip at the top of the window (a menubar) drawn by `draw`,
+    // with the client's content shifted down by `inset` pixels.
+    void set_window_inset(i32 window_id, int inset, Function<void(Gfx::Bitmap&, Gfx::IntRect)> draw);
+
+    // Popup surfaces for server-rendered menus.
+    void create_popup(i32 popup_id, i32 parent_window_id, Gfx::IntRect anchor, Gfx::IntSize size);
+    void present_popup(i32 popup_id, Gfx::Bitmap const& bitmap);
+    void destroy_popup(i32 popup_id);
 
     // Wayland event dispatch (registered on the owning event loop).
     void dispatch();
@@ -136,6 +153,8 @@ public:
     void on_selection(wl_data_offer*);
     void on_source_send(wl_data_source*, char const* mime_type, int fd);
     void on_source_cancelled(wl_data_source*);
+    void on_popup_done(xdg_popup*);
+    void on_surface_configured(xdg_surface*);
     void note_input_serial(u32 serial) { m_last_input_serial = serial; }
 
 private:
@@ -151,10 +170,31 @@ private:
         Gfx::IntSize size;
         bool has_alpha { false };
         Vector<NonnullOwnPtr<BufferRecord>> buffers;
+        // Optional top strip (menubar) composited above the client content.
+        int inset { 0 };
+        Function<void(Gfx::Bitmap&, Gfx::IntRect)> draw_inset;
+        Core::AnonymousBuffer composed_buffer;
+        RefPtr<Gfx::Bitmap> composed_bitmap;
+    };
+
+    struct Popup {
+        i32 id { -1 };
+        wl_surface* surface { nullptr };
+        xdg_surface* xdg_surface_object { nullptr };
+        xdg_popup* popup { nullptr };
+        bool configured { false };
+        Core::AnonymousBuffer buffer;
+        RefPtr<Gfx::Bitmap> bitmap;
+        RefPtr<Gfx::Bitmap> pending;
+        Vector<NonnullOwnPtr<BufferRecord>> buffers;
     };
 
     WindowSurface* find(i32 window_id);
+    Popup* find_popup(i32 popup_id);
+    i32 popup_id_for_surface(wl_surface*) const;
     void purge_released_buffers(WindowSurface&);
+    void purge_released_buffers(Popup&);
+    void bind_bitmap(wl_surface*, Core::AnonymousBuffer const&, Gfx::Bitmap const&, Vector<NonnullOwnPtr<BufferRecord>>&);
     u32 current_modifiers() const;
     void maybe_create_data_device();
     ByteString preferred_mime_for(wl_data_offer*) const;
@@ -196,6 +236,8 @@ private:
     int m_scale { 1 };
 
     HashMap<i32, NonnullOwnPtr<WindowSurface>> m_windows;
+    HashMap<i32, NonnullOwnPtr<Popup>> m_popups;
+    i32 m_pointer_popup { -1 };
 };
 
 }

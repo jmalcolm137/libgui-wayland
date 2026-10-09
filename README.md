@@ -36,9 +36,10 @@ The shim is called **LibWM**. It sits between `LibGUI`'s WindowServer IPC protoc
   Serenity `KeyCode`/modifiers), focus/activation/close handled, and the full input path is
   verified headlessly (the compositor injects a click; the widget receives it). The
   **unmodified Calculator** builds and runs, decorated and movable, on KDE Plasma.
-- **M6 (partly)** — native clipboard: done for `text/plain`, `text/uri-list`, and
-  `image/png` ↔ `image/x-serenityos` (all verified headlessly in both directions). Menus/popups
-  and config remain.
+- **M6 (partly)** — clipboard and menus: done for `text/plain`, `text/uri-list`, and
+  `image/png` ↔ `image/x-serenityos` (all verified headlessly in both directions), plus a
+  server-rendered **menubar and dropdown menus** (clicking `File → Quit` works). Submenus,
+  keyboard navigation and config persistence remain.
 
 ```sh
 scripts/fetch-serenity.sh              # pinned, blobless, sparse checkout

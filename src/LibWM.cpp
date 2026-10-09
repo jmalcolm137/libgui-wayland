@@ -59,6 +59,11 @@ static void ensure_theme_installed()
     } else {
         dbgln("LibWM: failed to load system theme: {}", buffer.error());
     }
+
+    // The server draws the menubar and menus, so it needs fonts of its own.
+    Gfx::FontDatabase::set_default_font_query("Katica 10 400 0"sv);
+    Gfx::FontDatabase::set_fixed_width_font_query("Csilla 10 400 0"sv);
+    Gfx::FontDatabase::set_window_title_font_query("Katica 10 700 0"sv);
 }
 
 static ByteString expanded_portal_path(StringView template_path)

@@ -566,7 +566,28 @@ and **`text/uri-list`** against a native `libwayland-client` peer
 LibGUI sees), then the peer reads what our app published. This runs as part of the build
 (`scripts/run-clipboard-test.sh`).
 
-### 4.6 Building the applications
+### 4.6 Menus
+
+In SerenityOS the **menubar and dropdown menus are drawn by the WindowServer**, not the
+client: LibGUI sends only the menu model (and, for context menus, a `popup_menu` request).
+LibWM therefore renders them itself with LibGfx:
+
+* **Model.** `MenuController` keeps the menus and items (`create_menu`, `add_menu_item`,
+  separators, checkable/checked/default, shortcuts, submenu ids).
+* **Menubar.** Windows with menus get a 20 px top **inset**. The client's content is composited
+  below it into one buffer, and the menubar (`File Edit …`) is drawn into the strip. Pointer
+  events over the strip are handled by LibWM; content coordinates are shifted down by the
+  inset before being sent to the client.
+* **Dropdowns.** A menubar click opens the menu in an `xdg_popup` (`xdg_positioner` anchored at
+  the menubar item), with an input grab. Hover highlights items and sends
+  `menu_item_entered`/`menu_item_left`; clicking sends `menu_item_activated`; dismissal sends
+  `menu_visibility_did_change`. Context menus (`popup_menu`) use the active window as the parent.
+
+Verified headlessly: clicking `File` opens a popup, and clicking `Quit` in it activates the
+item (the app exits) — `scripts/run-menu-test.sh`. Known gaps: submenus, keyboard navigation
+and scrolling long menus are not implemented yet, and menu item icons are not drawn.
+
+### 4.7 Building the applications
 
 Serenity app `CMakeLists.txt` use `serenity_app`, `serenity_component`, `compile_gml`,
 `serenity_bin`, and `embed_resource`. Under Lagom these resolve through `Meta/CMake/`, so
@@ -577,7 +598,7 @@ embed). Any such accommodation is a *build flag or shim macro*, never an app sou
 `Calculator` needs `LibCore LibCrypto LibDesktop LibGfx LibGUI LibMain LibURL`.
 `PDFViewer` adds `LibPDF LibFileSystemAccessClient LibConfig`.
 
-### 4.7 Prefixes and running
+### 4.8 Prefixes and running
 
 Two user-local prefixes, no root (mirroring the sibling project):
 
@@ -684,7 +705,7 @@ open menus, copy/paste, resize/maximise, HiDPI.
 | M3 | Pointer/keyboard input from `wl_seat`, focus/activation, close request; then **Calculator** | ✅ input + unmodified **Calculator** renders & runs on Plasma (§4.3) |
 | M4 | Theme/font parity; decorations; icons; alpha | ⬜ |
 | M5 | **PDFViewer** (LibPDF, scrolling, toolbars, file access) | ⬜ |
-| M6 | Menus/popups, clipboard, config persistence | 🟡 native clipboard done (§4.5); menus/popups and config pending |
+| M6 | Menus/popups, clipboard, config persistence | 🟡 native clipboard + server-rendered menubar/popups done (§4.5, §4.6); submenus/keyboard/config pending |
 | M7 | Live Plasma session, headless test harness, CI matrix | 🟡 headless compositor + input test integrated (§5.2); CI matrix pending |
 | M8 | Crisp HiDPI (plumb an output scale into LibGUI's backing store) | ⬜ |
 

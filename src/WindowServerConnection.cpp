@@ -8,6 +8,7 @@
 #include "WaylandClient.h"
 #include <LibCore/AnonymousBuffer.h>
 #include <LibGfx/ImageFormats/PNGWriter.h>
+#include <LibGfx/Painter.h>
 #include <LibGfx/SystemTheme.h>
 #include <fcntl.h>
 #include <stdlib.h>
@@ -32,6 +33,7 @@ void WindowServerConnection::remove_window(i32 id)
 void WindowServerConnection::send_fast_greet()
 {
     install_input_callbacks();
+    install_menu_callbacks();
 
     auto& wayland = WaylandClient::the();
     if (auto result = wayland.ensure_connected(); result.is_error())
@@ -86,13 +88,60 @@ void WindowServerConnection::install_input_callbacks()
     callbacks.window_left = [this](i32 window_id) { async_window_left(window_id); };
     callbacks.window_close_request = [this](i32 window_id) { async_window_close_request(window_id); };
     callbacks.window_activation = [this](i32 window_id, bool activated) {
-        if (activated)
+        if (activated) {
+            m_active_window_id = window_id;
             async_window_activated(window_id);
-        else
+        } else {
+            if (m_active_window_id == window_id)
+                m_active_window_id = -1;
             async_window_deactivated(window_id);
+        }
     };
+    callbacks.menubar_motion = [this](i32 window_id, Gfx::IntPoint position) { m_menu.on_menubar_motion(window_id, position); };
+    callbacks.menubar_press = [this](i32 window_id, Gfx::IntPoint position) { m_menu.on_menubar_press(window_id, position); };
+    callbacks.popup_motion = [this](i32 popup_id, Gfx::IntPoint position) { m_menu.on_popup_motion(popup_id, position); };
+    callbacks.popup_button = [this](i32 popup_id, Gfx::IntPoint position, bool pressed) { m_menu.on_popup_button(popup_id, position, pressed); };
+    callbacks.popup_closed = [this](i32 popup_id) { m_menu.on_popup_closed(popup_id); };
 
     WaylandClient::the().set_input_callbacks(move(callbacks));
+}
+
+void WindowServerConnection::install_menu_callbacks()
+{
+    m_menu.show_popup = [this](i32 menu_id, i32 window_id, Gfx::IntRect anchor, Gfx::IntSize size) {
+        WaylandClient::the().create_popup(menu_id, window_id, anchor, size);
+        auto bitmap = Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, size);
+        if (bitmap.is_error())
+            return;
+        Gfx::Painter painter(*bitmap.value());
+        m_menu.render_popup(menu_id, painter);
+        WaylandClient::the().present_popup(menu_id, *bitmap.value());
+    };
+    m_menu.hide_popup = [](i32 menu_id) { WaylandClient::the().destroy_popup(menu_id); };
+    m_menu.item_activated = [this](i32 menu_id, u32 identifier) { async_menu_item_activated(menu_id, identifier); };
+    m_menu.item_entered = [this](i32 menu_id, u32 identifier) { async_menu_item_entered(menu_id, identifier); };
+    m_menu.item_left = [this](i32 menu_id, u32 identifier) { async_menu_item_left(menu_id, identifier); };
+    m_menu.visibility_changed = [this](i32 menu_id, bool visible) { async_menu_visibility_did_change(menu_id, visible); };
+    m_menu.menubar_changed = [this](i32 window_id) { update_window_menubar(window_id); };
+}
+
+void WindowServerConnection::update_window_menubar(i32 window_id)
+{
+    int inset = m_menu.window_has_menubar(window_id) ? m_menu.menubar_height() : 0;
+    auto& wayland = WaylandClient::the();
+    if (inset > 0) {
+        wayland.set_window_inset(window_id, inset, [this, window_id](Gfx::Bitmap& bitmap, Gfx::IntRect rect) {
+            Gfx::Painter painter(bitmap);
+            m_menu.render_menubar(window_id, painter, rect);
+        });
+    } else {
+        wayland.set_window_inset(window_id, 0, {});
+    }
+    if (auto* w = window(window_id)) {
+        Vector<Gfx::IntRect> rects;
+        rects.append({ 0, 0, w->rect.width(), w->rect.height() });
+        send_paint(*w, move(rects));
+    }
 }
 
 void WindowServerConnection::present(Window& window)
@@ -323,6 +372,74 @@ Messages::WindowServer::SetWallpaperResponse WindowServerConnection::set_wallpap
 Messages::WindowServer::StartDragResponse WindowServerConnection::start_drag(ByteString const&, HashMap<String, ByteBuffer> const&, Gfx::ShareableBitmap const&)
 {
     return Messages::WindowServer::StartDragResponse { false };
+}
+
+void WindowServerConnection::create_menu(i32 menu_id, String const& name, i32 minimum_width)
+{
+    m_menu.create_menu(menu_id, name.to_byte_string(), minimum_width);
+}
+
+void WindowServerConnection::set_menu_name(i32 menu_id, String const& name)
+{
+    m_menu.set_menu_name(menu_id, name.to_byte_string());
+}
+
+void WindowServerConnection::set_menu_minimum_width(i32 menu_id, i32 minimum_width)
+{
+    m_menu.set_menu_minimum_width(menu_id, minimum_width);
+}
+
+void WindowServerConnection::destroy_menu(i32 menu_id)
+{
+    m_menu.destroy_menu(menu_id);
+}
+
+void WindowServerConnection::add_menu(i32 window_id, i32 menu_id)
+{
+    m_menu.add_menu(window_id, menu_id);
+}
+
+void WindowServerConnection::add_menu_item(i32 menu_id, i32 identifier, i32 submenu_id, ByteString const& text, bool enabled, bool visible, bool checkable, bool checked, bool is_default, ByteString const& shortcut, Gfx::ShareableBitmap const&, bool exclusive)
+{
+    m_menu.add_menu_item(menu_id, identifier, submenu_id, text, enabled, visible, checkable, checked, is_default, shortcut, exclusive);
+}
+
+void WindowServerConnection::add_menu_separator(i32 menu_id)
+{
+    m_menu.add_menu_separator(menu_id);
+}
+
+void WindowServerConnection::update_menu_item(i32 menu_id, i32 identifier, i32 submenu_id, ByteString const& text, bool enabled, bool visible, bool checkable, bool checked, bool is_default, ByteString const& shortcut, Gfx::ShareableBitmap const&)
+{
+    m_menu.update_menu_item(menu_id, identifier, submenu_id, text, enabled, visible, checkable, checked, is_default, shortcut);
+}
+
+void WindowServerConnection::remove_menu_item(i32 menu_id, i32 identifier)
+{
+    m_menu.remove_menu_item(menu_id, identifier);
+}
+
+void WindowServerConnection::flash_menubar_menu(i32, i32)
+{
+}
+
+void WindowServerConnection::popup_menu(i32 menu_id, Gfx::IntPoint screen_position, Gfx::IntRect const& button_rect)
+{
+    // For menubar menus the owner window is known; context menus use the active
+    // window as the xdg_popup parent. Wayland clients don't know global screen
+    // coordinates, so positions are treated as parent-surface-relative.
+    i32 parent = m_menu.menu_window(menu_id);
+    if (parent < 0)
+        parent = m_active_window_id;
+    if (parent < 0)
+        return;
+    auto anchor = button_rect.is_empty() ? Gfx::IntRect { screen_position, { 1, 1 } } : button_rect;
+    m_menu.open_popup(menu_id, parent, anchor);
+}
+
+void WindowServerConnection::dismiss_menu(i32 menu_id)
+{
+    m_menu.close_menu(menu_id);
 }
 
 }
