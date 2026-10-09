@@ -6,6 +6,7 @@
 
 #include "MenuController.h"
 #include <AK/NonnullOwnPtr.h>
+#include <Kernel/API/KeyCode.h>
 #include <LibGfx/Font/Font.h>
 #include <LibGfx/Font/FontDatabase.h>
 #include <LibGfx/Painter.h>
@@ -440,6 +441,104 @@ void MenuController::on_popup_closed(i32 menu_id)
         visibility_changed(menu_id, false);
     if (window_id != -1 && menubar_changed)
         menubar_changed(window_id);
+}
+
+void MenuController::move_selection(Menu& menu, int delta)
+{
+    int const count = menu.items.size();
+    if (count == 0)
+        return;
+    int index = menu.hovered_valid ? menu.hovered : (delta > 0 ? -1 : count);
+    for (int step = 0; step < count; ++step) {
+        index = (index + delta + count) % count;
+        auto& item = menu.items[index];
+        if (item.is_separator || !item.enabled)
+            continue;
+        int previous = menu.hovered_valid ? menu.hovered : -1;
+        if (previous >= 0 && previous < count && item_left)
+            item_left(menu.id, menu.items[previous].identifier);
+        menu.hovered = index;
+        menu.hovered_valid = true;
+        if (item_entered)
+            item_entered(menu.id, item.identifier);
+        if (redraw_popup)
+            redraw_popup(menu.id);
+        return;
+    }
+}
+
+void MenuController::activate_selected(Menu& menu)
+{
+    if (!menu.hovered_valid || menu.hovered < 0 || menu.hovered >= static_cast<int>(menu.items.size()))
+        return;
+    auto& item = menu.items[menu.hovered];
+    if (item.enabled && !item.is_separator && item_activated)
+        item_activated(menu.id, item.identifier);
+    close_open_menu();
+}
+
+void MenuController::switch_menubar(i32 window_id, int direction)
+{
+    Vector<i32> menus;
+    for (auto menu_id : m_menubar_order) {
+        auto* menu = find_menu(menu_id);
+        if (menu && menu->window_id == window_id && !menu->items.is_empty())
+            menus.append(menu_id);
+    }
+    if (menus.is_empty())
+        return;
+    auto current = menus.find_first_index(m_open_menu_id);
+    int index = current.has_value() ? static_cast<int>(current.value()) : 0;
+    int next = (index + direction + static_cast<int>(menus.size())) % static_cast<int>(menus.size());
+    if (auto* menu = find_menu(menus[next]))
+        open_popup(menus[next], window_id, menu->menubar_rect);
+}
+
+bool MenuController::handle_key(i32 active_window_id, u32 key_code, bool is_press)
+{
+    if (m_open_menu_id == -1) {
+        // F10 opens the first menubar menu of the active window.
+        if (is_press && key_code == Key_F10 && active_window_id != -1) {
+            for (auto menu_id : m_menubar_order) {
+                auto* menu = find_menu(menu_id);
+                if (menu && menu->window_id == active_window_id && !menu->items.is_empty()) {
+                    open_popup(menu_id, active_window_id, menu->menubar_rect);
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // A menu is open: consume every key so the client doesn't react, and
+    // navigate on press.
+    if (!is_press)
+        return true;
+    auto* menu = find_menu(m_open_menu_id);
+    if (!menu)
+        return false;
+    switch (key_code) {
+    case Key_Up:
+        move_selection(*menu, -1);
+        return true;
+    case Key_Down:
+        move_selection(*menu, 1);
+        return true;
+    case Key_Return:
+        activate_selected(*menu);
+        return true;
+    case Key_Escape:
+        close_open_menu();
+        return true;
+    case Key_Left:
+        switch_menubar(menu->window_id, -1);
+        return true;
+    case Key_Right:
+        switch_menubar(menu->window_id, 1);
+        return true;
+    default:
+        return true;
+    }
 }
 
 }

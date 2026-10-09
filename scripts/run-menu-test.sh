@@ -75,6 +75,36 @@ check "Help: About activated an item"             "grep -q 'menu item activated'
 check "Help: About opened a second window"        "[[ \$(grep -c 'create_window' '$RUNTIME/about.app.log') -ge 2 ]]"
 check "Help: app stayed running (dialog)"         "[[ $CASE_EXIT -ne 0 ]]"
 
+# Keyboard navigation: F10 opens the first menu, Down selects Quit, Enter runs it.
+cat > "$RUNTIME/kbd.input" <<'EOF'
+sleep 1200
+key PRESS 68
+key RELEASE 68
+sleep 400
+key PRESS 108
+key RELEASE 108
+sleep 400
+key PRESS 28
+key RELEASE 28
+sleep 800
+EOF
+"$HC" --socket menu-kbd --size 800x600 --timeout 6 \
+    --output "$RUNTIME/kbd.png" --input "$RUNTIME/kbd.input" > "$RUNTIME/kbd.hc.log" 2>&1 &
+HC_PID=$!
+for _ in $(seq 1 100); do [[ -e "$RUNTIME/menu-kbd" ]] && break; sleep 0.1; done
+set +e
+env XDG_RUNTIME_DIR="$RUNTIME" WAYLAND_DISPLAY="menu-kbd" \
+    SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
+    LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    timeout 7 "$APP" > "$RUNTIME/kbd.app.log" 2>&1
+KBD_EXIT=$?
+set -e
+wait "$HC_PID" 2>/dev/null || true
+HC_PID=""
+check "keyboard: F10 opened a menu"               "grep -q 'popup .* created' '$RUNTIME/kbd.app.log'"
+check "keyboard: Enter activated an item"         "grep -q 'menu item activated' '$RUNTIME/kbd.app.log'"
+check "keyboard: app exited after activation"     "[[ $KBD_EXIT -eq 0 ]]"
+
 # About dialog regression: run it directly so we exercise the GML bitmap load
 # (which hardcodes /res/... and used to abort before the path redirect).
 ABOUT_APP="$BUILD_DIR/bin/libwm-about-test"

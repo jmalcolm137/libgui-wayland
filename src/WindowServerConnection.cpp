@@ -87,6 +87,9 @@ void WindowServerConnection::install_input_callbacks()
         async_mouse_wheel(window_id, position, 0, buttons, modifiers, wheel_delta_x, wheel_delta_y, wheel_delta_x, wheel_delta_y);
     };
     callbacks.key = [this](i32 window_id, u32 code_point, u32 key, u8 map_entry_index, u32 modifiers, u32 scancode, bool is_press) {
+        // While a menu is open (or to open one with F10) the menu handles keys.
+        if (m_menu.handle_key(window_id, key, is_press))
+            return;
         if (is_press)
             async_key_down(window_id, code_point, key, map_entry_index, modifiers, scancode);
         else

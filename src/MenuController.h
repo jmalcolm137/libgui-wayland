@@ -89,6 +89,9 @@ public:
     void on_popup_button(i32 menu_id, Gfx::IntPoint position, bool pressed);
     void on_popup_closed(i32 menu_id);
 
+    // Keyboard navigation. Returns true if the key was consumed by a menu.
+    bool handle_key(i32 active_window_id, u32 key_code, bool is_press);
+
     // --- callbacks (wired by WindowServerConnection) ---
     Function<void(i32 menu_id, i32 window_id, Gfx::IntRect anchor, Gfx::IntSize size)> show_popup;
     Function<void(i32 menu_id)> hide_popup;
@@ -106,6 +109,9 @@ private:
     void layout_popup(Menu&);
     int item_index_at(Menu const&, Gfx::IntPoint) const;
     void close_open_menu();
+    void move_selection(Menu&, int delta);
+    void activate_selected(Menu&);
+    void switch_menubar(i32 window_id, int direction);
 
     HashMap<i32, NonnullOwnPtr<Menu>> m_menus;
     Vector<i32> m_menubar_order;
