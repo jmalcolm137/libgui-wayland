@@ -24,6 +24,7 @@ def main() -> int:
     base = "WindowServer"
     include_dir = None
     extra_includes = []
+    namespace = "LibWM"
     args = sys.argv[1:]
     i = 0
     while i < len(args):
@@ -32,6 +33,9 @@ def main() -> int:
             i += 2
         elif args[i] == "--include-dir":
             include_dir = args[i + 1]
+            i += 2
+        elif args[i] == "--namespace":
+            namespace = args[i + 1]
             i += 2
         elif args[i] == "--extra-include":
             extra_includes.append(args[i + 1])
@@ -100,7 +104,7 @@ def main() -> int:
         lines.append(f"#include <{extra}>")
     lines.append(f"#include <{include_dir}/{endpoint}.h>")
     lines.append("")
-    lines.append("namespace LibWM {")
+    lines.append(f"namespace {namespace} {{")
     lines.append("")
     lines.append(f"// Harmless defaults for every {endpoint}::Stub method.")
     lines.append(f"class {default_stub} : public {endpoint}::Stub {{")
@@ -115,7 +119,7 @@ def main() -> int:
             lines.append(f"    virtual {ret} {name}({args}){qualifier} override {{ return {ret}(nullptr); }}")
     lines.append("};")
     lines.append("")
-    lines.append("} // namespace LibWM")
+    lines.append(f"}} // namespace {namespace}")
     lines.append("")
 
     with open(out, "w") as f:

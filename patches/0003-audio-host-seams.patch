@@ -1,0 +1,116 @@
+diff --git a/Userland/Libraries/LibAudio/CMakeLists.txt b/Userland/Libraries/LibAudio/CMakeLists.txt
+index 6f50e24d..89875652 100644
+--- a/Userland/Libraries/LibAudio/CMakeLists.txt
++++ b/Userland/Libraries/LibAudio/CMakeLists.txt
+@@ -16,17 +16,21 @@ set(SOURCES
+ )
+ 
+ if (SERENITYOS)
+-    list(APPEND SOURCES ConnectionToServer.cpp)
+-    list(APPEND SOURCES ConnectionToManagerServer.cpp)
+     list(APPEND SOURCES PlaybackStreamSerenity.cpp)
+-    set(GENERATED_SOURCES
+-        ../../Services/AudioServer/AudioClientEndpoint.h
+-        ../../Services/AudioServer/AudioServerEndpoint.h
+-        ../../Services/AudioServer/AudioManagerClientEndpoint.h
+-        ../../Services/AudioServer/AudioManagerServerEndpoint.h
+-    )
+ endif()
+ 
++# libgui-wayland: the AudioServer *client* protocol is built on the host too;
++# LibSerenityAudio provides the server side in-process over PipeWire. Only the
++# generated endpoint headers and the client connections are needed for that.
++list(APPEND SOURCES ConnectionToServer.cpp)
++list(APPEND SOURCES ConnectionToManagerServer.cpp)
++set(GENERATED_SOURCES
++    ../../Services/AudioServer/AudioClientEndpoint.h
++    ../../Services/AudioServer/AudioServerEndpoint.h
++    ../../Services/AudioServer/AudioManagerClientEndpoint.h
++    ../../Services/AudioServer/AudioManagerServerEndpoint.h
++)
++
+ if (HAVE_PULSEAUDIO)
+     list(APPEND SOURCES
+         PlaybackStreamPulseAudio.cpp
+@@ -37,6 +41,13 @@ endif()
+ serenity_lib(LibAudio audio)
+ target_link_libraries(LibAudio PRIVATE LibCore LibRIFF LibIPC LibThreading LibUnicode LibCrypto)
+ 
++# libgui-wayland: THREAD_PRIORITY_MAX is a SerenityOS constant from
++# Kernel/API/POSIX/sched.h, which the host does not use. It is only referenced
++# by the (host-built) AudioServer client connection.
++if (NOT SERENITYOS)
++    target_compile_definitions(LibAudio PRIVATE THREAD_PRIORITY_MAX=99)
++endif()
++
+ if (HAVE_PULSEAUDIO)
+     target_link_libraries(LibAudio PRIVATE pulse)
+     target_compile_definitions(LibAudio PRIVATE HAVE_PULSEAUDIO=1)
+diff --git a/Userland/Libraries/LibAudio/Queue.h b/Userland/Libraries/LibAudio/Queue.h
+index fd103819..b6453e95 100644
+--- a/Userland/Libraries/LibAudio/Queue.h
++++ b/Userland/Libraries/LibAudio/Queue.h
+@@ -11,7 +11,10 @@
+ 
+ namespace Audio {
+ 
+-static constexpr size_t AUDIO_BUFFERS_COUNT = 128;
++// libgui-wayland host tuning: the shared queue is the dominant latency source
++// (128 buffers = ~145 ms at 44.1 kHz). The client keeps the queue full, so this
++// directly sets key-to-sound delay. 16 buffers = ~18 ms, still ample headroom.
++static constexpr size_t AUDIO_BUFFERS_COUNT = 16;
+ // The audio buffer size is specifically chosen to be about 1/1000th of a second (1ms).
+ // This has the biggest impact on latency and performance.
+ // The currently chosen value was not put here with much thought and a better choice is surely possible.
+diff --git a/Userland/Libraries/LibThreading/Thread.cpp b/Userland/Libraries/LibThreading/Thread.cpp
+index 9f9bc13e..939fd186 100644
+--- a/Userland/Libraries/LibThreading/Thread.cpp
++++ b/Userland/Libraries/LibThreading/Thread.cpp
+@@ -27,7 +27,19 @@ Thread::~Thread()
+ 
+ ErrorOr<void> Thread::set_priority(int priority)
+ {
+-    // MacOS has an extra __opaque field, so list initialization will not compile on MacOS Lagom.
++    // libgui-wayland host seam: callers may set the priority before start()
++    // (e.g. Piano's audio pipeline). pthread_setschedparam() faults on the unset
++    // handle, so defer until the thread exists.
++    if (!is_started()) {
++        m_pending_priority = priority;
++        m_has_pending_priority = true;
++        return {};
++    }
++    return apply_priority(priority);
++}
++
++ErrorOr<void> Thread::apply_priority(int priority)
++{
+     sched_param scheduling_parameters {};
+     scheduling_parameters.sched_priority = priority;
+     int result = pthread_setschedparam(m_tid, 0, &scheduling_parameters);
+@@ -102,6 +114,10 @@ void Thread::start()
+         &NonnullRefPtr(*this).leak_ref());
+ 
+     VERIFY(rc == 0);
++    if (m_has_pending_priority) {
++        m_has_pending_priority = false;
++        (void)apply_priority(m_pending_priority);
++    }
+ #ifdef AK_OS_SERENITY
+     if (!m_thread_name.is_empty()) {
+         rc = pthread_setname_np(m_tid, m_thread_name.characters());
+diff --git a/Userland/Libraries/LibThreading/Thread.h b/Userland/Libraries/LibThreading/Thread.h
+index d20ebfaf..6db886ac 100644
+--- a/Userland/Libraries/LibThreading/Thread.h
++++ b/Userland/Libraries/LibThreading/Thread.h
+@@ -82,6 +82,11 @@ private:
+     pthread_t m_tid { 0 };
+     ByteString m_thread_name;
+     Atomic<ThreadState> m_state { ThreadState::Startable };
++    // libgui-wayland host seam: glibc's pthread_setschedparam() faults on an
++    // unstarted thread, so remember a priority requested before start().
++    ErrorOr<void> apply_priority(int priority);
++    int m_pending_priority { 0 };
++    bool m_has_pending_priority { false };
+ };
+ 
+ template<typename T>

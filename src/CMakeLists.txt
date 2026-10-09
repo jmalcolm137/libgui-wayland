@@ -147,3 +147,35 @@ add_executable(PDFViewer
 target_include_directories(PDFViewer PRIVATE "${PDFVIEWER_SRC}")
 target_link_options(PDFViewer PRIVATE "-Wl,--no-as-needed")
 target_link_libraries(PDFViewer PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibPDF LibFileSystemAccessClient LibConfig LibURL wm)
+
+# --- Unmodified Piano (audio through LibSerenityAudio -> PipeWire) ------------
+set(PIANO_SRC "${SERENITY_PROJECT_ROOT}/Userland/Applications/Piano")
+set(PIANO_GEN "${CMAKE_CURRENT_BINARY_DIR}/Applications/Piano/ExportProgressWidget.h")
+add_custom_command(
+    OUTPUT "${PIANO_GEN}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/Applications/Piano"
+    COMMAND "${Python3_EXECUTABLE}" "${SERENITY_PROJECT_ROOT}/Meta/embed_as_string.py" --type=string-view "${PIANO_SRC}/ExportProgressWidget.gml" -o "${PIANO_GEN}" -n export_progress_widget
+    VERBATIM
+    DEPENDS "${SERENITY_PROJECT_ROOT}/Meta/embed_as_string.py" "${PIANO_SRC}/ExportProgressWidget.gml"
+    MAIN_DEPENDENCY "${PIANO_SRC}/ExportProgressWidget.gml"
+)
+add_executable(Piano
+    "${PIANO_SRC}/main.cpp"
+    "${PIANO_SRC}/AudioPlayerLoop.cpp"
+    "${PIANO_SRC}/ExportProgressWindow.cpp"
+    "${PIANO_SRC}/KeysWidget.cpp"
+    "${PIANO_SRC}/MainWidget.cpp"
+    "${PIANO_SRC}/PlayerWidget.cpp"
+    "${PIANO_SRC}/RollWidget.cpp"
+    "${PIANO_SRC}/SamplerWidget.cpp"
+    "${PIANO_SRC}/TrackControlsWidget.cpp"
+    "${PIANO_SRC}/TrackManager.cpp"
+    "${PIANO_SRC}/WaveWidget.cpp"
+    "${PIANO_SRC}/ProcessorParameterWidget/ParameterWidget.cpp"
+    "${PIANO_SRC}/ProcessorParameterWidget/Slider.cpp"
+    "${PIANO_GEN}"
+)
+target_include_directories(Piano PRIVATE "${PIANO_SRC}" "${CMAKE_CURRENT_BINARY_DIR}")
+# LibWM and LibSerenityAudio register their portals from static initializers.
+target_link_options(Piano PRIVATE "-Wl,--no-as-needed")
+target_link_libraries(Piano PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibAudio LibDSP LibThreading wm serenity-audio)

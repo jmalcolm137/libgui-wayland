@@ -209,7 +209,7 @@ void initialize()
         setenv("SERENITY_RES_ROOT", root.characters(), 0);
     }
 
-    Core::PortalServer::set_connector([](ByteString const& path) {
+    Core::PortalServer::add_connector([](ByteString const& path) {
         return make_portal(path);
     });
 }

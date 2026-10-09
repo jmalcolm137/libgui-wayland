@@ -24,7 +24,7 @@ for arg in "$@"; do
     esac
 done
 if [[ ${#TARGETS[@]} -eq 0 ]]; then
-    TARGETS=(LibGfx LibGUI wm Calculator PDFViewer libwm-test-window)
+    TARGETS=(LibGfx LibGUI wm Calculator PDFViewer Piano libwm-test-window)
 fi
 
 if [[ ! -d "$SERENITY_SRC/.git" ]]; then
@@ -67,6 +67,8 @@ if [[ "$RUN_TESTS" == "1" ]]; then
     SERENITY_SRC="$SERENITY_SRC" BUILD_DIR="$BUILD_DIR" "$PROJECT_ROOT/scripts/run-menu-test.sh"
     echo "==> Running PDFViewer integration test"
     SERENITY_SRC="$SERENITY_SRC" BUILD_DIR="$BUILD_DIR" "$PROJECT_ROOT/scripts/run-pdfviewer-test.sh"
+    echo "==> Running Piano integration test"
+    SERENITY_SRC="$SERENITY_SRC" BUILD_DIR="$BUILD_DIR" "$PROJECT_ROOT/scripts/run-piano-test.sh"
 fi
 
 echo "==> Done. Libraries in $BUILD_DIR/lib"

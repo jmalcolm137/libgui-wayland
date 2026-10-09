@@ -675,6 +675,38 @@ Headless testing this surfaced a compositor bug: the headless compositor sent
 `wl_keyboard.enter` only once, so after opening a dialog it kept routing keys to the old
 surface. That is fixed in xlib-wayland (pin bumped in `scripts/fetch-headless-compositor.sh`).
 
+### 4.8.2 LibSerenityAudio — LibAudio ↔ PipeWire
+
+`LibSerenityAudio` is a **second shim**, shaped exactly like LibWM: it implements a
+SerenityOS service protocol in-process and translates it to the native host API. Where LibWM
+speaks the WindowServer protocol to Wayland, LibSerenityAudio speaks the **AudioServer**
+protocol to **PipeWire**.
+
+* **Protocol.** SerenityOS apps stream audio by opening `ConnectionToServer` on
+  `/tmp/session/%sid/portal/audio`, then handing the server a **shared single-producer
+  circular queue** (`Audio::AudioQueue`, lock-free) that they fill from a high-priority
+  thread. LibSerenityAudio registers an `AudioServer` endpoint server for that portal and
+  attaches to the client's queue (`AudioQueue::create(fd)`).
+* **Data plane.** A `Mixer` holds one `ClientAudioStream` per connection (queue + resampler +
+  volume/mute), exactly like the AudioServer's mixer. PipeWire's real-time `process` callback
+  pulls mixed samples from all streams and writes interleaved `f32` stereo into the stream's
+  buffer. Because the queue is SPSC, the RT thread never locks the client.
+* **Latency.** The callback fills only the frames PipeWire requests
+  (`pw_buffer::requested`), not the whole (much larger) buffer — filling `maxsize` added
+  ~280 ms and over-produced. The remaining latency is the client's own ring buffer, so its
+  depth is tuned host-side (`AUDIO_BUFFERS_COUNT` 128 → 16 ≈ 12 ms); producer and consumer
+  share the constant, and underruns stay at zero.
+* **Registration.** `Core::PortalServer` was generalised from a single connector to a small
+  registry (`add_connector`), so LibWM and LibSerenityAudio each register their own portals
+  independently and neither owns the seam.
+* **Host seams** (`patches/0003-*`): build `LibAudio`'s `ConnectionToServer` on the host,
+  define `THREAD_PRIORITY_MAX`, and let `LibThreading::Thread::set_priority` be called before
+  `start()` (glibc faults on the unset handle).
+
+Verified by `scripts/run-piano-test.sh`: the unmodified **Piano** app builds and renders, the
+AudioServer portal is served, and (when PipeWire is present) the stream reaches `streaming`
+with the process callback running and zero underruns.
+
 ### 4.9 Building the applications
 
 Serenity app `CMakeLists.txt` use `serenity_app`, `serenity_component`, `compile_gml`,
@@ -796,6 +828,7 @@ open menus, copy/paste, resize/maximise, HiDPI.
 | M6 | Menus/popups, clipboard, config persistence | 🟡 native clipboard + server-rendered menubar/popups/submenus + keyboard nav done (§4.5, §4.6); Config + FileSystemAccess portals in-process (§4.8); config persistence pending |
 | M7 | Live Plasma session, headless test harness, CI matrix | 🟡 headless compositor + input test integrated (§5.2); CI matrix pending |
 | M8 | Crisp HiDPI (plumb an output scale into LibGUI's backing store) | ⬜ |
+| M9 | Audio: **LibSerenityAudio** (LibAudio ↔ PipeWire) and **Piano** | ✅ unmodified **Piano** builds, renders and plays through PipeWire (§4.8.2) |
 
 The state column is kept honest as work proceeds; §6 records every gap found, whether fixed in
 LibWM or shown to be an upstream/host issue.
@@ -812,6 +845,9 @@ In rough priority order:
   already carries them; `MenuController::render_popup` ignores them).
 * **Config persistence.** The in-process Config portal (`ConfigServerConnection`) is an
   in-memory store; it does not persist to disk between runs.
+* **Audio polish.** `LibSerenityAudio` has no AudioManager portal (so no system
+  mixer/volume integration), and cross-rate clients use LibAudio's naive insert/drop
+  resampler. Multi-client mixing itself is done.
 * **M4 polish.** Theme/font parity, decorations, icons, alpha.
 * **M7.** A CI matrix around the headless suites.
 

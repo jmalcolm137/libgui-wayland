@@ -1,8 +1,16 @@
 diff --git a/Meta/Lagom/CMakeLists.txt b/Meta/Lagom/CMakeLists.txt
-index 213a1e77..6a273e82 100644
+index 213a1e77..3db0a482 100644
 --- a/Meta/Lagom/CMakeLists.txt
 +++ b/Meta/Lagom/CMakeLists.txt
-@@ -545,18 +545,9 @@ if (BUILD_LAGOM)
+@@ -473,6 +473,7 @@ if (BUILD_LAGOM)
+         DeviceTree
+         DNS
+         Diff
++        DSP
+         Gemini
+         Gfx
+         GL
+@@ -545,18 +546,9 @@ if (BUILD_LAGOM)
      endforeach()
  
      # GUI
@@ -24,7 +32,7 @@ index 213a1e77..6a273e82 100644
  
      # FIXME: How about we don't include Kernel/API from random high-level libraries?
      install(FILES ${SERENITY_PROJECT_ROOT}/Kernel/API/KeyCode.h DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/Kernel/API")
-@@ -569,6 +560,43 @@ if (BUILD_LAGOM)
+@@ -569,6 +561,51 @@ if (BUILD_LAGOM)
          # Lagom Services
          add_serenity_subdirectory(Userland/Services)
  
@@ -49,6 +57,11 @@ index 213a1e77..6a273e82 100644
 +        compile_ipc(${SERENITY_PROJECT_ROOT}/Userland/Services/LaunchServer/LaunchServer.ipc Userland/Services/LaunchServer/LaunchServerEndpoint.h)
 +        compile_ipc(${SERENITY_PROJECT_ROOT}/Userland/Services/FileSystemAccessServer/FileSystemAccessClient.ipc Userland/Services/FileSystemAccessServer/FileSystemAccessClientEndpoint.h)
 +        compile_ipc(${SERENITY_PROJECT_ROOT}/Userland/Services/FileSystemAccessServer/FileSystemAccessServer.ipc Userland/Services/FileSystemAccessServer/FileSystemAccessServerEndpoint.h)
++        # AudioServer endpoints (LibAudio's ConnectionToServer, used by Piano et al).
++        compile_ipc(${SERENITY_PROJECT_ROOT}/Userland/Services/AudioServer/AudioClient.ipc Userland/Services/AudioServer/AudioClientEndpoint.h)
++        compile_ipc(${SERENITY_PROJECT_ROOT}/Userland/Services/AudioServer/AudioServer.ipc Userland/Services/AudioServer/AudioServerEndpoint.h)
++        compile_ipc(${SERENITY_PROJECT_ROOT}/Userland/Services/AudioServer/AudioManagerClient.ipc Userland/Services/AudioServer/AudioManagerClientEndpoint.h)
++        compile_ipc(${SERENITY_PROJECT_ROOT}/Userland/Services/AudioServer/AudioManagerServer.ipc Userland/Services/AudioServer/AudioManagerServerEndpoint.h)
 +
 +        add_serenity_subdirectory(Userland/Libraries/LibConfig)
 +        add_serenity_subdirectory(Userland/Libraries/LibGUI)
@@ -64,6 +77,9 @@ index 213a1e77..6a273e82 100644
 +
 +        # libgui-wayland: LibWM (the Wayland <-> LibGUI compatibility layer).
 +        add_subdirectory("${SERENITY_PROJECT_ROOT}/../src" "${CMAKE_CURRENT_BINARY_DIR}/libwm")
++
++        # libgui-wayland: LibSerenityAudio (the PipeWire <-> LibAudio compatibility layer).
++        add_subdirectory("${SERENITY_PROJECT_ROOT}/../libserenity-audio" "${CMAKE_CURRENT_BINARY_DIR}/libserenity-audio")
 +
          # Lagom Utilities
          lagom_utility(abench SOURCES ../../Userland/Utilities/abench.cpp LIBS LibMain LibFileSystem LibAudio)
