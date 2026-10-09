@@ -1,0 +1,60 @@
+diff --git a/Meta/Lagom/CMakeLists.txt b/Meta/Lagom/CMakeLists.txt
+index 213a1e77..62736360 100644
+--- a/Meta/Lagom/CMakeLists.txt
++++ b/Meta/Lagom/CMakeLists.txt
+@@ -545,18 +545,9 @@ if (BUILD_LAGOM)
+     endforeach()
+ 
+     # GUI
+-    set(LIBGUI_SOURCES
+-        GML/Lexer.cpp
+-        GML/Parser.cpp
+-        GML/SyntaxHighlighter.cpp
+-        Icon.cpp
+-        Model.cpp
+-        ModelIndex.cpp
+-    )
+-    list(TRANSFORM LIBGUI_SOURCES PREPEND "${SERENITY_PROJECT_ROOT}/Userland/Libraries/LibGUI/")
+-    lagom_lib(LibGUI gui
+-        SOURCES ${LIBGUI_SOURCES}
+-        LIBS LibCore LibGfx LibSyntax)
++    # NOTE: The full LibGUI (and its host-side dependencies) is added further
++    # down, after Userland/Services, so that the IPC endpoint targets it depends
++    # on already exist. See "libgui-wayland" block below.
+ 
+     # FIXME: How about we don't include Kernel/API from random high-level libraries?
+     install(FILES ${SERENITY_PROJECT_ROOT}/Kernel/API/KeyCode.h DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/Kernel/API")
+@@ -569,6 +560,33 @@ if (BUILD_LAGOM)
+         # Lagom Services
+         add_serenity_subdirectory(Userland/Services)
+ 
++        # ------------------------------------------------------------------
++        # libgui-wayland: build the full LibGUI on the host.
++        #
++        # Services gated on SERENITYOS (WindowServer, Clipboard, LaunchServer,
++        # NotificationServer, ...) are not added in a Lagom build, so generate
++        # the IPC endpoints they own explicitly, then add the libraries that
++        # consume them (LibConfig/LibGUI/LibDesktop) *after* the endpoints
++        # exist. No library source is modified.
++        # ------------------------------------------------------------------
++        compile_ipc(${SERENITY_PROJECT_ROOT}/Userland/Services/WindowServer/WindowServer.ipc Userland/Services/WindowServer/WindowServerEndpoint.h)
++        compile_ipc(${SERENITY_PROJECT_ROOT}/Userland/Services/WindowServer/WindowClient.ipc Userland/Services/WindowServer/WindowClientEndpoint.h)
++        compile_ipc(${SERENITY_PROJECT_ROOT}/Userland/Services/WindowServer/WindowManagerServer.ipc Userland/Services/WindowServer/WindowManagerServerEndpoint.h)
++        compile_ipc(${SERENITY_PROJECT_ROOT}/Userland/Services/WindowServer/WindowManagerClient.ipc Userland/Services/WindowServer/WindowManagerClientEndpoint.h)
++        compile_ipc(${SERENITY_PROJECT_ROOT}/Userland/Services/Clipboard/ClipboardClient.ipc Userland/Services/Clipboard/ClipboardClientEndpoint.h)
++        compile_ipc(${SERENITY_PROJECT_ROOT}/Userland/Services/Clipboard/ClipboardServer.ipc Userland/Services/Clipboard/ClipboardServerEndpoint.h)
++        compile_ipc(${SERENITY_PROJECT_ROOT}/Userland/Services/NotificationServer/NotificationClient.ipc Userland/Services/NotificationServer/NotificationClientEndpoint.h)
++        compile_ipc(${SERENITY_PROJECT_ROOT}/Userland/Services/NotificationServer/NotificationServer.ipc Userland/Services/NotificationServer/NotificationServerEndpoint.h)
++        compile_ipc(${SERENITY_PROJECT_ROOT}/Userland/Services/LaunchServer/LaunchClient.ipc Userland/Services/LaunchServer/LaunchClientEndpoint.h)
++        compile_ipc(${SERENITY_PROJECT_ROOT}/Userland/Services/LaunchServer/LaunchServer.ipc Userland/Services/LaunchServer/LaunchServerEndpoint.h)
++
++        add_serenity_subdirectory(Userland/Libraries/LibConfig)
++        add_serenity_subdirectory(Userland/Libraries/LibGUI)
++        add_serenity_subdirectory(Userland/Libraries/LibDesktop)
++
++        # libgui-wayland: LibWM (the Wayland <-> LibGUI compatibility layer).
++        add_subdirectory("${SERENITY_PROJECT_ROOT}/../src" "${CMAKE_CURRENT_BINARY_DIR}/libwm")
++
+         # Lagom Utilities
+         lagom_utility(abench SOURCES ../../Userland/Utilities/abench.cpp LIBS LibMain LibFileSystem LibAudio)
+         lagom_utility(aconv SOURCES ../../Userland/Utilities/aconv.cpp LIBS LibMain LibFileSystem LibAudio)

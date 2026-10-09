@@ -1,0 +1,117 @@
+diff --git a/Userland/Libraries/LibCore/PortalServer.h b/Userland/Libraries/LibCore/PortalServer.h
+new file mode 100644
+index 00000000..de3c3dda
+--- /dev/null
++++ b/Userland/Libraries/LibCore/PortalServer.h
+@@ -0,0 +1,52 @@
++/*
++ * Copyright (c) 2026, libgui-wayland contributors
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#pragma once
++
++#include <AK/ByteString.h>
++#include <AK/Function.h>
++#include <AK/NonnullOwnPtr.h>
++#include <AK/Optional.h>
++
++namespace Core {
++
++class LocalSocket;
++
++// Lets an in-process component (LibWM) answer connections that would normally
++// go to a SerenityOS system service over a Unix socket.
++//
++// This is the single seam through which libgui-wayland redirects the
++// WindowServer / Clipboard / Config / ... portals, so that LibGUI and the
++// applications it drives remain byte-for-byte unmodified. When no connector is
++// installed, LocalSocket::connect() behaves exactly as on SerenityOS.
++class PortalServer {
++public:
++    // Returns a connected in-process socket for `path`, or an empty Optional to
++    // fall back to the real filesystem socket.
++    using Connector = Function<Optional<NonnullOwnPtr<LocalSocket>>(ByteString const& path)>;
++
++    static void set_connector(Connector connector)
++    {
++        connector_slot() = move(connector);
++    }
++
++    static Optional<NonnullOwnPtr<LocalSocket>> try_connect(ByteString const& path)
++    {
++        auto& connector = connector_slot();
++        if (!connector)
++            return {};
++        return connector(path);
++    }
++
++private:
++    static Connector& connector_slot()
++    {
++        static Connector s_connector;
++        return s_connector;
++    }
++};
++
++}
+diff --git a/Userland/Libraries/LibCore/ResourceImplementation.cpp b/Userland/Libraries/LibCore/ResourceImplementation.cpp
+index 2834124a..86aa6d61 100644
+--- a/Userland/Libraries/LibCore/ResourceImplementation.cpp
++++ b/Userland/Libraries/LibCore/ResourceImplementation.cpp
+@@ -4,10 +4,12 @@
+  * SPDX-License-Identifier: BSD-2-Clause
+  */
+ 
++#include <AK/String.h>
+ #include <LibCore/DirIterator.h>
+ #include <LibCore/ResourceImplementation.h>
+ #include <LibCore/ResourceImplementationFile.h>
+ #include <LibCore/System.h>
++#include <stdlib.h>
+ 
+ namespace Core {
+ 
+@@ -20,8 +22,16 @@ void ResourceImplementation::install(OwnPtr<ResourceImplementation> the)
+ 
+ ResourceImplementation& ResourceImplementation::the()
+ {
+-    if (!s_the)
+-        install(make<ResourceImplementationFile>("/res"_string));
++    if (!s_the) {
++        // On a host build, /res does not exist. Allow the resource root to be
++        // relocated with SERENITY_RES_ROOT so that namespace-scope users such as
++        // LibGUI/Calendar.cpp can load fonts from their static initializers,
++        // before any application code has run.
++        ByteString root = "/res";
++        if (auto const* env = getenv("SERENITY_RES_ROOT"); env && *env)
++            root = ByteString(env);
++        install(make<ResourceImplementationFile>(MUST(String::from_byte_string(root))));
++    }
+     return *s_the;
+ }
+ 
+diff --git a/Userland/Libraries/LibCore/Socket.cpp b/Userland/Libraries/LibCore/Socket.cpp
+index 08f64ec6..3e7bdd92 100644
+--- a/Userland/Libraries/LibCore/Socket.cpp
++++ b/Userland/Libraries/LibCore/Socket.cpp
+@@ -6,6 +6,7 @@
+  */
+ 
+ #include <AK/Coroutine.h>
++#include <LibCore/PortalServer.h>
+ #include <LibCore/Socket.h>
+ #include <LibCore/System.h>
+ 
+@@ -304,6 +305,10 @@ ErrorOr<NonnullOwnPtr<UDPSocket>> UDPSocket::connect(SocketAddress const& addres
+ 
+ ErrorOr<NonnullOwnPtr<LocalSocket>> LocalSocket::connect(ByteString const& path, PreventSIGPIPE prevent_sigpipe)
+ {
++    // Let an in-process portal (e.g. LibWM's WindowServer) answer first.
++    if (auto portal = PortalServer::try_connect(path); portal.has_value())
++        return portal.release_value();
++
+     auto socket = TRY(adopt_nonnull_own_or_enomem(new (nothrow) LocalSocket(prevent_sigpipe)));
+ 
+     auto fd = TRY(create_fd(SocketDomain::Local, SocketType::Stream));

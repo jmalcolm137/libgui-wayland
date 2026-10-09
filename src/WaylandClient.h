@@ -1,0 +1,166 @@
+/*
+ * Copyright (c) 2026, libgui-wayland contributors
+ *
+ * SPDX-License-Identifier: BSD-2-Clause
+ */
+
+#pragma once
+
+#include <AK/ByteString.h>
+#include <AK/Error.h>
+#include <AK/Function.h>
+#include <AK/HashMap.h>
+#include <AK/NonnullOwnPtr.h>
+#include <AK/RefPtr.h>
+#include <AK/Vector.h>
+#include <LibGfx/Point.h>
+#include <LibGfx/Size.h>
+
+struct wl_buffer;
+struct wl_compositor;
+struct wl_display;
+struct wl_keyboard;
+struct wl_output;
+struct wl_pointer;
+struct wl_registry;
+struct wl_seat;
+struct wl_shm;
+struct wl_surface;
+struct xdg_surface;
+struct xdg_toplevel;
+struct xdg_wm_base;
+struct zxdg_decoration_manager_v1;
+struct zxdg_toplevel_decoration_v1;
+
+struct xkb_context;
+struct xkb_keymap;
+struct xkb_state;
+
+namespace Core {
+class Notifier;
+}
+
+namespace LibWM {
+
+// A thin wrapper over the real Wayland compositor.
+//
+// This is the source of truth for environmental state (principle P1): output
+// logical size and scale, seat capabilities, input, shm, and the xdg-shell
+// objects used to present LibGUI windows. It is driven from the WindowServer
+// thread's event loop.
+class WaylandClient {
+public:
+    // Input is delivered through these callbacks, which the WindowServer
+    // connection installs to translate into Serenity WindowClient events.
+    struct InputCallbacks {
+        Function<void(i32 window_id, Gfx::IntPoint position, u32 buttons, u32 modifiers)> mouse_move;
+        Function<void(i32 window_id, Gfx::IntPoint position, u32 button, u32 buttons, u32 modifiers)> mouse_down;
+        Function<void(i32 window_id, Gfx::IntPoint position, u32 button, u32 buttons, u32 modifiers)> mouse_up;
+        Function<void(i32 window_id, Gfx::IntPoint position, u32 buttons, u32 modifiers, i32 wheel_delta_x, i32 wheel_delta_y)> mouse_wheel;
+        Function<void(i32 window_id, u32 code_point, u32 key, u8 map_entry_index, u32 modifiers, u32 scancode, bool is_press)> key;
+        Function<void(i32 window_id)> window_entered;
+        Function<void(i32 window_id)> window_left;
+        Function<void(i32 window_id)> window_close_request;
+        Function<void(i32 window_id, bool activated)> window_activation;
+    };
+
+    static WaylandClient& the();
+
+    ErrorOr<void> ensure_connected();
+    bool is_connected() const { return m_display != nullptr; }
+
+    // Logical screen size and output scale as reported by the compositor.
+    Gfx::IntSize screen_size() const { return m_screen_size; }
+    int output_scale() const { return m_scale; }
+
+    void set_input_callbacks(InputCallbacks callbacks) { m_input = move(callbacks); }
+
+    // Window <-> xdg_toplevel lifecycle.
+    void create_window(i32 window_id, Gfx::IntSize, ByteString const& title, bool has_alpha);
+    void destroy_window(i32 window_id);
+    void set_title(i32 window_id, ByteString const& title);
+
+    // Attach the client's shared bitmap (given as an fd) and commit.
+    void attach_and_commit(i32 window_id, int client_fd, Gfx::IntSize, i32 pitch, bool has_alpha);
+
+    // Wayland event dispatch (registered on the owning event loop).
+    void dispatch();
+
+    // --- called by the C protocol listeners (see WaylandClient.cpp) ---
+    struct BufferRecord {
+        wl_buffer* buffer { nullptr };
+        bool released { false };
+    };
+    void set_compositor(wl_compositor* compositor) { m_compositor = compositor; }
+    void set_shm(wl_shm* shm) { m_shm = shm; }
+    void add_seat(wl_seat* seat);
+    void add_wm_base(xdg_wm_base* wm_base);
+    void set_decoration_manager(zxdg_decoration_manager_v1* manager) { m_decoration_manager = manager; }
+    void add_output(wl_output* output);
+    void on_output_mode(Gfx::IntSize physical_size) { m_physical_size = physical_size; }
+    void on_output_scale(int factor) { m_scale = factor > 0 ? factor : 1; }
+    void on_output_done();
+
+    void on_seat_capabilities(u32 capabilities);
+    i32 window_id_for_surface(wl_surface*) const;
+    void on_pointer_enter(wl_surface*, Gfx::IntPoint);
+    void on_pointer_leave();
+    void on_pointer_motion(Gfx::IntPoint);
+    void on_pointer_button(u32 button, bool pressed);
+    void on_pointer_axis(i32 x, i32 y);
+    void on_keyboard_keymap(int fd, u32 size);
+    void on_keyboard_modifiers(u32 depressed, u32 latched, u32 locked, u32 group, u32 serial);
+    void on_keyboard_key(u32 key, bool pressed);
+    void on_keyboard_focus(wl_surface*, bool entered);
+    void on_toplevel_configure(xdg_toplevel*, bool activated);
+    void on_toplevel_close(xdg_toplevel*);
+
+private:
+    WaylandClient() = default;
+
+    struct WindowSurface {
+        i32 window_id { -1 };
+        wl_surface* surface { nullptr };
+        xdg_surface* xdg_surface_object { nullptr };
+        xdg_toplevel* toplevel { nullptr };
+        zxdg_toplevel_decoration_v1* decoration { nullptr };
+        ByteString title;
+        Gfx::IntSize size;
+        bool has_alpha { false };
+        Vector<NonnullOwnPtr<BufferRecord>> buffers;
+    };
+
+    WindowSurface* find(i32 window_id);
+    void purge_released_buffers(WindowSurface&);
+    u32 current_modifiers() const;
+
+    wl_display* m_display { nullptr };
+    wl_registry* m_registry { nullptr };
+    wl_compositor* m_compositor { nullptr };
+    wl_shm* m_shm { nullptr };
+    wl_seat* m_seat { nullptr };
+    wl_pointer* m_pointer { nullptr };
+    wl_keyboard* m_keyboard { nullptr };
+    wl_output* m_output { nullptr };
+    xdg_wm_base* m_wm_base { nullptr };
+    zxdg_decoration_manager_v1* m_decoration_manager { nullptr };
+    RefPtr<Core::Notifier> m_notifier;
+
+    xkb_context* m_xkb_context { nullptr };
+    xkb_keymap* m_xkb_keymap { nullptr };
+    xkb_state* m_xkb_state { nullptr };
+
+    InputCallbacks m_input;
+    i32 m_pointer_window { -1 };
+    i32 m_focused_window { -1 };
+    Gfx::IntPoint m_pointer_position;
+    u32 m_pointer_buttons { 0 };
+
+    Gfx::IntSize m_physical_size;
+    Gfx::IntSize m_screen_size;
+    int m_scale { 1 };
+
+    HashMap<i32, NonnullOwnPtr<WindowSurface>> m_windows;
+};
+
+}

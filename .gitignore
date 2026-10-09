@@ -1,0 +1,16 @@
+# Pinned SerenityOS checkout (fetched by scripts/fetch-serenity.sh)
+/serenity/
+
+# Pinned xlib-wayland checkout, used only for its pure-Wayland headless compositor
+/third_party/
+
+# Build outputs
+/build/
+*.o
+*.so
+*.a
+
+# Editor / OS
+.DS_Store
+*.swp
+compile_commands.json
