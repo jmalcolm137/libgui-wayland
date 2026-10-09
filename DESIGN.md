@@ -851,6 +851,45 @@ In rough priority order:
 * **M4 polish.** Theme/font parity, decorations, icons, alpha.
 * **M7.** A CI matrix around the headless suites.
 
+### 7.2 Deferred: a Serenity Desktop Environment on Linux
+
+A handful of applications and settings target SerenityOS **system services** rather than a
+portable protocol. Shimming each one piecemeal would bake Serenity's kernel/service APIs into
+the compatibility layer, so they are deferred until there is a **Serenity Desktop Environment
+on Linux** — a Serenity-shaped session that provides the missing services and per-compositor
+backends.
+
+**Applications** (in `Userland/Applications`, deliberately not built):
+
+| App | Needs | Why deferred |
+|---|---|---|
+| `Terminal` | a Serenity pty and `LibVT`'s Serenity terminal backend | Linux has ptys (`posix_openpt`), but `LibVT`'s plumbing is Serenity-specific |
+| `SystemMonitor` | Serenity `/proc` and `LibDebug`/`LibSymbolication` (`sys/arch/regs.h`, ptrace) | Linux `/proc` and the process model differ |
+| `Debugger` | Serenity's ptrace ABI, `sys/arch/regs.h`, core/ELF model | non-portable |
+| `CrashReporter` | Serenity's core-dump format, `LibCoredump`, `LibSymbolication` | non-portable |
+| `MouseSettings` | WindowServer *service* internals plus compositor-specific pointer settings | see below |
+
+**Settings with no Wayland standard.** These are *compositor/desktop* configuration, not
+client-facing protocol:
+
+* **Pointer acceleration, scroll step, double-click speed, cursor highlight.**
+* **Display configuration** (resolution/refresh/scale/rotation): no adopted Wayland protocol —
+  `wlr-output-management-unstable-v1` (wlroots only), `org.gnome.Mutter.DisplayConfig`,
+  `org.kde.KScreen`.
+* **Cursor theme/size**: the *transport* is standard (`org.freedesktop.portal.Settings`) but the
+  keys are desktop-specific; `LibEDID` (parsing) is portable, *applying* a mode is not.
+
+**The portable path (not deferred)** is a **portal service layer**: a provider behind
+`Core::PortalServer` that proxies `org.freedesktop.portal.Settings` (appearance/theme: color
+scheme, accent, cursor theme/size with a small key map) and, for the wider framework,
+`org.freedesktop.portal.{Screenshot,Notification,FileChooser,OpenURI,...}`. The
+compositor-specific capabilities above sit behind a thin **per-compositor backend interface**
+(one implementation per desktop — KDE first for the reference session — then GNOME/wlroots), so
+the applications stay portable and functional where a backend exists.
+
+The general rule: **read** compositor state from standard Wayland (`wl_output`/`xdg_output_v1`,
+`wl_seat`, `cursor-shape-v1`) and the portals; **write** system settings only through a backend.
+
 ---
 
 ## 8. Appendix

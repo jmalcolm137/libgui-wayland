@@ -78,11 +78,47 @@ The shim is called **LibWM**. It sits between `LibGUI`'s WindowServer IPC protoc
   written to disk between runs.
 - **Audio polish.** `LibSerenityAudio` has no AudioManager portal (no system mixer/volume
   integration), and cross-rate clients use LibAudio's naive resampler.
-- **Serenity-only applications (host exclusions).** `Terminal`, `SystemMonitor`, `Debugger`,
-  `CrashReporter` and `MouseSettings` build against Serenity kernel/system services (a pty,
-  `/proc`, ptrace and `sys/arch/regs.h`, WindowServer *service* internals) and neither build nor
-  function on Linux. Every other application in `Userland/Applications` builds and runs.
+- **Serenity-only applications and settings (host exclusions).** A handful of apps and
+  settings target SerenityOS *system services* rather than a portable protocol; they are
+  deferred until a **Serenity Desktop Environment on Linux** exists — see
+  [Deferred: a Serenity Desktop Environment](#deferred-a-serenity-desktop-environment-on-linux).
+  Every other application in `Userland/Applications` builds and runs.
 - **Theme/font parity, decorations, icons, alpha (M4)** — remaining polish.
+
+## Deferred: a Serenity Desktop Environment on Linux
+
+Some applications and settings target SerenityOS *system services* instead of a portable
+protocol. Rather than shim each one piecemeal, they are deferred until there is a **Serenity
+Desktop Environment on Linux**: a Serenity-shaped session providing the corresponding services
+and per-compositor backends.
+
+Deferred applications (in `Userland/Applications`):
+
+| App | Needs | Why deferred |
+|---|---|---|
+| `Terminal` | a Serenity pty and `LibVT`'s Serenity terminal backend | Linux has ptys (`posix_openpt`), but `LibVT`'s plumbing is Serenity-specific |
+| `SystemMonitor` | Serenity `/proc` and `LibDebug`/`LibSymbolication` (`sys/arch/regs.h`, ptrace) | Linux `/proc` and the process model differ |
+| `Debugger` | Serenity's ptrace ABI, `sys/arch/regs.h`, and core/ELF model | a hostile, non-portable mismatch |
+| `CrashReporter` | Serenity's core-dump format, `LibCoredump`, `LibSymbolication` | same |
+| `MouseSettings` | WindowServer *service* internals plus compositor-specific pointer settings | see below |
+
+Compositor-specific settings (no Wayland standard exists):
+
+* **Pointer acceleration, scroll step, double-click speed, cursor highlight** — libinput /
+  compositor settings, configured per desktop (KDE KConfig/KWin, GNOME GSettings/Mutter).
+* **Display configuration** (resolution/refresh/scale/rotation) — no adopted Wayland protocol;
+  each desktop has its own (`wlr-output-management-unstable-v1`, `org.gnome.Mutter.DisplayConfig`,
+  `org.kde.KScreen`).
+* **Cursor theme/size** — the *transport* is standard (`org.freedesktop.portal.Settings`), but
+  the keys are desktop-specific.
+
+The **portable path** (not deferred) is a portal service layer: a provider behind
+`PortalServer` that proxies `org.freedesktop.portal.Settings` for appearance/theme settings
+(color scheme, accent, cursor theme/size with a small key map), plus the other portals a GUI
+framework wants (`Screenshot`, `Notification`, `FileChooser`, `OpenURI`, ...). The
+compositor-specific capabilities above would sit behind a thin **per-compositor backend
+interface** (one implementation per desktop, KDE first), so the applications stay portable while
+still working where a backend exists.
 
 ```sh
 scripts/fetch-serenity.sh              # pinned, blobless, sparse checkout
