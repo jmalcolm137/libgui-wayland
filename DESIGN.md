@@ -543,10 +543,15 @@ session. Startup required two more in-process portals besides the WindowServer:
 The clipboard bridges the SerenityOS clipboard protocol to Wayland's data device:
 
 * **Reads.** LibWM watches `wl_data_device.data_offer`/`selection`, records the offered mime
-  types, prefers `text/plain;charset=utf-8` → `text/plain` → `UTF8_STRING`, receives it into a
-  pipe, and returns it to the Serenity client (normalized to `text/plain`).
-* **Writes.** `set_clipboard_data` creates a `wl_data_source` offering the Serenity mime plus
-  standard text aliases, and calls `wl_data_device.set_selection`.
+  types, and receives the best one into a pipe. Preference is text
+  (`text/plain;charset=utf-8` → `text/plain` → `UTF8_STRING`) then `text/uri-list` then
+  `image/png`; text is normalized to `text/plain`, `text/uri-list` passes through, and
+  `image/png` is transcoded with LibGfx into Serenity's raw `image/x-serenityos` (pixels +
+  `width/height/scale/format/pitch` metadata) so `Clipboard::as_bitmap()` works.
+* **Writes.** `set_clipboard_data` builds the set of representations to offer: `text/plain`
+  (plus `text/plain;charset=utf-8`/`UTF8_STRING`/`STRING` aliases), `text/uri-list` and other
+  types pass through unchanged, and `image/x-serenityos` is encoded to `image/png` (and also
+  offered raw, so LibWM-to-LibWM image copies stay lossless).
 * **Same thread as input, on purpose.** `set_selection` requires a serial from a *recent input
   event on the same connection*, so the data device lives on the connection that owns the
   seat. LibWM therefore serves all portals from a single server thread with one
@@ -555,9 +560,10 @@ The clipboard bridges the SerenityOS clipboard protocol to Wayland's data device
   a selection set with no prior input is ignored by real compositors, which is correct Wayland
   behaviour.)
 
-Both directions are verified headlessly against a native `libwayland-client` peer
-(`tools/wl-clipboard-peer.c`): the peer owns the selection, our app reads it, then the peer
-reads what our app published. This runs as part of the build
+Both directions are verified headlessly for **text**, **`image/png` ↔ `image/x-serenityos`**,
+and **`text/uri-list`** against a native `libwayland-client` peer
+(`tools/wl-clipboard-peer.c`): the peer owns the selection, our app reads it (logging what
+LibGUI sees), then the peer reads what our app published. This runs as part of the build
 (`scripts/run-clipboard-test.sh`).
 
 ### 4.6 Building the applications

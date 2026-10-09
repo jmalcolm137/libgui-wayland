@@ -4,8 +4,9 @@
  * Built directly on libwayland-client (no X11, no GTK). Used to verify LibWM's
  * clipboard bridge in both directions against the headless compositor:
  *
- *   wl-clipboard-peer set "some text"   # own the selection, serve it, stay alive
- *   wl-clipboard-peer get               # print the selection's text, exit
+ *   wl-clipboard-peer set TEXT              # own the selection with text, stay alive
+ *   wl-clipboard-peer set-file MIME PATH    # own the selection with a file's bytes
+ *   wl-clipboard-peer get [MIME]            # print the selection (preferred or MIME), exit
  */
 #define _GNU_SOURCE
 #include <fcntl.h>
@@ -23,13 +24,16 @@ static struct wl_data_device *device;
 static struct wl_data_source *source;
 static struct wl_data_offer *current_offer;
 static int got_selection;
-static char const *set_text;
+static char const *set_mime = "text/plain";
+static unsigned char *set_data;
+static size_t set_size;
+static char const *want_mime;
 static char mimes[32][128];
 static int mime_count;
 
 static char const *preferred(void)
 {
-    char const *wanted[] = { "text/plain;charset=utf-8", "text/plain", "UTF8_STRING", "STRING" };
+    char const *wanted[] = { "text/plain;charset=utf-8", "text/plain", "UTF8_STRING", "STRING", "text/uri-list", "image/png" };
     for (size_t w = 0; w < sizeof(wanted) / sizeof(wanted[0]); ++w)
         for (int i = 0; i < mime_count; ++i)
             if (!strcmp(mimes[i], wanted[w]))
@@ -37,11 +41,19 @@ static char const *preferred(void)
     return mime_count ? mimes[0] : NULL;
 }
 
+static int mimes_has(char const *m)
+{
+    for (int i = 0; i < mime_count; ++i)
+        if (!strcmp(mimes[i], m))
+            return 1;
+    return 0;
+}
+
 static void source_send(void *data, struct wl_data_source *src, const char *mime, int32_t fd)
 {
     (void)data; (void)src; (void)mime;
-    if (set_text)
-        (void)write(fd, set_text, strlen(set_text));
+    if (set_data && set_size)
+        (void)write(fd, set_data, set_size);
     close(fd);
 }
 static void source_cancelled(void *data, struct wl_data_source *src)
@@ -118,16 +130,49 @@ static void registry_global(void *data, struct wl_registry *registry, uint32_t n
 static void registry_global_remove(void *d, struct wl_registry *r, uint32_t n) { (void)d; (void)r; (void)n; }
 static struct wl_registry_listener const registry_listener = { registry_global, registry_global_remove };
 
+static int read_file(char const *path, unsigned char **out, size_t *out_size)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (n < 0) { fclose(f); return -1; }
+    unsigned char *buf = malloc((size_t)n ? (size_t)n : 1);
+    if (!buf) { fclose(f); return -1; }
+    *out_size = fread(buf, 1, (size_t)n, f);
+    fclose(f);
+    *out = buf;
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 2) {
-        fprintf(stderr, "usage: %s set TEXT | get\n", argv[0]);
+        fprintf(stderr, "usage: %s set TEXT | set-file MIME PATH | get [MIME]\n", argv[0]);
         return 2;
     }
-    int mode_set = !strcmp(argv[1], "set");
-    if (mode_set) {
-        if (argc < 3) { fprintf(stderr, "set needs TEXT\n"); return 2; }
-        set_text = argv[2];
+    int mode = 0; // 0=get, 1=set text, 2=set file
+    if (!strcmp(argv[1], "set")) {
+        if (argc < 3) return 2;
+        mode = 1;
+        set_mime = "text/plain";
+        set_data = (unsigned char *)argv[2];
+        set_size = strlen(argv[2]);
+    } else if (!strcmp(argv[1], "set-file")) {
+        if (argc < 4 || read_file(argv[3], &set_data, &set_size) != 0) {
+            fprintf(stderr, "peer: cannot read file\n");
+            return 1;
+        }
+        mode = 2;
+        set_mime = argv[2];
+    } else if (!strcmp(argv[1], "get")) {
+        mode = 0;
+        want_mime = argc >= 3 ? argv[2] : NULL;
+        if (want_mime && !*want_mime)
+            want_mime = NULL;
+    } else {
+        return 2;
     }
 
     display = wl_display_connect(NULL);
@@ -142,12 +187,14 @@ int main(int argc, char **argv)
     wl_data_device_add_listener(device, &device_listener, NULL);
     wl_display_roundtrip(display);
 
-    if (mode_set) {
+    if (mode != 0) {
         source = wl_data_device_manager_create_data_source(manager);
         wl_data_source_add_listener(source, &source_listener, NULL);
-        wl_data_source_offer(source, "text/plain;charset=utf-8");
-        wl_data_source_offer(source, "text/plain");
-        wl_data_source_offer(source, "UTF8_STRING");
+        wl_data_source_offer(source, set_mime);
+        if (!strcmp(set_mime, "text/plain")) {
+            wl_data_source_offer(source, "text/plain;charset=utf-8");
+            wl_data_source_offer(source, "UTF8_STRING");
+        }
         wl_data_device_set_selection(device, source, 0);
         wl_display_flush(display);
         printf("PEER: serving selection\n");
@@ -167,8 +214,11 @@ int main(int argc, char **argv)
         fprintf(stderr, "PEER: no selection\n");
         return 1;
     }
-    char const *mime = preferred();
-    if (!mime) { fprintf(stderr, "PEER: no usable mime\n"); return 1; }
+    char const *mime = want_mime ? want_mime : preferred();
+    if (!mime || (want_mime && !mimes_has(want_mime))) {
+        fprintf(stderr, "PEER: requested mime not offered\n");
+        return 1;
+    }
 
     int fds[2];
     if (pipe(fds) != 0) return 1;
@@ -176,12 +226,11 @@ int main(int argc, char **argv)
     wl_display_flush(display);
     close(fds[1]);
 
-    char buffer[4096];
-    ssize_t n = read(fds[0], buffer, sizeof(buffer) - 1);
+    unsigned char buffer[65536];
+    ssize_t n = read(fds[0], buffer, sizeof(buffer));
     close(fds[0]);
     if (n < 0) n = 0;
-    buffer[n] = 0;
-    printf("%s", buffer);
+    fwrite(buffer, 1, (size_t)n, stdout);
     fflush(stdout);
     return 0;
 }

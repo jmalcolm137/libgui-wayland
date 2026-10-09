@@ -692,7 +692,7 @@ ByteString WaylandClient::preferred_mime_for(wl_data_offer* offer) const
     if (it == m_offer_mime_types.end() || it->value.is_empty())
         return {};
     auto const& mimes = it->value;
-    for (auto const& candidate : { "text/plain;charset=utf-8"sv, "text/plain"sv, "UTF8_STRING"sv, "STRING"sv }) {
+    for (auto const& candidate : { "text/plain;charset=utf-8"sv, "text/plain"sv, "UTF8_STRING"sv, "STRING"sv, "text/uri-list"sv, "image/png"sv }) {
         for (auto const& mime : mimes) {
             if (mime == candidate)
                 return mime;
@@ -742,12 +742,14 @@ void WaylandClient::on_selection(wl_data_offer* offer)
         m_clipboard_changed(mime);
 }
 
-void WaylandClient::on_source_send(wl_data_source*, char const*, int fd)
+void WaylandClient::on_source_send(wl_data_source*, char const* mime_type, int fd)
 {
-    if (!m_clipboard_data.is_empty()) {
+    auto it = m_clipboard_offers.find(ByteString(mime_type));
+    if (it != m_clipboard_offers.end()) {
+        auto const& data = it->value;
         size_t written = 0;
-        while (written < m_clipboard_data.size()) {
-            ssize_t n = write(fd, m_clipboard_data.data() + written, m_clipboard_data.size() - written);
+        while (written < data.size()) {
+            ssize_t n = write(fd, data.data() + written, data.size() - written);
             if (n <= 0)
                 break;
             written += static_cast<size_t>(n);
@@ -809,13 +811,9 @@ ErrorOr<ByteBuffer> WaylandClient::read_clipboard(ByteString& out_mime_type)
     return data;
 }
 
-void WaylandClient::write_clipboard(ReadonlyBytes data, ByteString const& mime_type)
+void WaylandClient::write_clipboard(HashMap<ByteString, ByteBuffer> offers)
 {
-    if (auto copied = ByteBuffer::copy(data); !copied.is_error())
-        m_clipboard_data = copied.release_value();
-    else
-        return;
-    m_clipboard_mime_type = mime_type;
+    m_clipboard_offers = move(offers);
 
     if (!m_data_device_manager || !m_data_device) {
         dbgln("LibWM/Wayland: cannot set clipboard (no data device)");
@@ -827,17 +825,19 @@ void WaylandClient::write_clipboard(ReadonlyBytes data, ByteString const& mime_t
         m_data_source = nullptr;
     }
 
+    if (m_clipboard_offers.is_empty()) {
+        wl_data_device_set_selection(m_data_device, nullptr, m_last_input_serial);
+        wl_display_flush(m_display);
+        return;
+    }
+
     m_data_source = wl_data_device_manager_create_data_source(m_data_device_manager);
     wl_data_source_add_listener(m_data_source, &s_data_source_listener, this);
-    wl_data_source_offer(m_data_source, mime_type.characters());
-    if (mime_type == "text/plain"sv) {
-        wl_data_source_offer(m_data_source, "text/plain;charset=utf-8");
-        wl_data_source_offer(m_data_source, "UTF8_STRING");
-        wl_data_source_offer(m_data_source, "STRING");
-    }
+    for (auto const& it : m_clipboard_offers)
+        wl_data_source_offer(m_data_source, it.key.characters());
     wl_data_device_set_selection(m_data_device, m_data_source, m_last_input_serial);
     wl_display_flush(m_display);
-    dbgln("LibWM/Wayland: set clipboard (mime='{}', {} bytes, serial {})", mime_type, data.size(), m_last_input_serial);
+    dbgln("LibWM/Wayland: set clipboard ({} representation(s), serial {})", m_clipboard_offers.size(), m_last_input_serial);
 }
 
 WaylandClient::WindowSurface* WaylandClient::find(i32 window_id)
