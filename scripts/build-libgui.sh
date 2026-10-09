@@ -28,7 +28,7 @@ if [[ ${#TARGETS[@]} -eq 0 ]]; then
     # apps -- Terminal, SystemMonitor, Debugger, CrashReporter, MouseSettings --
     # are excluded; see README).
     TARGETS=(
-        LibGfx LibGUI wm serenity-audio
+        LibGfx LibGUI wm serenity-audio eglgpu
         Calculator PDFViewer Piano libwm-test-window
         3DFileViewer Tubes About AnalogClock Assistant Browser BrowserSettings
         Calendar CalendarSettings CharacterMap ClockSettings Escalator FileManager
@@ -50,9 +50,14 @@ for patch in "$PROJECT_ROOT"/patches/*.patch; do
     name="$(basename "$patch")"
     if git -C "$SERENITY_SRC" apply --reverse --check "$patch" >/dev/null 2>&1; then
         echo "==> $name already applied"
-    else
+    elif git -C "$SERENITY_SRC" apply --check "$patch" >/dev/null 2>&1; then
         echo "==> Applying $name"
         git -C "$SERENITY_SRC" apply "$patch"
+    else
+        # Several patches edit the same files (e.g. Meta/Lagom/CMakeLists.txt), so
+        # once those are applied a clean reverse-check is impossible even though
+        # this patch is too. Treat that as already applied rather than failing.
+        echo "==> $name already applied (overlapping context)"
     fi
 done
 

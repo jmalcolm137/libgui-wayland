@@ -1,0 +1,60 @@
+diff --git a/Meta/Lagom/CMakeLists.txt b/Meta/Lagom/CMakeLists.txt
+--- a/Meta/Lagom/CMakeLists.txt
++++ b/Meta/Lagom/CMakeLists.txt
+@@ -625,7 +625,10 @@
+         add_subdirectory("${SERENITY_PROJECT_ROOT}/../src" "${CMAKE_CURRENT_BINARY_DIR}/libwm")
+ 
+         # libgui-wayland: LibSerenityAudio (the PipeWire <-> LibAudio compatibility layer).
+         add_subdirectory("${SERENITY_PROJECT_ROOT}/../libserenity-audio" "${CMAKE_CURRENT_BINARY_DIR}/libserenity-audio")
+ 
++        # libgui-wayland: EGLGPU (a Mesa/EGL-backed GPU::Device with a LibSoftGPU
++        # fallback; loaded at runtime by LibGPU's driver).
++        add_subdirectory("${SERENITY_PROJECT_ROOT}/../libeglgpu" "${CMAKE_CURRENT_BINARY_DIR}/libeglgpu")
+         # ------------------------------------------------------------------
+         # libgui-wayland: the SerenityOS applications we support on the host,
+diff --git a/Userland/Libraries/LibGPU/Driver.cpp b/Userland/Libraries/LibGPU/Driver.cpp
+--- a/Userland/Libraries/LibGPU/Driver.cpp
++++ b/Userland/Libraries/LibGPU/Driver.cpp
+@@ -21,6 +21,7 @@
+ #elif defined(AK_OS_MACOS)
+     { "softgpu"sv, "liblagom-softgpu.dylib" },
+ #else
+     { "softgpu"sv, "liblagom-softgpu.so.0" },
++    { "eglgpu"sv, "liblagom-eglgpu.so.0" },
+ #endif
+ };
+@@ -40,5 +40,12 @@
+         return Error::from_string_literal("The requested GPU driver was not found in the list of allowed driver libraries");
+ 
+-    auto lib = dlopen(it->value, RTLD_NOW);
++    // RTLD_DEEPBIND ensures a driver's own GL/EGL references resolve against its
++    // own dependencies (e.g. Mesa's libGL) rather than a library that was already
++    // loaded and exports the same symbols (Serenity's LibGL exports gl* too).
++    auto dlopen_flags = RTLD_NOW;
++#ifdef RTLD_DEEPBIND
++    dlopen_flags |= RTLD_DEEPBIND;
++#endif
++    auto lib = dlopen(it->value, dlopen_flags);
+     if (!lib)
+         return Error::from_string_literal("The library for the requested GPU driver could not be opened");
+diff --git a/Userland/Libraries/LibGL/GLContext.cpp b/Userland/Libraries/LibGL/GLContext.cpp
+--- a/Userland/Libraries/LibGL/GLContext.cpp
++++ b/Userland/Libraries/LibGL/GLContext.cpp
+@@ -883,5 +883,15 @@
+ ErrorOr<NonnullOwnPtr<GLContext>> create_context(Gfx::Bitmap& bitmap)
+ {
+-    // FIXME: Automatically select GPU drivers other than LibSoftGPU once they are mature enough.
+-    auto driver = TRY(GPU::Driver::try_create(Core::Environment::get("LIBGL_GPU_DRIVER"sv).value_or("softgpu"sv)));
++    // Prefer the Mesa/EGL backend, which itself falls back to LibSoftGPU when no
++    // usable EGL/GL context can be created. An explicit $LIBGL_GPU_DRIVER still
++    // wins, and a missing eglgpu library falls back to softgpu here.
++    RefPtr<GPU::Driver> driver;
++    if (auto requested = Core::Environment::get("LIBGL_GPU_DRIVER"sv); requested.has_value()) {
++        driver = TRY(GPU::Driver::try_create(*requested));
++    } else {
++        auto selected_driver = GPU::Driver::try_create("eglgpu"sv);
++        if (selected_driver.is_error())
++            selected_driver = TRY(GPU::Driver::try_create("softgpu"sv));
++        driver = selected_driver.release_value();
++    }
+     auto device = TRY(driver->try_create_device(bitmap.size()));

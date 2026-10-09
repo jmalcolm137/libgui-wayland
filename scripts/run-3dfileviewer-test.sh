@@ -3,11 +3,12 @@
 #
 # Runs the unmodified SerenityOS 3DFileViewer under the headless compositor,
 # opening a bundled .obj model. This exercises the *client-side* GL stack:
-# LibGL -> LibGPU -> LibSoftGPU (the CPU rasterizer). GL renders into an
-# offscreen Gfx::Bitmap, LibGUI paints that bitmap into the window backing
-# store, and LibWM presents it as a wl_shm buffer. No GPU, no EGL and no
-# compositor cooperation are involved -- which is the whole point: the GL stack
-# is transparent to LibWM and to the Wayland transport.
+# LibGL -> LibGPU -> the default backend (EGLGPU over Mesa/EGL, or LibSoftGPU
+# when no EGL context is available). GL renders into an offscreen Gfx::Bitmap,
+# LibGUI paints that bitmap into the window backing store, and LibWM presents it
+# as a wl_shm buffer. The compositor is not involved in rendering at all.
+#
+# Set LIBGL_GPU_DRIVER=softgpu to force the CPU rasterizer.
 #
 # The rendered window is dumped to a PNG for inspection.
 set -euo pipefail
@@ -44,7 +45,6 @@ set +e
 env XDG_RUNTIME_DIR="$RUNTIME" WAYLAND_DISPLAY=libwm-3d \
     SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
     LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-    LIBGL_GPU_DRIVER=softgpu \
     timeout 8 "$APP" "$MODEL" > "$RUNTIME/app.log" 2>&1
 set -e
 
