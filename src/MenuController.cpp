@@ -389,6 +389,8 @@ void MenuController::on_popup_motion(i32 menu_id, Gfx::IntPoint position)
         item_left(menu_id, menu->items[previous].identifier);
     if (index >= 0 && index < static_cast<int>(menu->items.size()) && menu->items[index].enabled && item_entered)
         item_entered(menu_id, menu->items[index].identifier);
+    if (redraw_popup)
+        redraw_popup(menu_id);
 }
 
 void MenuController::on_popup_button(i32 menu_id, Gfx::IntPoint position, bool pressed)

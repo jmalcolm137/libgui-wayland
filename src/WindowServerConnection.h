@@ -67,6 +67,7 @@ private:
     void install_input_callbacks();
     void install_menu_callbacks();
     void update_window_menubar(i32 window_id);
+    void present_menu_popup(i32 menu_id);
 
     // WindowServerEndpoint overrides (the commands LibGUI actually issues).
     void create_window(i32 window_id, i32 process_id, Gfx::IntRect const& rect, bool auto_position, bool has_alpha_channel, bool minimizable, bool closeable, bool resizable, bool fullscreen, bool frameless, bool forced_shadow, float alpha_hit_threshold, Gfx::IntSize base_size, Gfx::IntSize size_increment, Gfx::IntSize minimum_size, Optional<Gfx::IntSize> const& resize_aspect_ratio, i32 type, i32 mode, ByteString const& title, i32 parent_window_id, Gfx::IntRect const& launch_origin_rect) override;

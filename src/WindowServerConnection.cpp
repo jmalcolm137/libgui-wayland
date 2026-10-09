@@ -110,19 +110,31 @@ void WindowServerConnection::install_menu_callbacks()
 {
     m_menu.show_popup = [this](i32 menu_id, i32 window_id, Gfx::IntRect anchor, Gfx::IntSize size) {
         WaylandClient::the().create_popup(menu_id, window_id, anchor, size);
-        auto bitmap = Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, size);
-        if (bitmap.is_error())
-            return;
-        Gfx::Painter painter(*bitmap.value());
-        m_menu.render_popup(menu_id, painter);
-        WaylandClient::the().present_popup(menu_id, *bitmap.value());
+        present_menu_popup(menu_id);
     };
     m_menu.hide_popup = [](i32 menu_id) { WaylandClient::the().destroy_popup(menu_id); };
-    m_menu.item_activated = [this](i32 menu_id, u32 identifier) { async_menu_item_activated(menu_id, identifier); };
+    m_menu.item_activated = [this](i32 menu_id, u32 identifier) {
+        dbgln("LibWM: menu item activated menu={} id={}", menu_id, identifier);
+        async_menu_item_activated(menu_id, identifier);
+    };
     m_menu.item_entered = [this](i32 menu_id, u32 identifier) { async_menu_item_entered(menu_id, identifier); };
     m_menu.item_left = [this](i32 menu_id, u32 identifier) { async_menu_item_left(menu_id, identifier); };
     m_menu.visibility_changed = [this](i32 menu_id, bool visible) { async_menu_visibility_did_change(menu_id, visible); };
     m_menu.menubar_changed = [this](i32 window_id) { update_window_menubar(window_id); };
+    m_menu.redraw_popup = [this](i32 menu_id) { present_menu_popup(menu_id); };
+}
+
+void WindowServerConnection::present_menu_popup(i32 menu_id)
+{
+    auto size = m_menu.popup_size(menu_id);
+    if (size.is_empty())
+        return;
+    auto bitmap = Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, size);
+    if (bitmap.is_error())
+        return;
+    Gfx::Painter painter(*bitmap.value());
+    m_menu.render_popup(menu_id, painter);
+    WaylandClient::the().present_popup(menu_id, *bitmap.value());
 }
 
 void WindowServerConnection::update_window_menubar(i32 window_id)

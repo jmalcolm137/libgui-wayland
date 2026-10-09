@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Menubar/menu integration test (headless, no X11).
 #
-# Runs Calculator under the headless compositor, clicks "File" in the menubar,
-# and checks that a popup is created *below* the menubar (correct positioning),
-# then clicks "Quit" in the popup and checks the app exits.
+# Runs Calculator under the headless compositor and exercises two menus:
+#   * File -> Quit  : the item activates and the app exits 0.
+#   * Help -> About : the item activates and a second window (the dialog) opens.
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -27,50 +27,57 @@ cleanup() {
 trap cleanup EXIT
 HC_PID=""; APP_PID=""
 
-# "File" is the first menubar item, ~16px in and ~10px down (menubar is 20px).
-# Its one item, "Quit", sits just below the menubar.
-cat > "$RUNTIME/input.txt" <<'EOF'
+# run_case NAME MENUBAR_X ITEM_Y TIMEOUT
+# Clicks menubar item at (MENUBAR_X,10), then the popup item at (30,ITEM_Y).
+run_case() {
+    local name="$1" menubar_x="$2" item_y="$3" timeout_s="$4"
+    cat > "$RUNTIME/$name.input" <<EOF
 sleep 1200
-motion 16 10
+motion $menubar_x 10
 button PRESS left
 button RELEASE left
-sleep 400
-motion 30 34
+sleep 500
+motion 30 $item_y
 button PRESS left
 button RELEASE left
-sleep 200
+sleep 1200
 EOF
-
-"$HC" --socket menu-test --size 800x600 --timeout 6 \
-    --output "$RUNTIME/frame.png" --input "$RUNTIME/input.txt" > "$RUNTIME/hc.log" 2>&1 &
-HC_PID=$!
-for _ in $(seq 1 100); do [[ -e "$RUNTIME/menu-test" ]] && break; sleep 0.1; done
-
-set +e
-env XDG_RUNTIME_DIR="$RUNTIME" WAYLAND_DISPLAY=menu-test \
-    SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
-    LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-    timeout 8 "$APP" > "$RUNTIME/app.log" 2>&1
-APP_EXIT=$?
-set -e
-wait "$HC_PID" 2>/dev/null || true
+    "$HC" --socket "menu-$name" --size 800x600 --timeout 6 \
+        --output "$RUNTIME/$name.png" --input "$RUNTIME/$name.input" > "$RUNTIME/$name.hc.log" 2>&1 &
+    HC_PID=$!
+    for _ in $(seq 1 100); do [[ -e "$RUNTIME/menu-$name" ]] && break; sleep 0.1; done
+    set +e
+    env XDG_RUNTIME_DIR="$RUNTIME" WAYLAND_DISPLAY="menu-$name" \
+        SERENITY_ROOT= SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
+        LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        timeout "$timeout_s" "$APP" > "$RUNTIME/$name.app.log" 2>&1
+    CASE_EXIT=$?
+    set -e
+    wait "$HC_PID" 2>/dev/null || true
+    HC_PID=""
+}
 
 failures=0
-check() { if eval "$2"; then printf '%-46s PASS\n' "$1"; else printf '%-46s FAIL\n' "$1"; failures=$((failures + 1)); fi; }
+check() { if eval "$2"; then printf '%-50s PASS\n' "$1"; else printf '%-50s FAIL\n' "$1"; failures=$((failures + 1)); fi; }
 
-check "menubar click opened a popup"   "grep -q 'popup .* created' '$RUNTIME/app.log'"
-check "popup was configured"           "grep -q 'popup configure at' '$RUNTIME/app.log'"
-# The popup must anchor at the File menubar item (surface x ~0), not at random.
-check "popup anchored at the menubar item" "grep -qE 'popup [0-9]+ created .* at 0,0$' '$RUNTIME/app.log'"
-# The earlier bug: attaching a buffer before configure is a protocol error.
-check "no attach-before-configure error" "! grep -q 'attached a buffer before configure' '$RUNTIME/hc.log'"
-check "clicking Quit activated an item" "grep -q 'menu_item_activated' '$RUNTIME/app.log' || [[ $APP_EXIT -eq 0 ]]"
-grep 'popup configure at' "$RUNTIME/app.log" | tail -2 | sed 's/^/  /' || true
+# File (x~16) -> Quit (first item, y~13).
+run_case quit 16 13 8
+check "File: menubar click opened a popup"        "grep -q 'popup .* created' '$RUNTIME/quit.app.log'"
+check "File: popup anchored at the item (x=0)"    "grep -qE 'popup [0-9]+ created .* at 0,0$' '$RUNTIME/quit.app.log'"
+check "File: no attach-before-configure error"    "! grep -q 'attached a buffer before configure' '$RUNTIME/quit.hc.log'"
+check "File: Quit activated an item"              "grep -q 'menu item activated' '$RUNTIME/quit.app.log'"
+check "File: app exited after Quit"               "[[ $CASE_EXIT -eq 0 ]]"
+
+# Help (x~225) -> About (third item, y~57).
+run_case about 225 57 6
+check "Help: menubar click opened a popup"        "grep -q 'popup .* created' '$RUNTIME/about.app.log'"
+check "Help: About activated an item"             "grep -q 'menu item activated' '$RUNTIME/about.app.log'"
+check "Help: About opened a second window"        "[[ \$(grep -c 'create_window' '$RUNTIME/about.app.log') -ge 2 ]]"
+check "Help: app stayed running (dialog)"         "[[ $CASE_EXIT -ne 0 ]]"
 
 if [[ $failures -ne 0 ]]; then
     KEEP=1
     echo "==> $failures check(s) failed; logs in $RUNTIME"
-    tail -20 "$RUNTIME/app.log"
     exit 1
 fi
 echo "==> menu test passed"

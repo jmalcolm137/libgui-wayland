@@ -96,6 +96,7 @@ public:
     Function<void(i32 menu_id, u32 identifier)> item_left;
     Function<void(i32 menu_id, bool visible)> visibility_changed;
     Function<void(i32 window_id)> menubar_changed;
+    Function<void(i32 menu_id)> redraw_popup;
 
 private:
     Menu* find_menu(i32 menu_id);
