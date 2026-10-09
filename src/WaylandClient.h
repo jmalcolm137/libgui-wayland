@@ -6,11 +6,13 @@
 
 #pragma once
 
+#include <AK/ByteBuffer.h>
 #include <AK/ByteString.h>
 #include <AK/Error.h>
 #include <AK/Function.h>
 #include <AK/HashMap.h>
 #include <AK/NonnullOwnPtr.h>
+#include <AK/Span.h>
 #include <AK/RefPtr.h>
 #include <AK/Vector.h>
 #include <LibGfx/Point.h>
@@ -18,6 +20,10 @@
 
 struct wl_buffer;
 struct wl_compositor;
+struct wl_data_device;
+struct wl_data_device_manager;
+struct wl_data_offer;
+struct wl_data_source;
 struct wl_display;
 struct wl_keyboard;
 struct wl_output;
@@ -75,6 +81,15 @@ public:
 
     void set_input_callbacks(InputCallbacks callbacks) { m_input = move(callbacks); }
 
+    // --- Clipboard (native Wayland data device) ---
+    // Called when the compositor's selection changes; the mime type is a
+    // preferred Serenity-side type (e.g. "text/plain").
+    void set_clipboard_changed_callback(Function<void(ByteString const&)> callback) { m_clipboard_changed = move(callback); }
+    // Fetch the current selection, preferring text. Blocks until the source closes the pipe.
+    ErrorOr<ByteBuffer> read_clipboard(ByteString& out_mime_type);
+    // Advertise `data` as the selection.
+    void write_clipboard(ReadonlyBytes data, ByteString const& mime_type);
+
     // Window <-> xdg_toplevel lifecycle.
     void create_window(i32 window_id, Gfx::IntSize, ByteString const& title, bool has_alpha);
     void destroy_window(i32 window_id);
@@ -96,6 +111,7 @@ public:
     void add_seat(wl_seat* seat);
     void add_wm_base(xdg_wm_base* wm_base);
     void set_decoration_manager(zxdg_decoration_manager_v1* manager) { m_decoration_manager = manager; }
+    void set_data_device_manager(wl_data_device_manager* manager);
     void add_output(wl_output* output);
     void on_output_mode(Gfx::IntSize physical_size) { m_physical_size = physical_size; }
     void on_output_scale(int factor) { m_scale = factor > 0 ? factor : 1; }
@@ -115,6 +131,13 @@ public:
     void on_toplevel_configure(xdg_toplevel*, bool activated);
     void on_toplevel_close(xdg_toplevel*);
 
+    void on_data_offer(wl_data_offer*);
+    void on_data_offer_mime(wl_data_offer*, char const* mime_type);
+    void on_selection(wl_data_offer*);
+    void on_source_send(wl_data_source*, char const* mime_type, int fd);
+    void on_source_cancelled(wl_data_source*);
+    void note_input_serial(u32 serial) { m_last_input_serial = serial; }
+
 private:
     WaylandClient() = default;
 
@@ -133,6 +156,8 @@ private:
     WindowSurface* find(i32 window_id);
     void purge_released_buffers(WindowSurface&);
     u32 current_modifiers() const;
+    void maybe_create_data_device();
+    ByteString preferred_mime_for(wl_data_offer*) const;
 
     wl_display* m_display { nullptr };
     wl_registry* m_registry { nullptr };
@@ -149,6 +174,17 @@ private:
     xkb_context* m_xkb_context { nullptr };
     xkb_keymap* m_xkb_keymap { nullptr };
     xkb_state* m_xkb_state { nullptr };
+
+    wl_data_device_manager* m_data_device_manager { nullptr };
+    wl_data_device* m_data_device { nullptr };
+    wl_data_offer* m_current_offer { nullptr };
+    Vector<wl_data_offer*> m_pending_offers;
+    HashMap<u64, Vector<ByteString>> m_offer_mime_types;
+    wl_data_source* m_data_source { nullptr };
+    ByteBuffer m_clipboard_data;
+    ByteString m_clipboard_mime_type;
+    u32 m_last_input_serial { 0 };
+    Function<void(ByteString const&)> m_clipboard_changed;
 
     InputCallbacks m_input;
     i32 m_pointer_window { -1 };

@@ -60,6 +60,8 @@ if [[ "$RUN_TESTS" == "1" ]]; then
     SERENITY_SRC="$SERENITY_SRC" BUILD_DIR="$BUILD_DIR" "$PROJECT_ROOT/scripts/run-lib-tests.sh"
     echo "==> Running headless integration test"
     SERENITY_SRC="$SERENITY_SRC" BUILD_DIR="$BUILD_DIR" "$PROJECT_ROOT/scripts/run-headless-tests.sh"
+    echo "==> Running clipboard integration test"
+    SERENITY_SRC="$SERENITY_SRC" BUILD_DIR="$BUILD_DIR" "$PROJECT_ROOT/scripts/run-clipboard-test.sh"
 fi
 
 echo "==> Done. Libraries in $BUILD_DIR/lib"

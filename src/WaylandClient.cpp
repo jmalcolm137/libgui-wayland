@@ -6,10 +6,13 @@
 
 #include "WaylandClient.h"
 #include <AK/Assertions.h>
+#include <AK/ByteBuffer.h>
 #include <Kernel/API/KeyCode.h>
 #include <LibCore/Notifier.h>
 #include <LibGUI/Event.h>
+#include <errno.h>
 #include <linux/input-event-codes.h>
+#include <poll.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -39,6 +42,10 @@ static void registry_global(void* data, wl_registry* registry, uint32_t name, ch
         self.add_wm_base(reinterpret_cast<xdg_wm_base*>(wl_registry_bind(registry, name, &xdg_wm_base_interface, 1)));
     else if (!strcmp(interface, zxdg_decoration_manager_v1_interface.name))
         self.set_decoration_manager(reinterpret_cast<zxdg_decoration_manager_v1*>(wl_registry_bind(registry, name, &zxdg_decoration_manager_v1_interface, min(version, 1u))));
+    else if (!strcmp(interface, wl_data_device_manager_interface.name)) {
+        dbgln("LibWM/Wayland: found wl_data_device_manager v{}", version);
+        self.set_data_device_manager(reinterpret_cast<wl_data_device_manager*>(wl_registry_bind(registry, name, &wl_data_device_manager_interface, min(version, 3u))));
+    }
 }
 
 static void registry_global_remove(void*, wl_registry*, uint32_t) { }
@@ -261,8 +268,9 @@ static wl_seat_listener const s_seat_listener = {
     .name = seat_name,
 };
 
-static void pointer_enter(void* data, wl_pointer*, uint32_t, wl_surface* surface, wl_fixed_t sx, wl_fixed_t sy)
+static void pointer_enter(void* data, wl_pointer*, uint32_t serial, wl_surface* surface, wl_fixed_t sx, wl_fixed_t sy)
 {
+    static_cast<WaylandClient*>(data)->note_input_serial(serial);
     static_cast<WaylandClient*>(data)->on_pointer_enter(surface, { wl_fixed_to_int(sx), wl_fixed_to_int(sy) });
 }
 
@@ -276,8 +284,9 @@ static void pointer_motion(void* data, wl_pointer*, uint32_t, wl_fixed_t sx, wl_
     static_cast<WaylandClient*>(data)->on_pointer_motion({ wl_fixed_to_int(sx), wl_fixed_to_int(sy) });
 }
 
-static void pointer_button(void* data, wl_pointer*, uint32_t, uint32_t, uint32_t button, uint32_t state)
+static void pointer_button(void* data, wl_pointer*, uint32_t serial, uint32_t, uint32_t button, uint32_t state)
 {
+    static_cast<WaylandClient*>(data)->note_input_serial(serial);
     static_cast<WaylandClient*>(data)->on_pointer_button(button, state == WL_POINTER_BUTTON_STATE_PRESSED);
 }
 
@@ -318,8 +327,9 @@ static void keyboard_keymap(void* data, wl_keyboard*, uint32_t, int32_t fd, uint
     static_cast<WaylandClient*>(data)->on_keyboard_keymap(fd, size);
 }
 
-static void keyboard_enter(void* data, wl_keyboard*, uint32_t, wl_surface* surface, wl_array*)
+static void keyboard_enter(void* data, wl_keyboard*, uint32_t serial, wl_surface* surface, wl_array*)
 {
+    static_cast<WaylandClient*>(data)->note_input_serial(serial);
     static_cast<WaylandClient*>(data)->on_keyboard_focus(surface, true);
 }
 
@@ -328,8 +338,9 @@ static void keyboard_leave(void* data, wl_keyboard*, uint32_t, wl_surface*)
     static_cast<WaylandClient*>(data)->on_keyboard_focus(nullptr, false);
 }
 
-static void keyboard_key(void* data, wl_keyboard*, uint32_t, uint32_t, uint32_t key, uint32_t state)
+static void keyboard_key(void* data, wl_keyboard*, uint32_t serial, uint32_t, uint32_t key, uint32_t state)
 {
+    static_cast<WaylandClient*>(data)->note_input_serial(serial);
     static_cast<WaylandClient*>(data)->on_keyboard_key(key, state == WL_KEYBOARD_KEY_STATE_PRESSED);
 }
 
@@ -347,6 +358,71 @@ static wl_keyboard_listener const s_keyboard_listener = {
     .key = keyboard_key,
     .modifiers = keyboard_modifiers,
     .repeat_info = keyboard_repeat_info,
+};
+
+// --- wl_data_device / wl_data_offer / wl_data_source -------------------------
+
+static void data_device_data_offer(void* data, wl_data_device*, wl_data_offer* offer)
+{
+    static_cast<WaylandClient*>(data)->on_data_offer(offer);
+}
+
+static void data_device_enter(void*, wl_data_device*, uint32_t, wl_surface*, wl_fixed_t, wl_fixed_t, wl_data_offer*) { }
+static void data_device_leave(void*, wl_data_device*) { }
+static void data_device_motion(void*, wl_data_device*, uint32_t, wl_fixed_t, wl_fixed_t) { }
+static void data_device_drop(void*, wl_data_device*) { }
+
+static void data_device_selection(void* data, wl_data_device*, wl_data_offer* offer)
+{
+    static_cast<WaylandClient*>(data)->on_selection(offer);
+}
+
+static wl_data_device_listener const s_data_device_listener = {
+    .data_offer = data_device_data_offer,
+    .enter = data_device_enter,
+    .leave = data_device_leave,
+    .motion = data_device_motion,
+    .drop = data_device_drop,
+    .selection = data_device_selection,
+};
+
+static void data_offer_offer(void* data, wl_data_offer* offer, char const* mime_type)
+{
+    static_cast<WaylandClient*>(data)->on_data_offer_mime(offer, mime_type);
+}
+
+static void data_offer_source_actions(void*, wl_data_offer*, uint32_t) { }
+static void data_offer_action(void*, wl_data_offer*, uint32_t) { }
+
+static wl_data_offer_listener const s_data_offer_listener = {
+    .offer = data_offer_offer,
+    .source_actions = data_offer_source_actions,
+    .action = data_offer_action,
+};
+
+static void data_source_target(void*, wl_data_source*, char const*) { }
+
+static void data_source_send(void* data, wl_data_source* source, char const* mime_type, int32_t fd)
+{
+    static_cast<WaylandClient*>(data)->on_source_send(source, mime_type, fd);
+}
+
+static void data_source_cancelled(void* data, wl_data_source* source)
+{
+    static_cast<WaylandClient*>(data)->on_source_cancelled(source);
+}
+
+static void data_source_dnd_drop_performed(void*, wl_data_source*) { }
+static void data_source_dnd_finished(void*, wl_data_source*) { }
+static void data_source_action(void*, wl_data_source*, uint32_t) { }
+
+static wl_data_source_listener const s_data_source_listener = {
+    .target = data_source_target,
+    .send = data_source_send,
+    .cancelled = data_source_cancelled,
+    .dnd_drop_performed = data_source_dnd_drop_performed,
+    .dnd_finished = data_source_dnd_finished,
+    .action = data_source_action,
 };
 
 // --- WaylandClient ------------------------------------------------------------
@@ -405,6 +481,23 @@ void WaylandClient::add_seat(wl_seat* seat)
 {
     m_seat = seat;
     wl_seat_add_listener(seat, &s_seat_listener, this);
+    maybe_create_data_device();
+}
+
+void WaylandClient::set_data_device_manager(wl_data_device_manager* manager)
+{
+    m_data_device_manager = manager;
+    maybe_create_data_device();
+}
+
+void WaylandClient::maybe_create_data_device()
+{
+    if (m_data_device || !m_seat || !m_data_device_manager)
+        return;
+    m_data_device = wl_data_device_manager_get_data_device(m_data_device_manager, m_seat);
+    dbgln("LibWM/Wayland: data device created: {}", m_data_device != nullptr);
+    if (m_data_device)
+        wl_data_device_add_listener(m_data_device, &s_data_device_listener, this);
 }
 
 void WaylandClient::add_wm_base(xdg_wm_base* wm_base)
@@ -591,6 +684,160 @@ void WaylandClient::on_toplevel_close(xdg_toplevel* toplevel)
             return;
         }
     }
+}
+
+ByteString WaylandClient::preferred_mime_for(wl_data_offer* offer) const
+{
+    auto it = m_offer_mime_types.find(reinterpret_cast<u64>(offer));
+    if (it == m_offer_mime_types.end() || it->value.is_empty())
+        return {};
+    auto const& mimes = it->value;
+    for (auto const& candidate : { "text/plain;charset=utf-8"sv, "text/plain"sv, "UTF8_STRING"sv, "STRING"sv }) {
+        for (auto const& mime : mimes) {
+            if (mime == candidate)
+                return mime;
+        }
+    }
+    // No known type: fall back to the source's first offer (e.g. image/png).
+    return mimes.first();
+}
+
+void WaylandClient::on_data_offer(wl_data_offer* offer)
+{
+    dbgln("LibWM/Wayland: data offer {}", static_cast<void*>(offer));
+    m_pending_offers.append(offer);
+    m_offer_mime_types.set(reinterpret_cast<u64>(offer), {});
+    wl_data_offer_add_listener(offer, &s_data_offer_listener, this);
+}
+
+void WaylandClient::on_data_offer_mime(wl_data_offer* offer, char const* mime_type)
+{
+    auto it = m_offer_mime_types.find(reinterpret_cast<u64>(offer));
+    if (it != m_offer_mime_types.end())
+        it->value.append(ByteString(mime_type));
+}
+
+void WaylandClient::on_selection(wl_data_offer* offer)
+{
+    for (auto* pending : m_pending_offers) {
+        if (pending != offer) {
+            m_offer_mime_types.remove(reinterpret_cast<u64>(pending));
+            wl_data_offer_destroy(pending);
+        }
+    }
+    m_pending_offers.clear();
+    if (offer)
+        m_pending_offers.append(offer);
+    m_current_offer = offer;
+
+    ByteString mime;
+    if (offer) {
+        mime = preferred_mime_for(offer);
+        // Serenity clients key on "text/plain"; normalize the charset variant.
+        if (mime.starts_with("text/plain"sv))
+            mime = ByteString("text/plain");
+    }
+    dbgln("LibWM/Wayland: selection changed (mime='{}')", mime);
+    if (m_clipboard_changed)
+        m_clipboard_changed(mime);
+}
+
+void WaylandClient::on_source_send(wl_data_source*, char const*, int fd)
+{
+    if (!m_clipboard_data.is_empty()) {
+        size_t written = 0;
+        while (written < m_clipboard_data.size()) {
+            ssize_t n = write(fd, m_clipboard_data.data() + written, m_clipboard_data.size() - written);
+            if (n <= 0)
+                break;
+            written += static_cast<size_t>(n);
+        }
+    }
+    close(fd);
+}
+
+void WaylandClient::on_source_cancelled(wl_data_source* source)
+{
+    if (source == m_data_source)
+        m_data_source = nullptr;
+    if (source)
+        wl_data_source_destroy(source);
+}
+
+ErrorOr<ByteBuffer> WaylandClient::read_clipboard(ByteString& out_mime_type)
+{
+    out_mime_type = {};
+    if (!m_current_offer || !m_display)
+        return Error::from_string_literal("LibWM: no clipboard selection");
+
+    ByteString mime = preferred_mime_for(m_current_offer);
+    if (mime.is_empty())
+        return Error::from_string_literal("LibWM: selection offers no usable type");
+
+    int fds[2];
+    if (pipe(fds) != 0)
+        return Error::from_errno(errno);
+
+    wl_data_offer_receive(m_current_offer, mime.characters(), fds[1]);
+    wl_display_flush(m_display);
+    close(fds[1]);
+
+    ByteBuffer data;
+    char buffer[4096];
+    for (;;) {
+        struct pollfd pfd {
+            .fd = fds[0],
+            .events = POLLIN,
+            .revents = 0,
+        };
+        int rc = poll(&pfd, 1, 2000);
+        if (rc <= 0)
+            break;
+        ssize_t n = read(fds[0], buffer, sizeof(buffer));
+        if (n <= 0)
+            break;
+        if (auto appended = data.try_append(buffer, static_cast<size_t>(n)); appended.is_error()) {
+            close(fds[0]);
+            return appended.release_error();
+        }
+    }
+    close(fds[0]);
+
+    if (mime.starts_with("text/plain"sv))
+        mime = ByteString("text/plain");
+    out_mime_type = move(mime);
+    return data;
+}
+
+void WaylandClient::write_clipboard(ReadonlyBytes data, ByteString const& mime_type)
+{
+    if (auto copied = ByteBuffer::copy(data); !copied.is_error())
+        m_clipboard_data = copied.release_value();
+    else
+        return;
+    m_clipboard_mime_type = mime_type;
+
+    if (!m_data_device_manager || !m_data_device) {
+        dbgln("LibWM/Wayland: cannot set clipboard (no data device)");
+        return;
+    }
+
+    if (m_data_source) {
+        wl_data_source_destroy(m_data_source);
+        m_data_source = nullptr;
+    }
+
+    m_data_source = wl_data_device_manager_create_data_source(m_data_device_manager);
+    wl_data_source_add_listener(m_data_source, &s_data_source_listener, this);
+    wl_data_source_offer(m_data_source, mime_type.characters());
+    if (mime_type == "text/plain"sv) {
+        wl_data_source_offer(m_data_source, "text/plain;charset=utf-8");
+        wl_data_source_offer(m_data_source, "UTF8_STRING");
+        wl_data_source_offer(m_data_source, "STRING");
+    }
+    wl_data_device_set_selection(m_data_device, m_data_source, m_last_input_serial);
+    wl_display_flush(m_display);
+    dbgln("LibWM/Wayland: set clipboard (mime='{}', {} bytes, serial {})", mime_type, data.size(), m_last_input_serial);
 }
 
 WaylandClient::WindowSurface* WaylandClient::find(i32 window_id)

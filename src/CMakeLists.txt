@@ -56,6 +56,12 @@ add_executable(libwm-test-window test/TestWindow.cpp)
 target_include_directories(libwm-test-window PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(libwm-test-window PRIVATE LibMain LibGUI LibGfx LibCore LibIPC wm)
 
+# Reads the Wayland clipboard then publishes text, to exercise the clipboard bridge.
+add_executable(libwm-clipboard-test test/ClipboardTest.cpp)
+target_include_directories(libwm-clipboard-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_options(libwm-clipboard-test PRIVATE "-Wl,--no-as-needed")
+target_link_libraries(libwm-clipboard-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC wm)
+
 # --- Unmodified SerenityOS applications ---------------------------------------
 # Built directly from their upstream sources. No source is edited; only the GML
 # is precompiled (the app's own CMakeLists uses compile_gml, which requires a

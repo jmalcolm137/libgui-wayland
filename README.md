@@ -35,7 +35,9 @@ The shim is called **LibWM**. It sits between `LibGUI`'s WindowServer IPC protoc
 - **M3** — input + Calculator: done. Pointer/keyboard come from `wl_seat` (xkbcommon →
   Serenity `KeyCode`/modifiers), focus/activation/close handled, and the full input path is
   verified headlessly (the compositor injects a click; the widget receives it). The
-  **unmodified Calculator** builds and runs, rendering correctly on KDE Plasma.
+  **unmodified Calculator** builds and runs, decorated and movable, on KDE Plasma.
+- **M6 (partly)** — native clipboard: done. `wl_data_device`-based read and write, verified
+  headlessly in both directions with a native Wayland peer. Menus/popups and config remain.
 
 ```sh
 scripts/fetch-serenity.sh              # pinned, blobless, sparse checkout

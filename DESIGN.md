@@ -425,7 +425,7 @@ X11/Serenity got from server pointer grabs.
 | Portal | LibWM implementation |
 |---|---|
 | `window` | `WM::WindowServer` (the core of this project) |
-| `clipboard` | `WM::Clipboard` over `wl_data_device`; Serenity mime-data map ↔ `wl_data_source`/`wl_data_offer` |
+| `clipboard` | native Wayland `wl_data_device`/`wl_data_source`/`wl_data_offer`; Serenity text mime ↔ Wayland text mimes (§4.5) |
 | `config` | file-backed ConfigServer (`~/.config/…` INI), serving `ConfigServerEndpoint` |
 | `image` | in-process `LibGfx` image decoders, serving `ImageDecoderServerEndpoint` |
 | `filesystemaccess` | `xdg-desktop-portal` (D-Bus) where present, else a LibGUI `FilePicker` fallback; command-line file arguments work without it |
@@ -527,7 +527,40 @@ test asserts that the event reaches the LibGUI widget (`TestWindow: mouse down a
 button 1`), with the frame captured to PNG. This runs as part of the build
 (`scripts/run-headless-tests.sh`).
 
-### 4.2 Building the applications
+### 4.4 Unmodified Calculator
+
+The upstream `Userland/Applications/Calculator` sources build and run **unmodified** on
+Wayland (`main.cpp`, `Calculator.cpp`, `CalculatorWidget.cpp`, `Keypad.cpp`, and a precompiled
+`CalculatorWindow.gml`), rendering correctly — decorated and movable — on the live Plasma
+session. Startup required two more in-process portals besides the WindowServer:
+
+* **LaunchServer** — `Desktop::Launcher` registers and seals its allowlist synchronously
+  during `serenity_main`.
+* **Clipboard** — `LibGUI::TextBox` (via `TextEditor`) reads the clipboard while initialising.
+
+### 4.5 Native clipboard
+
+The clipboard bridges the SerenityOS clipboard protocol to Wayland's data device:
+
+* **Reads.** LibWM watches `wl_data_device.data_offer`/`selection`, records the offered mime
+  types, prefers `text/plain;charset=utf-8` → `text/plain` → `UTF8_STRING`, receives it into a
+  pipe, and returns it to the Serenity client (normalized to `text/plain`).
+* **Writes.** `set_clipboard_data` creates a `wl_data_source` offering the Serenity mime plus
+  standard text aliases, and calls `wl_data_device.set_selection`.
+* **Same thread as input, on purpose.** `set_selection` requires a serial from a *recent input
+  event on the same connection*, so the data device lives on the connection that owns the
+  seat. LibWM therefore serves all portals from a single server thread with one
+  `Core::EventLoop` and one `WaylandClient`; the last input serial is tracked from
+  pointer/keyboard events. (Interactive Copy — Ctrl+C or a menu action — supplies a serial;
+  a selection set with no prior input is ignored by real compositors, which is correct Wayland
+  behaviour.)
+
+Both directions are verified headlessly against a native `libwayland-client` peer
+(`tools/wl-clipboard-peer.c`): the peer owns the selection, our app reads it, then the peer
+reads what our app published. This runs as part of the build
+(`scripts/run-clipboard-test.sh`).
+
+### 4.6 Building the applications
 
 Serenity app `CMakeLists.txt` use `serenity_app`, `serenity_component`, `compile_gml`,
 `serenity_bin`, and `embed_resource`. Under Lagom these resolve through `Meta/CMake/`, so
@@ -538,7 +571,7 @@ embed). Any such accommodation is a *build flag or shim macro*, never an app sou
 `Calculator` needs `LibCore LibCrypto LibDesktop LibGfx LibGUI LibMain LibURL`.
 `PDFViewer` adds `LibPDF LibFileSystemAccessClient LibConfig`.
 
-### 4.3 Prefixes and running
+### 4.7 Prefixes and running
 
 Two user-local prefixes, no root (mirroring the sibling project):
 
@@ -645,7 +678,7 @@ open menus, copy/paste, resize/maximise, HiDPI.
 | M3 | Pointer/keyboard input from `wl_seat`, focus/activation, close request; then **Calculator** | ✅ input + unmodified **Calculator** renders & runs on Plasma (§4.3) |
 | M4 | Theme/font parity; decorations; icons; alpha | ⬜ |
 | M5 | **PDFViewer** (LibPDF, scrolling, toolbars, file access) | ⬜ |
-| M6 | Menus/popups, clipboard, config persistence | ⬜ |
+| M6 | Menus/popups, clipboard, config persistence | 🟡 native clipboard done (§4.5); menus/popups and config pending |
 | M7 | Live Plasma session, headless test harness, CI matrix | 🟡 headless compositor + input test integrated (§5.2); CI matrix pending |
 | M8 | Crisp HiDPI (plumb an output scale into LibGUI's backing store) | ⬜ |
 
@@ -671,6 +704,7 @@ scripts/run-lib-tests.sh      upstream LibGfx test suite
 scripts/fetch-headless-compositor.sh   pinned clone of xlib-wayland (pure-Wayland compositor)
 scripts/build-headless-compositor.sh   Meson-build just the headless-compositor target
 scripts/run-headless-tests.sh headless app + synthetic-input integration test
+scripts/run-clipboard-test.sh native clipboard integration test (read + write)
 src/                          LibWM
   LibWM.{h,cpp}               portal registration + server threads
   WindowServerConnection.{h,cpp}  WindowServer protocol server
@@ -683,6 +717,7 @@ serenity/                     pinned SerenityOS checkout (gitignored)
 third_party/xlib-wayland/     pinned checkout, used only for its headless compositor (gitignored)
 build/                        host build outputs (gitignored)
 tools/gen-default-stub.py     generate a default stub for any IPC endpoint
+tools/wl-clipboard-peer.c     native libwayland-client clipboard peer (tests)
 ```
 
 Changes to files under `third_party/xlib-wayland/` (e.g. compositor improvements) are made in
