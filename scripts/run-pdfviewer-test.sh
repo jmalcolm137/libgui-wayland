@@ -163,6 +163,56 @@ wait "$HC_PID" 2>/dev/null || true
 
 check "double-click traversed a directory and opened a file" "grep -q 'set_window_title.*aaa/inner.pdf' '$RUNTIME/dc.app.log'"
 
+# Interactive resize: the compositor sets XDG_TOPLEVEL_STATE_RESIZING for the
+# duration of the drag (resize_begin) and clears it at the end (resize). The shim
+# must NOT re-render the client during the drag, and must deliver exactly one
+# window_resized when it ends.
+{
+    printf 'sleep 2000\n'
+    printf 'resize_begin 720 470\n'
+    printf 'resize_begin 800 520\n'
+    printf 'resize_begin 880 570\n'
+    printf 'resize_begin 960 620\n'
+    printf 'resize 1040 680\n'
+    printf 'sleep 1500\n'
+} > "$RUNTIME/resize.input"
+"$HC" --socket libwm-pdf-resize --size 1600x1200 --timeout 7 \
+    --output "$RUNTIME/resize-hc.png" --input "$RUNTIME/resize.input" > "$RUNTIME/resize-hc.log" 2>&1 &
+HC_PID=$!
+for _ in $(seq 1 100); do [[ -e "$RUNTIME/libwm-pdf-resize" ]] && break; sleep 0.1; done
+set +e
+env XDG_RUNTIME_DIR="$RUNTIME" WAYLAND_DISPLAY=libwm-pdf-resize \
+    SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
+    LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    timeout 8 "$APP" "$PDF" > "$RUNTIME/resize.app.log" 2>&1
+set -e
+wait "$HC_PID" 2>/dev/null || true
+
+check "interactive resize carries RESIZING"     "[[ \$(grep -c 'resizing=true' '$RUNTIME/resize.app.log') -ge 4 ]]"
+check "resize drag re-renders the client once"  "[[ \$(grep -c 'window_resized' '$RUNTIME/resize.app.log') -eq 1 ]]"
+check "resize flow did not crash"               "! grep -q 'VERIFICATION FAILED' '$RUNTIME/resize.app.log'"
+
+# Plain (non-interactive) resize still resizes live, one event per step.
+{
+    printf 'sleep 2000\n'
+    printf 'resize 700 500\nsleep 200\n'
+    printf 'resize 760 540\nsleep 200\n'
+    printf 'resize 820 580\nsleep 1200\n'
+} > "$RUNTIME/live.input"
+"$HC" --socket libwm-pdf-live --size 1600x1200 --timeout 7 \
+    --output "$RUNTIME/live-hc.png" --input "$RUNTIME/live.input" > "$RUNTIME/live-hc.log" 2>&1 &
+HC_PID=$!
+for _ in $(seq 1 100); do [[ -e "$RUNTIME/libwm-pdf-live" ]] && break; sleep 0.1; done
+set +e
+env XDG_RUNTIME_DIR="$RUNTIME" WAYLAND_DISPLAY=libwm-pdf-live \
+    SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
+    LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    timeout 8 "$APP" "$PDF" > "$RUNTIME/live.app.log" 2>&1
+set -e
+wait "$HC_PID" 2>/dev/null || true
+
+check "plain resize still resizes the client"   "[[ \$(grep -c 'window_resized' '$RUNTIME/live.app.log') -ge 3 ]]"
+
 if [[ $failures -ne 0 ]]; then
     echo "==> $failures PDFViewer check(s) failed; app log:"
     cat "$RUNTIME/app.log"
@@ -170,6 +220,8 @@ if [[ $failures -ne 0 ]]; then
     cat "$RUNTIME/open.app.log"
     echo "--- double-click run log ---"
     cat "$RUNTIME/dc.app.log"
+    echo "--- resize run log ---"
+    cat "$RUNTIME/resize.app.log"
     exit 1
 fi
 echo "==> PDFViewer test passed (rendered: $FRAME_OUT)"

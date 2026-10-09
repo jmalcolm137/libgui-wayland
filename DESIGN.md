@@ -519,6 +519,16 @@ The first vertical slice is implemented and verified on a real KDE Plasma Waylan
   interactive resize), so the correct region is presented. Crisp rendering at a fractional
   scale still requires plumbing a device scale into LibGUI's backing store (M8); today the
   logical buffer is presented 1:1 and the compositor upscales it.
+* **Interactive resize.** The compositor owns the drag (server-side decorations); while it is
+  in progress the toplevel configure carries `XDG_TOPLEVEL_STATE_RESIZING`. LibWM then keeps
+  the client's **last frame** and stretches it to the new size with `wp_viewporter` instead of
+  asking the client to repaint for every configure; when the state clears it delivers a single
+  `window_resized` — one re-render for the whole drag. This matters because LibGUI apps can do
+  heavy work on resize: `PDFViewer::resize_event` throws away and re-rasterises every rendered
+  page, so a live resize would otherwise re-render the document on every pointer move. Presents
+  are additionally paced to the compositor with `wl_surface.frame` callbacks, and
+  configure-driven repaints are coalesced to one in flight per window. Verified by
+  `scripts/run-pdfviewer-test.sh`.
 
 Still deferred (next milestones): pointer/keyboard input (M3), CSD/decoration policy and DPI
 polish (M4), menus/popups and clipboard (M6).

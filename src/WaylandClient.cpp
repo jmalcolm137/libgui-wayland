@@ -23,6 +23,7 @@
 #include "xdg-decoration-client-protocol.h"
 #include "xdg-output-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
+#include "viewporter-client-protocol.h"
 
 namespace LibWM {
 
@@ -49,6 +50,8 @@ static void registry_global(void* data, wl_registry* registry, uint32_t name, ch
         self.set_data_device_manager(reinterpret_cast<wl_data_device_manager*>(wl_registry_bind(registry, name, &wl_data_device_manager_interface, min(version, 3u))));
     } else if (!strcmp(interface, zxdg_output_manager_v1_interface.name)) {
         self.set_xdg_output_manager(reinterpret_cast<zxdg_output_manager_v1*>(wl_registry_bind(registry, name, &zxdg_output_manager_v1_interface, min(version, 3u))));
+    } else if (!strcmp(interface, wp_viewporter_interface.name)) {
+        self.set_viewporter(reinterpret_cast<wp_viewporter*>(wl_registry_bind(registry, name, &wp_viewporter_interface, 1)));
     }
 }
 
@@ -145,16 +148,18 @@ static void toplevel_configure(void* data, xdg_toplevel* toplevel, int32_t width
     bool activated = false;
     bool fullscreen = false;
     bool maximized = false;
+    bool resizing = false;
     auto* state_data = static_cast<uint32_t const*>(states->data);
     for (size_t i = 0; i < states->size / sizeof(uint32_t); ++i) {
         switch (state_data[i]) {
         case XDG_TOPLEVEL_STATE_ACTIVATED: activated = true; break;
         case XDG_TOPLEVEL_STATE_FULLSCREEN: fullscreen = true; break;
         case XDG_TOPLEVEL_STATE_MAXIMIZED: maximized = true; break;
+        case XDG_TOPLEVEL_STATE_RESIZING: resizing = true; break;
         default: break;
         }
     }
-    self.on_toplevel_configure(toplevel, { width, height }, activated, fullscreen, maximized);
+    self.on_toplevel_configure(toplevel, { width, height }, activated, fullscreen, maximized, resizing);
 }
 
 static void toplevel_close(void* data, xdg_toplevel* toplevel)
@@ -819,9 +824,9 @@ void WaylandClient::on_keyboard_focus(wl_surface* surface, bool entered)
     m_focused_window = entered ? window_id_for_surface(surface) : -1;
 }
 
-void WaylandClient::on_toplevel_configure(xdg_toplevel* toplevel, Gfx::IntSize size, bool activated, bool fullscreen, bool maximized)
+void WaylandClient::on_toplevel_configure(xdg_toplevel* toplevel, Gfx::IntSize size, bool activated, bool fullscreen, bool maximized, bool resizing)
 {
-    dbgln("LibWM/Wayland: toplevel configure {}x{} activated={} fullscreen={} maximized={}", size.width(), size.height(), activated, fullscreen, maximized);
+    dbgln("LibWM/Wayland: toplevel configure {}x{} activated={} fullscreen={} maximized={} resizing={}", size.width(), size.height(), activated, fullscreen, maximized, resizing);
     for (auto const& it : m_windows) {
         auto& w = *it.value;
         if (w.toplevel != toplevel)
@@ -832,12 +837,28 @@ void WaylandClient::on_toplevel_configure(xdg_toplevel* toplevel, Gfx::IntSize s
         bool const was_fullscreen = w.fullscreen;
         w.fullscreen = fullscreen || maximized;
 
+        if (!resizing)
+            w.resizing = false;
+
         auto resize_to = [&](Gfx::IntSize content) {
             if (content == w.size)
                 return;
             w.size = content;
             if (m_input.window_resize)
                 m_input.window_resize(w.window_id, content);
+        };
+
+        // Keep the client's last frame and let the compositor scale it to the
+        // new size for the duration of an interactive resize. Returns false if
+        // there is no viewport to stretch with.
+        auto stretch_to = [&](Gfx::IntSize content) {
+            if (!w.viewport)
+                return false;
+            wp_viewport_set_destination(w.viewport, content.width(), content.height() + w.inset);
+            w.stretch_active = true;
+            wl_surface_commit(w.surface);
+            wl_display_flush(m_display);
+            return true;
         };
 
         if (fullscreen || maximized) {
@@ -849,8 +870,17 @@ void WaylandClient::on_toplevel_configure(xdg_toplevel* toplevel, Gfx::IntSize s
             resize_to(w.fixed_size);
         } else if (w.resizable) {
             // Interactive resize for resizable windows.
-            if (size.width() > 0 && size.height() > w.inset)
-                resize_to({ size.width(), size.height() - w.inset });
+            if (size.width() > 0 && size.height() > w.inset) {
+                auto content = Gfx::IntSize { size.width(), size.height() - w.inset };
+                if (resizing) {
+                    w.resizing = true;
+                    // Don't re-render the client for every step; stretch instead.
+                    if (!stretch_to(content))
+                        resize_to(content);
+                } else {
+                    resize_to(content);
+                }
+            }
         }
         return;
     }
@@ -1255,6 +1285,8 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntSize size, ByteString c
     window_surface->has_alpha = has_alpha;
     window_surface->resizable = resizable;
     window_surface->fixed_size = size;
+    if (m_viewporter)
+        window_surface->viewport = wp_viewporter_get_viewport(m_viewporter, surface);
 
     // A non-resizable window pins min == max (fullscreen still overrides this).
     if (!resizable) {
@@ -1288,6 +1320,8 @@ void WaylandClient::destroy_window(i32 window_id)
     }
     if (window_surface.toplevel)
         xdg_toplevel_destroy(window_surface.toplevel);
+    if (window_surface.viewport)
+        wp_viewport_destroy(window_surface.viewport);
     if (window_surface.decoration)
         zxdg_toplevel_decoration_v1_destroy(window_surface.decoration);
     if (window_surface.xdg_surface_object)
@@ -1385,6 +1419,15 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
         wl_callback_add_listener(window_surface.frame_callback, &s_frame_listener, this);
         window_surface.frame_in_flight = true;
     };
+
+    // After an interactive resize the client renders the final size; drop the
+    // stretch so the surface shows the buffer at its native size. Doing it here
+    // (rather than at the end of the drag) avoids a snap back to the old size.
+    if (window_surface.stretch_active && !window_surface.resizing) {
+        if (window_surface.viewport)
+            wp_viewport_set_destination(window_surface.viewport, -1, -1);
+        window_surface.stretch_active = false;
+    }
 
     purge_released_buffers(window_surface);
 

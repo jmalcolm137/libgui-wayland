@@ -34,6 +34,8 @@ struct wl_registry;
 struct wl_seat;
 struct wl_shm;
 struct wl_surface;
+struct wp_viewporter;
+struct wp_viewport;
 struct xdg_popup;
 struct xdg_surface;
 struct xdg_toplevel;
@@ -141,6 +143,7 @@ public:
     void add_seat(wl_seat* seat);
     void add_wm_base(xdg_wm_base* wm_base);
     void set_decoration_manager(zxdg_decoration_manager_v1* manager) { m_decoration_manager = manager; }
+    void set_viewporter(wp_viewporter* viewporter) { m_viewporter = viewporter; }
     void set_data_device_manager(wl_data_device_manager* manager);
     void add_output(wl_output* output);
     void set_xdg_output_manager(zxdg_output_manager_v1* manager);
@@ -160,7 +163,7 @@ public:
     void on_keyboard_modifiers(u32 depressed, u32 latched, u32 locked, u32 group, u32 serial);
     void on_keyboard_key(u32 key, bool pressed);
     void on_keyboard_focus(wl_surface*, bool entered);
-    void on_toplevel_configure(xdg_toplevel*, Gfx::IntSize size, bool activated, bool fullscreen, bool maximized);
+    void on_toplevel_configure(xdg_toplevel*, Gfx::IntSize size, bool activated, bool fullscreen, bool maximized, bool resizing);
     void on_toplevel_close(xdg_toplevel*);
 
     void on_data_offer(wl_data_offer*);
@@ -204,6 +207,13 @@ private:
         i32 pending_pitch { 0 };
         bool pending_has_alpha { false };
         bool has_pending { false };
+        // Interactive-resize stretch: while the compositor reports
+        // XDG_TOPLEVEL_STATE_RESIZING we keep the last frame and let the
+        // compositor scale it via a wp_viewport, avoiding a client re-render
+        // per configure.
+        wp_viewport* viewport { nullptr };
+        bool resizing { false };
+        bool stretch_active { false };
     };
 
     struct Popup {
@@ -241,6 +251,7 @@ private:
     zxdg_output_manager_v1* m_xdg_output_manager { nullptr };
     xdg_wm_base* m_wm_base { nullptr };
     zxdg_decoration_manager_v1* m_decoration_manager { nullptr };
+    wp_viewporter* m_viewporter { nullptr };
     RefPtr<Core::Notifier> m_notifier;
 
     xkb_context* m_xkb_context { nullptr };

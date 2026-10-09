@@ -9,7 +9,7 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 XLIB_WAYLAND_REMOTE="${XLIB_WAYLAND_REMOTE:-https://github.com/jmalcolm137/xlib-wayland.git}"
-XLIB_WAYLAND_REVISION="${XLIB_WAYLAND_REVISION:-fdadee5d638a582aed20c16947cd2a2a2ca5f8c1}"
+XLIB_WAYLAND_REVISION="${XLIB_WAYLAND_REVISION:-3cfa18c60279157a363c86de336764ce31292524}"
 XLIB_WAYLAND_SRC="${XLIB_WAYLAND_SRC:-$PROJECT_ROOT/third_party/xlib-wayland}"
 
 if [[ -d "$XLIB_WAYLAND_SRC/.git" ]]; then

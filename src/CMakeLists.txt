@@ -44,6 +44,18 @@ add_custom_command(
     VERBATIM
 )
 
+# wp_viewporter (stretch the last frame during an interactive resize).
+set(VIEWPORTER_XML "${WAYLAND_PROTOCOLS_DIR}/stable/viewporter/viewporter.xml")
+add_custom_command(
+    OUTPUT
+        "${WM_WAYLAND_DIR}/viewporter-client-protocol.h"
+        "${WM_WAYLAND_DIR}/viewporter-protocol.c"
+    COMMAND "${WAYLAND_SCANNER}" client-header "${VIEWPORTER_XML}" "${WM_WAYLAND_DIR}/viewporter-client-protocol.h"
+    COMMAND "${WAYLAND_SCANNER}" private-code "${VIEWPORTER_XML}" "${WM_WAYLAND_DIR}/viewporter-protocol.c"
+    DEPENDS "${VIEWPORTER_XML}"
+    VERBATIM
+)
+
 add_library(wm SHARED
     LibWM.cpp
     MenuController.cpp
@@ -52,6 +64,7 @@ add_library(wm SHARED
     "${WM_WAYLAND_DIR}/xdg-shell-protocol.c"
     "${WM_WAYLAND_DIR}/xdg-decoration-protocol.c"
     "${WM_WAYLAND_DIR}/xdg-output-protocol.c"
+    "${WM_WAYLAND_DIR}/viewporter-protocol.c"
 )
 target_include_directories(wm PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
