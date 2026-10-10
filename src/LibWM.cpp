@@ -371,6 +371,11 @@ static Optional<NonnullOwnPtr<Core::LocalSocket>> make_portal(ByteString const& 
         spawn_multi_client_service(service_binary_path("SQLServer"sv), path, "sql"sv);
         return {};
     }
+    if (path == expanded_portal_path("/tmp/session/%sid/portal/notify"sv)) {
+        // NotificationServer is also a multi-client (IPC::MultiServer) service.
+        spawn_multi_client_service(service_binary_path("NotificationServer"sv), path, "notification"sv);
+        return {};
+    }
 
     if (!s_server_started) {
         s_server_started = true;

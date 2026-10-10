@@ -1721,14 +1721,17 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::In
     // toplevels the compositor would decorate and place them, so they would not
     // work as dropdowns. Mirror the server-rendered menu popups: an overlay layer
     // surface anchored top-left at the client's requested position.
-    if (m_layer_shell && (type == WindowServer::WindowType::Popup || type == WindowServer::WindowType::Autocomplete || type == WindowServer::WindowType::Tooltip || type == WindowServer::WindowType::Menu)) {
+    // Notifications use the same mechanism: the NotificationServer positions them
+    // (top-right) and they must not be decorated or enter the window list.
+    if (m_layer_shell && (type == WindowServer::WindowType::Popup || type == WindowServer::WindowType::Autocomplete || type == WindowServer::WindowType::Tooltip || type == WindowServer::WindowType::Menu || type == WindowServer::WindowType::Notification)) {
+        bool const is_notification = type == WindowServer::WindowType::Notification;
         auto* surface = wl_compositor_create_surface(m_compositor);
-        auto* layer_surface = zwlr_layer_shell_v1_get_layer_surface(m_layer_shell, surface, nullptr, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, "serenity-popup");
+        auto* layer_surface = zwlr_layer_shell_v1_get_layer_surface(m_layer_shell, surface, nullptr, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, is_notification ? "serenity-notification" : "serenity-popup");
         zwlr_layer_surface_v1_add_listener(layer_surface, &s_layer_surface_listener, this);
         zwlr_layer_surface_v1_set_size(layer_surface, size.width(), size.height());
         zwlr_layer_surface_v1_set_anchor(layer_surface, ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
         zwlr_layer_surface_v1_set_exclusive_zone(layer_surface, -1);
-        zwlr_layer_surface_v1_set_keyboard_interactivity(layer_surface, ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND);
+        zwlr_layer_surface_v1_set_keyboard_interactivity(layer_surface, is_notification ? ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE : ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND);
         zwlr_layer_surface_v1_set_margin(layer_surface, position.y(), 0, 0, position.x());
         wl_surface_commit(surface);
 
