@@ -1640,6 +1640,9 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::In
         int exclusive_zone = 0;
         char const* layer_namespace = "serenity-window";
         bool is_panel = false;
+        // Applets encode their name in the namespace so the compositor can order
+        // them ([Applet] Order) and lay them out (WS4).
+        ByteString applet_namespace;
 
         switch (type) {
         case WindowServer::WindowType::Taskbar:
@@ -1665,10 +1668,13 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::In
             layer_namespace = "serenity-desktop";
             break;
         case WindowServer::WindowType::Applet:
-            // Applets sit in the top layer, anchored to the bottom-right.
+            // Applets sit in the top layer, anchored to the bottom-right. The
+            // compositor overrides the position, laying them out in the Taskbar's
+            // applet area; the namespace carries the applet's name.
             anchor = ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM
                 | ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT;
-            layer_namespace = "serenity-applet";
+            applet_namespace = ByteString::formatted("serenity-applet:{}", title);
+            layer_namespace = applet_namespace.characters();
             break;
         default:
             VERIFY_NOT_REACHED();
