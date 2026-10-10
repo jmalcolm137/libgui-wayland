@@ -1606,12 +1606,16 @@ void WaylandClient::destroy_window(i32 window_id)
     }
     if (window_surface.layer_surface)
         zwlr_layer_surface_v1_destroy(window_surface.layer_surface);
+    if (window_surface.chrome)
+        serenity_toplevel_destroy(window_surface.chrome);
+    // The decoration is a child of the toplevel and must be destroyed first, or
+    // the compositor raises a "destroyed before" protocol error.
+    if (window_surface.decoration)
+        zxdg_toplevel_decoration_v1_destroy(window_surface.decoration);
     if (window_surface.toplevel)
         xdg_toplevel_destroy(window_surface.toplevel);
     if (window_surface.viewport)
         wp_viewport_destroy(window_surface.viewport);
-    if (window_surface.decoration)
-        zxdg_toplevel_decoration_v1_destroy(window_surface.decoration);
     if (window_surface.xdg_surface_object)
         xdg_surface_destroy(window_surface.xdg_surface_object);
     if (window_surface.surface)
