@@ -1,0 +1,21 @@
+diff --git a/Userland/Libraries/LibGUI/FileIconProvider.cpp b/Userland/Libraries/LibGUI/FileIconProvider.cpp
+index 102d3dad..a6c3caf8 100644
+--- a/Userland/Libraries/LibGUI/FileIconProvider.cpp
++++ b/Userland/Libraries/LibGUI/FileIconProvider.cpp
+@@ -69,7 +69,15 @@ static void initialize_if_needed()
+     if (s_initialized)
+         return;
+ 
+-    auto config = Core::ConfigFile::open("/etc/FileIconProvider.ini").release_value_but_fixme_should_propagate_errors();
++    // The port's sparse checkout does not materialise the system /etc; read the
++    // icon patterns from beside the resource root when /etc is absent.
++    ByteString config_path { "/etc/FileIconProvider.ini" };
++    if (auto const* res_root = getenv("SERENITY_RES_ROOT"); res_root && *res_root) {
++        auto candidate = ByteString::formatted("{}/../etc/FileIconProvider.ini", res_root);
++        if (!Core::System::access(candidate, R_OK).is_error())
++            config_path = move(candidate);
++    }
++    auto config = Core::ConfigFile::open(config_path).release_value_but_fixme_should_propagate_errors();
+ 
+     s_symlink_emblem = MUST(Gfx::Bitmap::load_from_uri("resource://icons/symlink-emblem.png"sv));
+     s_symlink_emblem_small = MUST(Gfx::Bitmap::load_from_uri("resource://icons/symlink-emblem-small.png"sv));

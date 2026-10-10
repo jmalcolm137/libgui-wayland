@@ -14,11 +14,11 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERENITY_SRC="${SERENITY_SRC:-$PROJECT_ROOT/serenity}"
 
 # Trees required to build the full LibGfx + LibGUI on the host:
-#   AK, Userland, Meta, Base/res, Base/home  -> sources, build system, resources
+#   AK, Userland, Meta, Base/res, Base/home, Base/etc  -> sources, build system, resources
 #   Tests                                     -> host unit tests
 #   Kernel/API                               -> shared ABI constants (KeyCode, serenity_limits)
 #   Kernel/Memory                            -> header-only VirtualAddress/PhysicalAddress (LibELF)
-SPARSE_DIRS=(AK Userland Meta Base/res Base/home Tests Kernel/API Kernel/Memory)
+SPARSE_DIRS=(AK Userland Meta Base/res Base/home Base/etc Tests Kernel/API Kernel/Memory)
 
 if [[ -d "$SERENITY_SRC/.git" ]]; then
     echo "==> Updating existing checkout at $SERENITY_SRC"

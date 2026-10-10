@@ -46,6 +46,24 @@ private:
     {
         dbgln("LibWM: LaunchServer seal_allowlist");
     }
+
+    // The generated stub returns invalid (null) responses for these, which makes
+    // the synchronous client calls fail. Return empty results until the launch
+    // service is implemented.
+    virtual Messages::LaunchServer::OpenUrlResponse open_url(URL::URL const&, ByteString const&) override
+    {
+        return false;
+    }
+
+    virtual Messages::LaunchServer::GetHandlersForUrlResponse get_handlers_for_url(URL::URL const&) override
+    {
+        return Vector<ByteString> {};
+    }
+
+    virtual Messages::LaunchServer::GetHandlersWithDetailsForUrlResponse get_handlers_with_details_for_url(URL::URL const&) override
+    {
+        return Vector<ByteString> {};
+    }
 };
 
 }
