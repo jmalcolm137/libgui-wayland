@@ -22,10 +22,10 @@ index 7e4acb83..3d2f4e81 100644
          m_error = Error::from_errno(errno);
      }
 diff --git a/Userland/Libraries/LibCore/System.cpp b/Userland/Libraries/LibCore/System.cpp
-index 1ff2626b..fd48b0f5 100644
+index 1ff2626b..829110e1 100644
 --- a/Userland/Libraries/LibCore/System.cpp
 +++ b/Userland/Libraries/LibCore/System.cpp
-@@ -596,6 +596,22 @@ ErrorOr<int> open(StringView path, int options, mode_t mode)
+@@ -596,6 +596,26 @@ ErrorOr<int> open(StringView path, int options, mode_t mode)
      return openat(AT_FDCWD, path, options, mode);
  }
  
@@ -34,12 +34,16 @@ index 1ff2626b..fd48b0f5 100644
 +#ifdef AK_OS_SERENITY
 +    return path;
 +#else
-+    // Host build: redirect SerenityOS's absolute "/res/..." paths to the bundled
-+    // resource root, so code that hardcodes "/res/..." (GML bitmaps, themes,
-+    // emoji, wallpapers, ...) works unmodified.
-+    if (path.starts_with("/res/"sv)) {
-+        if (auto const* root = getenv("SERENITY_RES_ROOT"); root && *root)
++    // Host build: redirect SerenityOS's absolute paths into the bundled Base
++    // tree, so code that hardcodes them works unmodified.
++    //   "/res/..."           -> $SERENITY_RES_ROOT/...   (roots, themes, ...)
++    //   "/usr/share/man/..." -> the SerenityOS man pages, which sit beside the
++    //                          resource root under Base (Help reads them).
++    if (auto const* root = getenv("SERENITY_RES_ROOT"); root && *root) {
++        if (path.starts_with("/res/"sv))
 +            return ByteString::formatted("{}{}", root, path.substring_view(4));
++        if (path.starts_with("/usr/share/man/"sv))
++            return ByteString::formatted("{}/../{}", root, path.substring_view(1));
 +    }
 +    return path;
 +#endif
@@ -48,7 +52,7 @@ index 1ff2626b..fd48b0f5 100644
  ErrorOr<int> openat(int fd, StringView path, int options, mode_t mode)
  {
      if (!path.characters_without_null_termination())
-@@ -607,6 +623,9 @@ ErrorOr<int> openat(int fd, StringView path, int options, mode_t mode)
+@@ -607,6 +627,9 @@ ErrorOr<int> openat(int fd, StringView path, int options, mode_t mode)
  #else
      // NOTE: We have to ensure that the path is null-terminated.
      ByteString path_string = path;
@@ -58,7 +62,7 @@ index 1ff2626b..fd48b0f5 100644
      int rc = ::openat(fd, path_string.characters(), options, mode);
      if (rc < 0)
          return Error::from_syscall("open"sv, -errno);
-@@ -646,7 +665,7 @@ ErrorOr<struct stat> stat(StringView path)
+@@ -646,7 +669,7 @@ ErrorOr<struct stat> stat(StringView path)
      int rc = syscall(SC_stat, &params);
      HANDLE_SYSCALL_RETURN_VALUE("stat", rc, st);
  #else
@@ -67,7 +71,7 @@ index 1ff2626b..fd48b0f5 100644
      if (::stat(path_string.characters(), &st) < 0)
          return Error::from_syscall("stat"sv, -errno);
      return st;
-@@ -664,7 +683,7 @@ ErrorOr<struct stat> lstat(StringView path)
+@@ -664,7 +687,7 @@ ErrorOr<struct stat> lstat(StringView path)
      int rc = syscall(SC_stat, &params);
      HANDLE_SYSCALL_RETURN_VALUE("lstat", rc, st);
  #else

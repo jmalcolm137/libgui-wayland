@@ -15,10 +15,11 @@ SERENITY_SRC="${SERENITY_SRC:-$PROJECT_ROOT/serenity}"
 
 # Trees required to build the full LibGfx + LibGUI on the host:
 #   AK, Userland, Meta, Base/res, Base/home, Base/etc  -> sources, build system, resources
+#   Base/usr/share/man                        -> the man pages Help renders
 #   Tests                                     -> host unit tests
 #   Kernel/API                               -> shared ABI constants (KeyCode, serenity_limits)
 #   Kernel/Memory                            -> header-only VirtualAddress/PhysicalAddress (LibELF)
-SPARSE_DIRS=(AK Userland Meta Base/res Base/home Base/etc Tests Kernel/API Kernel/Memory)
+SPARSE_DIRS=(AK Userland Meta Base/res Base/home Base/etc Base/usr/share/man Tests Kernel/API Kernel/Memory)
 
 if [[ -d "$SERENITY_SRC/.git" ]]; then
     echo "==> Updating existing checkout at $SERENITY_SRC"

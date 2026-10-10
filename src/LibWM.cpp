@@ -14,14 +14,18 @@
 #include <AK/NonnullOwnPtr.h>
 #include <AK/Optional.h>
 #include <ImageDecoder/ConnectionFromClient.h>
+#include <LibCore/Environment.h>
 #include <LibCore/EventLoop.h>
 #include <LibCore/PortalServer.h>
+#include <LibCore/Process.h>
 #include <LibCore/ResourceImplementationFile.h>
 #include <LibCore/SessionManagement.h>
 #include <LibCore/Socket.h>
+#include <LibCore/System.h>
 #include <LibGfx/Font/FontDatabase.h>
 #include <LibGfx/SystemTheme.h>
 #include <LibThreading/Thread.h>
+#include <fcntl.h>
 #include <stdlib.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -104,6 +108,79 @@ static void ensure_theme_installed()
 static ByteString expanded_portal_path(StringView template_path)
 {
     return MUST(Core::SessionManagement::parse_path_with_sid(template_path));
+}
+
+// A single-client service binary lives next to the running application (or in
+// SDE_APP_BIN_DIR when the session owns the app directory).
+static ByteString service_binary_path(StringView name)
+{
+    if (auto const* app_bin_dir = getenv("SDE_APP_BIN_DIR"); app_bin_dir && *app_bin_dir)
+        return ByteString::formatted("{}/{}", app_bin_dir, name);
+    return Core::Process::resolve_executable_path(ByteString::formatted("/bin/{}", name));
+}
+
+// SerenityOS runs a number of system services as one process per client: e.g.
+// WebContent (one per page) and RequestServer. SystemServer spawns a fresh
+// process per connection and hands it the accepted socket. We do the same on
+// demand - create a socketpair and pass the service one end through
+// SOCKET_TAKEOVER, the env contract Core::take_over_socket_from_system_server()
+// consumes (LibCore/SystemServerTakeover.cpp). These services are far too heavy
+// to host in-process inside every application, so they are spawned rather than
+// served.
+static Optional<NonnullOwnPtr<Core::LocalSocket>> spawn_single_client_service(StringView executable, StringView name)
+{
+    if (Core::System::access(executable, X_OK).is_error()) {
+        dbgln("LibWM: service '{}' not found at '{}'", name, executable);
+        return {};
+    }
+
+    int fds[2] {};
+    if (Core::System::socketpair(AF_LOCAL, SOCK_STREAM | SOCK_CLOEXEC, 0, fds).is_error())
+        return {};
+
+    // The service inherits fds[1]; clear CLOEXEC so it survives exec. fds[0]
+    // stays CLOEXEC, so the service never sees our end.
+    ::fcntl(fds[1], F_SETFD, 0);
+
+    // The spawning process may itself be a spawned service that has not yet
+    // consumed its own SOCKET_TAKEOVER (WebContent connects to RequestServer
+    // before it takes over its socket). Give the child *this* service's
+    // takeover, then restore ours, so a nested spawn does not clobber it.
+    Optional<ByteString> previous_takeover;
+    if (auto const* existing = getenv("SOCKET_TAKEOVER"); existing && *existing)
+        previous_takeover = ByteString { existing };
+
+    auto takeover = ByteString::formatted("{}:{}", name, fds[1]);
+    if (auto set = Core::Environment::set("SOCKET_TAKEOVER"sv, takeover, Core::Environment::Overwrite::Yes); set.is_error()) {
+        dbgln("LibWM: could not set SOCKET_TAKEOVER: {}", set.error());
+        ::close(fds[0]);
+        ::close(fds[1]);
+        return {};
+    }
+
+    Vector<ByteString> arguments;
+    auto spawned = Core::Process::spawn(executable, arguments, {}, Core::Process::KeepAsChild::No);
+
+    if (previous_takeover.has_value())
+        (void)Core::Environment::set("SOCKET_TAKEOVER"sv, previous_takeover.value(), Core::Environment::Overwrite::Yes);
+    else
+        (void)Core::Environment::unset("SOCKET_TAKEOVER"sv);
+    ::close(fds[1]);
+
+    if (spawned.is_error()) {
+        dbgln("LibWM: failed to spawn '{}': {}", name, spawned.error());
+        ::close(fds[0]);
+        return {};
+    }
+
+    auto socket = Core::LocalSocket::adopt_fd(fds[0]);
+    if (socket.is_error()) {
+        ::close(fds[0]);
+        return {};
+    }
+    (void)socket.value()->set_blocking(true);
+    dbgln("LibWM: spawned {} pid={}", name, spawned.value());
+    return socket.release_value();
 }
 
 // All portals are served from a single thread with a single Core::EventLoop.
@@ -212,6 +289,13 @@ static Optional<NonnullOwnPtr<Core::LocalSocket>> make_portal(ByteString const& 
         dbgln("LibWM: deferring to the session service on '{}'", path);
         return {};
     }
+
+    // These portals are spawned per connection rather than served in-process:
+    // LibWeb and the HTTP/TLS stack must not be linked into every application.
+    if (path == expanded_portal_path("/tmp/session/%sid/portal/webcontent"sv))
+        return spawn_single_client_service(service_binary_path("WebContent"sv), "webcontent"sv);
+    if (path == expanded_portal_path("/tmp/session/%sid/portal/request"sv))
+        return spawn_single_client_service(service_binary_path("RequestServer"sv), "requestserver"sv);
 
     if (!s_server_started) {
         s_server_started = true;

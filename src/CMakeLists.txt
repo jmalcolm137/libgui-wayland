@@ -164,7 +164,31 @@ add_executable(WebContent
 )
 target_include_directories(WebContent PRIVATE "${SERENITY_PROJECT_ROOT}/Userland/Services")
 target_link_options(WebContent PRIVATE "-Wl,--no-as-needed")
-target_link_libraries(WebContent PRIVATE LibCore LibFileSystem LibIPC LibGfx LibAudio LibImageDecoderClient LibJS LibWebView LibWeb LibLocale LibMain LibURL)
+# WebContent is a client-stack process too: link the shim so its outgoing portal
+# connects (RequestServer, ImageDecoder) go through LibWM and are spawned/served
+# on demand, exactly as an application's are.
+target_link_libraries(WebContent PRIVATE LibCore LibFileSystem LibIPC LibGfx LibAudio LibImageDecoderClient LibJS LibWebView LibWeb LibLocale LibMain LibURL windowserver)
+
+# --- The out-of-process RequestServer service ---------------------------------
+# WebContent (and the browser) require it: the HTTP/TLS backend for page loads.
+# Also a single-client service, spawned on demand the same way.
+set(REQUESTSERVER_SRC "${SERENITY_PROJECT_ROOT}/Userland/Services/RequestServer")
+add_executable(RequestServer
+    "${REQUESTSERVER_SRC}/ConnectionFromClient.cpp"
+    "${REQUESTSERVER_SRC}/ConnectionCache.cpp"
+    "${REQUESTSERVER_SRC}/GeminiProtocol.cpp"
+    "${REQUESTSERVER_SRC}/GeminiRequest.cpp"
+    "${REQUESTSERVER_SRC}/HttpProtocol.cpp"
+    "${REQUESTSERVER_SRC}/HttpRequest.cpp"
+    "${REQUESTSERVER_SRC}/HttpsProtocol.cpp"
+    "${REQUESTSERVER_SRC}/HttpsRequest.cpp"
+    "${REQUESTSERVER_SRC}/Protocol.cpp"
+    "${REQUESTSERVER_SRC}/Request.cpp"
+    "${REQUESTSERVER_SRC}/main.cpp"
+)
+target_include_directories(RequestServer PRIVATE "${SERENITY_PROJECT_ROOT}/Userland/Services")
+target_link_options(RequestServer PRIVATE "-Wl,--no-as-needed")
+target_link_libraries(RequestServer PRIVATE LibCore LibCrypto LibIPC LibGemini LibHTTP LibMain LibTLS LibWebSocket LibURL LibThreading)
 
 # --- Unmodified SerenityOS applications ---------------------------------------
 # Built directly from their upstream sources. No source is edited; only the GML
