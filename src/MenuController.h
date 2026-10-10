@@ -80,6 +80,9 @@ public:
     i32 menu_window(i32 menu_id) const;
     void open_root(i32 menu_id, i32 window_id, Gfx::IntRect anchor);
     void close_menu(i32 menu_id);
+    // Dismiss any open menus, e.g. when a press lands outside them.
+    bool has_open_menu() const { return !m_open_menus.is_empty(); }
+    void close_open_menus() { close_all_menus(); }
 
     // --- interaction (coordinates are surface-local) ---
     void on_menubar_motion(i32 window_id, Gfx::IntPoint position);

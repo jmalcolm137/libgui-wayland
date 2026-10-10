@@ -110,7 +110,7 @@ public:
     void write_clipboard(HashMap<ByteString, ByteBuffer> offers);
 
     // Window <-> xdg_toplevel lifecycle.
-    void create_window(i32 window_id, Gfx::IntSize, ByteString const& title, bool has_alpha, bool resizable, i32 window_type);
+    void create_window(i32 window_id, Gfx::IntPoint position, Gfx::IntSize, ByteString const& title, bool has_alpha, bool resizable, i32 window_type);
     void destroy_window(i32 window_id);
     void set_title(i32 window_id, ByteString const& title);
 
@@ -183,6 +183,8 @@ public:
     void on_toplevel_close(xdg_toplevel*);
     void on_layer_configure(zwlr_layer_surface_v1*, Gfx::IntSize size);
     void on_layer_closed(zwlr_layer_surface_v1*);
+    void on_menu_layer_configure(zwlr_layer_surface_v1*, Gfx::IntSize size);
+    void on_menu_layer_closed(zwlr_layer_surface_v1*);
     void on_menubar_visibility(serenity_toplevel*, bool visible);
 
     void on_data_offer(wl_data_offer*);
@@ -212,6 +214,12 @@ private:
         // A panel stretches along its anchored edges and reserves space.
         bool layer_panel { false };
         bool layer_configured { false };
+        // The position the client asked for (unreliable for layer surfaces) and
+        // the position the compositor actually gives the layer surface. Menus
+        // are placed in output coordinates, so both are needed to translate the
+        // client's anchor.
+        Gfx::IntPoint requested_position;
+        Gfx::IntPoint layer_output_position;
         // Whether the compositor currently wants this window's menu bar shown.
         bool menubar_visible { true };
         ByteString title;
@@ -250,6 +258,11 @@ private:
         wl_surface* surface { nullptr };
         xdg_surface* xdg_surface_object { nullptr };
         xdg_popup* popup { nullptr };
+        // Menus shown from a layer-surface window (the Desktop, Taskbar, applets)
+        // have no xdg parent, so they become overlay layer surfaces instead.
+        zwlr_layer_surface_v1* layer_surface { nullptr };
+        bool is_layer { false };
+        Gfx::IntPoint layer_position;
         bool configured { false };
         Core::AnonymousBuffer buffer;
         RefPtr<Gfx::Bitmap> bitmap;

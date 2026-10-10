@@ -113,6 +113,12 @@ void WindowServerConnection::install_input_callbacks()
         async_mouse_move(window_id, position, 0, buttons, modifiers, 0, 0, 0, 0);
     };
     callbacks.mouse_down = [this](i32 window_id, Gfx::IntPoint position, u32 button, u32 buttons, u32 modifiers) {
+        // A press on one of our windows is outside any open menu (menu clicks are
+        // routed to the popup), so dismiss it first.
+        if (m_menu.has_open_menu())
+            m_menu.close_open_menus();
+        if (button == 2) // GUI::MouseButton::Secondary
+            m_context_menu_window_id = window_id;
         async_mouse_down(window_id, position, button, buttons, modifiers, 0, 0, 0, 0);
     };
     callbacks.mouse_up = [this](i32 window_id, Gfx::IntPoint position, u32 button, u32 buttons, u32 modifiers) {
@@ -285,7 +291,7 @@ void WindowServerConnection::create_window(i32 window_id, i32, Gfx::IntRect cons
     m_windows.append(move(window));
 
     auto& created_window = *m_windows.last();
-    WaylandClient::the().create_window(window_id, created_window.rect.size(), title, has_alpha_channel, resizable, window_type);
+    WaylandClient::the().create_window(window_id, created_window.rect.location(), created_window.rect.size(), title, has_alpha_channel, resizable, window_type);
 
     // Ask the client to paint the whole window.
     Vector<Gfx::IntRect> rects;
@@ -559,6 +565,8 @@ void WindowServerConnection::popup_menu(i32 menu_id, Gfx::IntPoint screen_positi
     // window as the xdg_popup parent. Wayland clients don't know global screen
     // coordinates, so positions are treated as parent-surface-relative.
     i32 parent = m_menu.menu_window(menu_id);
+    if (parent < 0)
+        parent = m_context_menu_window_id;
     if (parent < 0)
         parent = m_active_window_id;
     if (parent < 0)

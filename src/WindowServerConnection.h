@@ -132,6 +132,9 @@ private:
     Gfx::IntSize m_screen_size { 1280, 800 };
     i32 m_client_id { 1 };
     i32 m_active_window_id { -1 };
+    // The window that last received a secondary-button press; used as the parent
+    // for a context menu when the menu is not tied to a menubar window.
+    i32 m_context_menu_window_id { -1 };
     MenuController m_menu;
 
     // Double-click detection, mirroring WindowServer::WindowManager: a second

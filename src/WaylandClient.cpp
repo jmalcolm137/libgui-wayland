@@ -211,6 +211,23 @@ static zwlr_layer_surface_v1_listener const s_layer_surface_listener = {
     .closed = layer_surface_closed,
 };
 
+// A menu shown from a layer-surface window is itself an overlay layer surface.
+static void menu_layer_configure(void* data, zwlr_layer_surface_v1* layer_surface, uint32_t serial, uint32_t width, uint32_t height)
+{
+    zwlr_layer_surface_v1_ack_configure(layer_surface, serial);
+    static_cast<WaylandClient*>(data)->on_menu_layer_configure(layer_surface, { static_cast<int>(width), static_cast<int>(height) });
+}
+
+static void menu_layer_closed(void* data, zwlr_layer_surface_v1* layer_surface)
+{
+    static_cast<WaylandClient*>(data)->on_menu_layer_closed(layer_surface);
+}
+
+static zwlr_layer_surface_v1_listener const s_menu_layer_listener = {
+    .configure = menu_layer_configure,
+    .closed = menu_layer_closed,
+};
+
 // --- serenity_toplevel (compositor-driven window chrome) ----------------------
 
 static void serenity_toplevel_menubar_visibility(void* data, serenity_toplevel* resource, int32_t visible)
@@ -1085,6 +1102,34 @@ void WaylandClient::on_layer_closed(zwlr_layer_surface_v1* layer_surface)
     }
 }
 
+void WaylandClient::on_menu_layer_configure(zwlr_layer_surface_v1* layer_surface, Gfx::IntSize)
+{
+    for (auto const& it : m_popups) {
+        auto& popup = *it.value;
+        if (popup.layer_surface != layer_surface)
+            continue;
+        popup.configured = true;
+        if (popup.pending) {
+            bind_bitmap(popup.surface, popup.buffer, *popup.bitmap, popup.buffers);
+            wl_surface_commit(popup.surface);
+            wl_display_flush(m_display);
+            popup.pending = nullptr;
+        }
+        return;
+    }
+}
+
+void WaylandClient::on_menu_layer_closed(zwlr_layer_surface_v1* layer_surface)
+{
+    for (auto const& it : m_popups) {
+        if (it.value->layer_surface == layer_surface) {
+            // The compositor vetoed the menu (e.g. it was dismissed); drop it.
+            destroy_popup(it.value->id);
+            return;
+        }
+    }
+}
+
 void WaylandClient::on_menubar_visibility(serenity_toplevel* resource, bool visible)
 {
     for (auto const& it : m_windows) {
@@ -1267,18 +1312,61 @@ void WaylandClient::create_popup(i32 popup_id, i32 parent_window_id, i32 parent_
     if (!m_compositor || !m_wm_base || size.is_empty())
         return;
 
+    // A layer-surface window (the Desktop, Taskbar, applets) has no xdg parent,
+    // so its menus become overlay layer surfaces positioned at the anchor.
+    bool layer_parent = false;
+    Gfx::IntPoint layer_position;
     xdg_surface* parent_xdg = nullptr;
     if (parent_popup_id != -1) {
         auto* parent_popup = find_popup(parent_popup_id);
         if (!parent_popup)
             return;
-        parent_xdg = parent_popup->xdg_surface_object;
+        if (parent_popup->is_layer) {
+            layer_parent = true;
+            layer_position = parent_popup->layer_position.translated(anchor.location());
+        } else {
+            parent_xdg = parent_popup->xdg_surface_object;
+        }
     } else {
         auto* parent_window = find(parent_window_id);
         if (!parent_window)
             return;
-        parent_xdg = parent_window->xdg_surface_object;
+        if (parent_window->is_layer) {
+            layer_parent = true;
+            auto local = anchor.location() - parent_window->requested_position;
+            layer_position = parent_window->layer_output_position.translated(local.x(), local.y());
+        } else {
+            parent_xdg = parent_window->xdg_surface_object;
+        }
     }
+
+    if (layer_parent) {
+        if (!m_layer_shell)
+            return;
+        auto* surface = wl_compositor_create_surface(m_compositor);
+        auto* layer_surface = zwlr_layer_shell_v1_get_layer_surface(m_layer_shell, surface, nullptr, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, "serenity-menu");
+        zwlr_layer_surface_v1_add_listener(layer_surface, &s_menu_layer_listener, this);
+        zwlr_layer_surface_v1_set_size(layer_surface, size.width(), size.height());
+        zwlr_layer_surface_v1_set_anchor(layer_surface, ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
+        zwlr_layer_surface_v1_set_margin(layer_surface, layer_position.y(), 0, 0, layer_position.x());
+        zwlr_layer_surface_v1_set_exclusive_zone(layer_surface, -1);
+        zwlr_layer_surface_v1_set_keyboard_interactivity(layer_surface, ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND);
+        wl_surface_commit(surface);
+
+        auto p = make<Popup>();
+        p->id = popup_id;
+        p->surface = surface;
+        p->layer_surface = layer_surface;
+        p->is_layer = true;
+        p->layer_position = layer_position;
+        m_popups.set(popup_id, move(p));
+        wl_display_flush(m_display);
+        dbgln("LibWM/Wayland: menu layer {} created ({}x{}) at {},{} submenu={}", popup_id, size.width(), size.height(), layer_position.x(), layer_position.y(), is_submenu);
+        return;
+    }
+
+    if (!parent_xdg)
+        return;
 
     auto* surface = wl_compositor_create_surface(m_compositor);
     auto* xdg_surface = xdg_wm_base_get_xdg_surface(m_wm_base, surface);
@@ -1367,6 +1455,8 @@ void WaylandClient::destroy_popup(i32 popup_id)
         if (record->buffer)
             wl_buffer_destroy(record->buffer);
     }
+    if (popup.layer_surface)
+        zwlr_layer_surface_v1_destroy(popup.layer_surface);
     if (popup.popup)
         xdg_popup_destroy(popup.popup);
     if (popup.xdg_surface_object)
@@ -1470,7 +1560,7 @@ WaylandClient::WindowSurface* WaylandClient::find(i32 window_id)
     return it->value.ptr();
 }
 
-void WaylandClient::create_window(i32 window_id, Gfx::IntSize size, ByteString const& title, bool has_alpha, bool resizable, i32 window_type)
+void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::IntSize size, ByteString const& title, bool has_alpha, bool resizable, i32 window_type)
 {
     if (!m_compositor || !m_wm_base)
         return;
@@ -1536,6 +1626,20 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntSize size, ByteString c
         window_surface->layer_surface = layer_surface;
         window_surface->is_layer = true;
         window_surface->layer_panel = is_panel;
+        window_surface->requested_position = position;
+        switch (type) {
+        case WindowServer::WindowType::Desktop:
+            window_surface->layer_output_position = { 0, 0 };
+            break;
+        case WindowServer::WindowType::Taskbar:
+            window_surface->layer_output_position = { 0, m_screen_size.height() - size.height() };
+            break;
+        case WindowServer::WindowType::Applet:
+            window_surface->layer_output_position = { m_screen_size.width() - size.width(), m_screen_size.height() - size.height() };
+            break;
+        default:
+            break;
+        }
         window_surface->title = title;
         window_surface->size = size;
         window_surface->has_alpha = has_alpha;
