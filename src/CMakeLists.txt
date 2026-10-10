@@ -146,6 +146,26 @@ target_include_directories(libwm-services-test PRIVATE "${CMAKE_CURRENT_SOURCE_D
 target_link_options(libwm-services-test PRIVATE "-Wl,--no-as-needed")
 target_link_libraries(libwm-services-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibURL LibDesktop LibLaunch LibImageDecoderClient windowserver)
 
+# --- The out-of-process WebContent service ------------------------------------
+# Built from the upstream sources. It is a single-client system service; LibWM
+# spawns it on demand and hands it a socket via SOCKET_TAKEOVER (the same
+# contract SystemServer uses), so no Serenity SystemServer is needed. Help,
+# Browser and any other WebView app reach it through the webcontent portal.
+set(WEBCONTENT_SRC "${SERENITY_PROJECT_ROOT}/Userland/Services/WebContent")
+add_executable(WebContent
+    "${WEBCONTENT_SRC}/ConnectionFromClient.cpp"
+    "${WEBCONTENT_SRC}/ConsoleGlobalEnvironmentExtensions.cpp"
+    "${WEBCONTENT_SRC}/ImageCodecPluginSerenity.cpp"
+    "${WEBCONTENT_SRC}/PageClient.cpp"
+    "${WEBCONTENT_SRC}/PageHost.cpp"
+    "${WEBCONTENT_SRC}/WebContentConsoleClient.cpp"
+    "${WEBCONTENT_SRC}/WebDriverConnection.cpp"
+    "${WEBCONTENT_SRC}/main.cpp"
+)
+target_include_directories(WebContent PRIVATE "${SERENITY_PROJECT_ROOT}/Userland/Services")
+target_link_options(WebContent PRIVATE "-Wl,--no-as-needed")
+target_link_libraries(WebContent PRIVATE LibCore LibFileSystem LibIPC LibGfx LibAudio LibImageDecoderClient LibJS LibWebView LibWeb LibLocale LibMain LibURL)
+
 # --- Unmodified SerenityOS applications ---------------------------------------
 # Built directly from their upstream sources. No source is edited; only the GML
 # is precompiled (the app's own CMakeLists uses compile_gml, which requires a
