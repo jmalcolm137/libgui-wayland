@@ -5,14 +5,19 @@
  */
 
 #include "LibWM.h"
+#include <LibCore/ConfigFile.h>
 #include <LibCore/EventLoop.h>
+#include <LibDesktop/AppFile.h>
 #include <LibDesktop/Launcher.h>
 #include <LibGfx/Bitmap.h>
 #include <LibGfx/Color.h>
 #include <LibGfx/ImageFormats/PNGWriter.h>
 #include <LibImageDecoderClient/Client.h>
+#include <LibLaunch/HandlerDatabase.h>
 #include <LibMain/Main.h>
 #include <LibURL/URL.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 // Exercises the two session-service portals, launch and image, so the *same*
 // binary can be run with and without an external session service:
@@ -31,10 +36,34 @@ static void probe_launch_handlers(StringView label, URL::URL const& url)
         dbgln("LAUNCH-PROBE:   {} => '{}'", label, handler->executable);
 }
 
+// AppFile's launcher_* accessors delegate to Launch::Handler::from_app_config;
+// check that delegation (and the case-preserving trim) actually holds.
+static void probe_appfile_delegation()
+{
+    auto path = ByteString::formatted("/tmp/sde-appfile-probe-{}.af", getpid());
+    ByteString const text = "[App]\nName=Probe\nExecutable=/bin/Probe\n"
+                            "[Launcher]\nFileTypes=png, JPEG ,gif\nMimeTypes=image/png\nProtocols=probe\n";
+    if (auto fd = ::open(path.characters(), O_WRONLY | O_CREAT | O_TRUNC, 0644); fd >= 0) {
+        (void)::write(fd, text.characters(), text.length());
+        ::close(fd);
+    }
+
+    auto af = Desktop::AppFile::open(path);
+    auto expected = Launch::Handler::from_app_config(*MUST(Core::ConfigFile::open(path)));
+    auto matches = af->is_valid()
+        && af->launcher_file_types() == expected.file_types
+        && af->launcher_mime_types() == expected.mime_types
+        && af->launcher_protocols() == expected.protocols;
+    dbgln("APPFILE-PROBE: delegated match={} file_types={}", matches ? 1 : 0, af->launcher_file_types().size());
+    (void)::unlink(path.characters());
+}
+
 ErrorOr<int> serenity_main(Main::Arguments)
 {
     LibWM::initialize();
     Core::EventLoop event_loop;
+
+    probe_appfile_delegation();
 
     // The launch portal: handler resolution goes through the LaunchServer
     // (libgui-wayland's in-process fallback, or the SDE session service).

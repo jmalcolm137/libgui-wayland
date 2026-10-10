@@ -144,7 +144,7 @@ target_link_libraries(libwm-submenu-test PRIVATE LibMain LibGUI LibGfx LibCore L
 add_executable(libwm-services-test test/ServiceLayeringTest.cpp)
 target_include_directories(libwm-services-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_options(libwm-services-test PRIVATE "-Wl,--no-as-needed")
-target_link_libraries(libwm-services-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibURL LibDesktop LibImageDecoderClient windowserver)
+target_link_libraries(libwm-services-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibURL LibDesktop LibLaunch LibImageDecoderClient windowserver)
 
 # --- Unmodified SerenityOS applications ---------------------------------------
 # Built directly from their upstream sources. No source is edited; only the GML

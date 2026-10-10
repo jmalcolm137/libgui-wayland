@@ -12,10 +12,10 @@ index 00000000..391d590e
 +target_link_libraries(LibLaunch PRIVATE LibCore LibURL)
 diff --git a/Userland/Libraries/LibLaunch/HandlerDatabase.cpp b/Userland/Libraries/LibLaunch/HandlerDatabase.cpp
 new file mode 100644
-index 00000000..f8c8a0c4
+index 00000000..bba98aff
 --- /dev/null
 +++ b/Userland/Libraries/LibLaunch/HandlerDatabase.cpp
-@@ -0,0 +1,154 @@
+@@ -0,0 +1,165 @@
 +/*
 + * Copyright (c) 2026, Serenity Desktop Environment contributors
 + *
@@ -40,6 +40,34 @@ index 00000000..f8c8a0c4
 +    return {};
 +}
 +
++Handler Handler::from_app_config(Core::ConfigFile& config)
++{
++    Handler handler;
++    handler.name = config.read_entry("App", "Name").trim_whitespace();
++    handler.executable = config.read_entry("App", "Executable").trim_whitespace();
++    for (auto& argument : config.read_entry("App", "Arguments").split(' ')) {
++        auto trimmed = argument.trim_whitespace();
++        if (!trimmed.is_empty())
++            handler.arguments.append(trimmed);
++    }
++    for (auto& type : config.read_entry("Launcher", "FileTypes").split(',')) {
++        auto trimmed = type.trim_whitespace();
++        if (!trimmed.is_empty())
++            handler.file_types.append(trimmed);
++    }
++    for (auto& mime : config.read_entry("Launcher", "MimeTypes").split(',')) {
++        auto trimmed = mime.trim_whitespace();
++        if (!trimmed.is_empty())
++            handler.mime_types.append(trimmed);
++    }
++    for (auto& protocol : config.read_entry("Launcher", "Protocols").split(',')) {
++        auto trimmed = protocol.trim_whitespace();
++        if (!trimmed.is_empty())
++            handler.protocols.append(trimmed);
++    }
++    return handler;
++}
++
 +ErrorOr<HandlerDatabase> HandlerDatabase::load()
 +{
 +    HandlerDatabase database;
@@ -58,29 +86,12 @@ index 00000000..f8c8a0c4
 +        if (config.is_error())
 +            return IterationDecision::Continue;
 +
-+        Handler handler;
-+        handler.name = config.value()->read_entry("App", "Name").trim_whitespace();
-+        handler.executable = config.value()->read_entry("App", "Executable").trim_whitespace();
-+        for (auto& argument : config.value()->read_entry("App", "Arguments").split(' ')) {
-+            auto trimmed = argument.trim_whitespace();
-+            if (!trimmed.is_empty())
-+                handler.arguments.append(trimmed);
-+        }
-+        for (auto& type : config.value()->read_entry("Launcher", "FileTypes").split(',')) {
-+            auto trimmed = type.trim_whitespace();
-+            if (!trimmed.is_empty())
-+                handler.file_types.append(trimmed.to_lowercase());
-+        }
-+        for (auto& mime : config.value()->read_entry("Launcher", "MimeTypes").split(',')) {
-+            auto trimmed = mime.trim_whitespace();
-+            if (!trimmed.is_empty())
-+                handler.mime_types.append(trimmed.to_lowercase());
-+        }
-+        for (auto& protocol : config.value()->read_entry("Launcher", "Protocols").split(',')) {
-+            auto trimmed = protocol.trim_whitespace();
-+            if (!trimmed.is_empty())
-+                handler.protocols.append(trimmed);
-+        }
++        auto handler = Handler::from_app_config(*config.value());
++        // Match file and mime types case-insensitively.
++        for (auto& file_type : handler.file_types)
++            file_type = file_type.to_lowercase();
++        for (auto& mime_type : handler.mime_types)
++            mime_type = mime_type.to_lowercase();
 +
 +        if (handler.executable.is_empty() || (handler.file_types.is_empty() && handler.mime_types.is_empty() && handler.protocols.is_empty()))
 +            return IterationDecision::Continue;
@@ -172,10 +183,10 @@ index 00000000..f8c8a0c4
 +}
 diff --git a/Userland/Libraries/LibLaunch/HandlerDatabase.h b/Userland/Libraries/LibLaunch/HandlerDatabase.h
 new file mode 100644
-index 00000000..e04cb577
+index 00000000..c5b604f4
 --- /dev/null
 +++ b/Userland/Libraries/LibLaunch/HandlerDatabase.h
-@@ -0,0 +1,60 @@
+@@ -0,0 +1,70 @@
 +/*
 + * Copyright (c) 2026, Serenity Desktop Environment contributors
 + *
@@ -190,6 +201,10 @@ index 00000000..e04cb577
 +#include <AK/Vector.h>
 +#include <LibURL/URL.h>
 +
++namespace Core {
++class ConfigFile;
++}
++
 +namespace Launch {
 +
 +// A launch handler: an application that can open some file types and/or URL
@@ -202,6 +217,12 @@ index 00000000..e04cb577
 +    Vector<ByteString> file_types;
 +    Vector<ByteString> mime_types;
 +    Vector<ByteString> protocols;
++
++    // Reads an application file's ".af" [App]/[Launcher] metadata. Values are
++    // returned as written (trimmed); callers that match against them lowercase as
++    // needed. Shared by the handler-database scan and LibDesktop::AppFile's
++    // launcher_* accessors, so the two parsings cannot drift apart.
++    static Handler from_app_config(Core::ConfigFile&);
 +};
 +
 +// Resolves a file or URL to the applications that can open it.

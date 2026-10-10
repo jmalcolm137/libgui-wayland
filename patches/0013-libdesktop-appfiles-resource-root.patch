@@ -1,11 +1,12 @@
 diff --git a/Userland/Libraries/LibDesktop/AppFile.cpp b/Userland/Libraries/LibDesktop/AppFile.cpp
-index af84468d..faa28970 100644
+index af84468d..b3bf35ab 100644
 --- a/Userland/Libraries/LibDesktop/AppFile.cpp
 +++ b/Userland/Libraries/LibDesktop/AppFile.cpp
-@@ -15,12 +15,22 @@
+@@ -15,12 +15,23 @@
  #include <LibDesktop/AppFile.h>
  #include <LibFileSystem/FileSystem.h>
  #include <LibGUI/MessageBox.h>
++#include <LibLaunch/HandlerDatabase.h>
 +#include <stdlib.h>
  
  namespace Desktop {
@@ -26,7 +27,7 @@ index af84468d..faa28970 100644
  }
  
  bool AppFile::exists_for_app(StringView app_name)
-@@ -40,14 +50,15 @@ NonnullRefPtr<AppFile> AppFile::open(StringView path)
+@@ -40,14 +51,15 @@ NonnullRefPtr<AppFile> AppFile::open(StringView path)
  
  void AppFile::for_each(Function<void(NonnullRefPtr<AppFile>)> callback, StringView directory)
  {
@@ -44,7 +45,7 @@ index af84468d..faa28970 100644
          auto af = AppFile::open(path);
          if (!af->is_valid())
              continue;
-@@ -124,7 +135,7 @@ GUI::Icon AppFile::icon() const
+@@ -124,7 +136,7 @@ GUI::Icon AppFile::icon() const
      if (!override_icon.is_empty())
          return GUI::FileIconProvider::icon_for_path(override_icon);
  
@@ -53,6 +54,49 @@ index af84468d..faa28970 100644
  }
  
  bool AppFile::run_in_terminal() const
+@@ -142,37 +154,21 @@ bool AppFile::exclude_from_system_menu() const
+     return m_config->read_bool_entry("App", "ExcludeFromSystemMenu", false);
+ }
+ 
++// The [Launcher] metadata is parsed by Launch::Handler, the same code the
++// handler database (and thus both LaunchServers) uses, so the two cannot drift.
+ Vector<ByteString> AppFile::launcher_mime_types() const
+ {
+-    Vector<ByteString> mime_types;
+-    for (auto& entry : m_config->read_entry("Launcher", "MimeTypes").split(',')) {
+-        entry = entry.trim_whitespace();
+-        if (!entry.is_empty())
+-            mime_types.append(entry);
+-    }
+-    return mime_types;
++    return Launch::Handler::from_app_config(*m_config).mime_types;
+ }
+ 
+ Vector<ByteString> AppFile::launcher_file_types() const
+ {
+-    Vector<ByteString> file_types;
+-    for (auto& entry : m_config->read_entry("Launcher", "FileTypes").split(',')) {
+-        entry = entry.trim_whitespace();
+-        if (!entry.is_empty())
+-            file_types.append(entry);
+-    }
+-    return file_types;
++    return Launch::Handler::from_app_config(*m_config).file_types;
+ }
+ 
+ Vector<ByteString> AppFile::launcher_protocols() const
+ {
+-    Vector<ByteString> protocols;
+-    for (auto& entry : m_config->read_entry("Launcher", "Protocols").split(',')) {
+-        entry = entry.trim_whitespace();
+-        if (!entry.is_empty())
+-            protocols.append(entry);
+-    }
+-    return protocols;
++    return Launch::Handler::from_app_config(*m_config).protocols;
+ }
+ 
+ ErrorOr<void> AppFile::spawn(ReadonlySpan<StringView> user_arguments) const
 diff --git a/Userland/Libraries/LibDesktop/AppFile.h b/Userland/Libraries/LibDesktop/AppFile.h
 index e1eb49d6..21b802d1 100644
 --- a/Userland/Libraries/LibDesktop/AppFile.h
@@ -72,3 +116,13 @@ index e1eb49d6..21b802d1 100644
      ~AppFile() = default;
  
      bool is_valid() const { return m_valid; }
+diff --git a/Userland/Libraries/LibDesktop/CMakeLists.txt b/Userland/Libraries/LibDesktop/CMakeLists.txt
+index 5320eb54..1b310b67 100644
+--- a/Userland/Libraries/LibDesktop/CMakeLists.txt
++++ b/Userland/Libraries/LibDesktop/CMakeLists.txt
+@@ -10,4 +10,4 @@ set(GENERATED_SOURCES
+ )
+ 
+ serenity_lib(LibDesktop desktop)
+-target_link_libraries(LibDesktop PRIVATE LibCore LibIPC LibGfx LibGUI LibFileSystem LibURL)
++target_link_libraries(LibDesktop PRIVATE LibCore LibIPC LibGfx LibGUI LibFileSystem LibLaunch LibURL)
