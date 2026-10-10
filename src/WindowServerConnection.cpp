@@ -182,10 +182,12 @@ void WindowServerConnection::send_fast_greet()
 
     // The client indexes this vector by SystemEffects::Effects, so it must have
     // exactly __Count entries (an empty vector causes an out-of-bounds crash on
-    // the first system_effects() access). We disable the animated effects.
+    // the first system_effects() access). The animated effects stay off; tooltips
+    // are enabled (WS6) so Application::show_tooltip() creates a tooltip window.
     Vector<bool> effects;
     for (size_t i = 0; i < to_underlying(WindowServer::Effects::__Count); ++i)
         effects.append(false);
+    effects[to_underlying(WindowServer::Effects::Tooltips)] = true;
 
     unsigned const workspace_rows = workspace_dimension("Rows"sv, 1);
     unsigned const workspace_columns = workspace_dimension("Columns"sv, 1);
@@ -629,7 +631,10 @@ void WindowServerConnection::move_window_to_front(i32)
 
 Messages::WindowServer::GetGlobalCursorPositionResponse WindowServerConnection::get_global_cursor_position()
 {
-    return Messages::WindowServer::GetGlobalCursorPositionResponse { Gfx::IntPoint { } };
+    // The compositor owns window placement, so the client reconstructs the
+    // cursor's output position from the surface under the pointer and that
+    // surface's known origin (see WaylandClient::global_pointer_position).
+    return Messages::WindowServer::GetGlobalCursorPositionResponse { WaylandClient::the().global_pointer_position() };
 }
 
 Messages::WindowServer::GetColorUnderCursorResponse WindowServerConnection::get_color_under_cursor()
