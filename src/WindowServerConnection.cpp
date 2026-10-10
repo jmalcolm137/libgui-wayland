@@ -570,7 +570,11 @@ void WindowServerConnection::popup_menu(i32 menu_id, Gfx::IntPoint screen_positi
         parent = m_active_window_id;
     if (parent < 0)
         return;
-    auto anchor = button_rect.is_empty() ? Gfx::IntRect { screen_position, { 1, 1 } } : button_rect;
+    // The client passes the button's screen position plus its (local) rect; the
+    // menu is placed from the screen position (the rect is only its size).
+    auto anchor = button_rect.is_empty()
+        ? Gfx::IntRect { screen_position, { 1, 1 } }
+        : Gfx::IntRect { screen_position, button_rect.size() };
     m_menu.open_root(menu_id, parent, anchor);
 }
 

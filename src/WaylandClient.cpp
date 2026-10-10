@@ -1349,10 +1349,13 @@ void WaylandClient::create_popup(i32 popup_id, i32 parent_window_id, i32 parent_
         zwlr_layer_surface_v1_set_size(layer_surface, size.width(), size.height());
         zwlr_layer_surface_v1_set_anchor(layer_surface, ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
         // Keep the menu on-screen: layer surfaces are placed by margin from the
-        // anchored corner and are not clamped for us.
+        // anchored corner and are not clamped for us. If it would run off the
+        // bottom, flip it above the anchor (as WindowServer does for buttons).
         int menu_x = layer_position.x();
         int menu_y = layer_position.y();
         if (!m_screen_size.is_empty()) {
+            if (menu_y + size.height() > m_screen_size.height())
+                menu_y -= size.height();
             menu_x = clamp(menu_x, 0, max(0, m_screen_size.width() - size.width()));
             menu_y = clamp(menu_y, 0, max(0, m_screen_size.height() - size.height()));
         }

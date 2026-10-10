@@ -1,0 +1,105 @@
+diff --git a/Userland/Applications/Terminal/main.cpp b/Userland/Applications/Terminal/main.cpp
+index 90cfa9f9..984312ea 100644
+--- a/Userland/Applications/Terminal/main.cpp
++++ b/Userland/Applications/Terminal/main.cpp
+@@ -36,6 +36,7 @@
+ #include <LibGfx/Font/FontDatabase.h>
+ #include <LibGfx/Palette.h>
+ #include <LibMain/Main.h>
++#include <LibSerenitySystem/SerenitySystem.h>
+ #include <LibURL/URL.h>
+ #include <LibVT/TerminalWidget.h>
+ #include <pty.h>
+@@ -103,36 +104,9 @@ private:
+ 
+ static ErrorOr<void> utmp_update(StringView tty, pid_t pid, bool create)
+ {
+-    auto pid_string = String::number(pid);
+-    Array utmp_update_command {
+-        "-f"sv,
+-        "Terminal"sv,
+-        "-p"sv,
+-        pid_string.bytes_as_string_view(),
+-        (create ? "-c"sv : "-d"sv),
+-        tty,
+-    };
+-
+-    auto utmpupdate_pid = TRY(Core::Process::spawn("/bin/utmpupdate"sv, utmp_update_command, {}, Core::Process::KeepAsChild::Yes));
+-
+-    Core::System::WaitPidResult status;
+-    auto wait_successful = false;
+-    while (!wait_successful) {
+-        auto result = Core::System::waitpid(utmpupdate_pid, 0);
+-        if (result.is_error() && result.error().code() != EINTR) {
+-            return result.release_error();
+-        } else if (!result.is_error()) {
+-            status = result.release_value();
+-            wait_successful = true;
+-        }
+-    }
+-
+-    if (WIFEXITED(status.status) && WEXITSTATUS(status.status) != 0)
+-        dbgln("Terminal: utmpupdate exited with status {}", WEXITSTATUS(status.status));
+-    else if (WIFSIGNALED(status.status))
+-        dbgln("Terminal: utmpupdate exited due to unhandled signal {}", WTERMSIG(status.status));
+-
+-    return {};
++    // The Serenity Desktop Environment owns the session/utmp system service;
++    // SerenityOS's /bin/utmpupdate has no host equivalent.
++    return SerenitySystem::update_utmp(tty, pid, create);
+ }
+ 
+ static ErrorOr<void> run_command(StringView command, bool keep_open)
+@@ -149,8 +123,22 @@ static ErrorOr<void> run_command(StringView command, bool keep_open)
+         arguments.append("-c"sv);
+         arguments.append(command);
+     }
+-    auto env = TRY(FixedArray<StringView>::create({ "TERM=xterm"sv, "COLORTERM=truecolor"sv, "PAGER=more"sv, "PATH="sv DEFAULT_PATH_SV }));
+-    TRY(Core::System::exec(shell, arguments, Core::System::SearchInPath::No, env.span()));
++    // Serenity Desktop Environment host compat: the host shell needs the display,
++    // runtime and library environment to launch GUI programs (Wayland/X11) and the
++    // Serenity layout to run Serenity applications.
++    Vector<ByteString> host_environment;
++    host_environment.append(ByteString::formatted("TERM={}", "xterm"sv));
++    host_environment.append(ByteString::formatted("COLORTERM={}", "truecolor"sv));
++    host_environment.append(ByteString::formatted("PAGER={}", "more"sv));
++    host_environment.append(ByteString::formatted("PATH={}", DEFAULT_PATH_SV));
++    for (auto const* name : { "WAYLAND_DISPLAY", "DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR", "XDG_SESSION_TYPE", "DBUS_SESSION_BUS_ADDRESS", "LD_LIBRARY_PATH", "SERENITY_RES_ROOT", "HOME", "USER", "LOGNAME", "SHELL", "LANG" }) {
++        if (auto const* value = getenv(name); value && *value)
++            host_environment.append(ByteString::formatted("{}={}", name, value));
++    }
++    Vector<StringView> environment;
++    for (auto const& entry : host_environment)
++        environment.append(entry.view());
++    TRY(Core::System::exec(shell, arguments, Core::System::SearchInPath::No, environment.span()));
+     VERIFY_NOT_REACHED();
+ }
+ 
+@@ -229,7 +217,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
+     TRY(Core::System::pledge("stdio tty rpath cpath wpath recvfd sendfd proc exec unix sigaction"));
+ 
+     struct sigaction act;
+-    act.sa_mask = 0;
++    sigemptyset(&act.sa_mask);
+     // Do not trust that both function pointers overlap.
+     act.sa_sigaction = nullptr;
+ 
+@@ -343,13 +331,11 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
+         return fg_pid != -1 && fg_pid != shell_pid;
+     };
+ 
+-    auto shell_child_process_count = [&] {
+-        int background_process_count = 0;
+-        Core::Directory::for_each_entry(String::formatted("/proc/{}/children", shell_pid).release_value_but_fixme_should_propagate_errors(), Core::DirIterator::Flags::SkipParentAndBaseDir, [&](auto&, auto&) {
+-            ++background_process_count;
+-            return IterationDecision::Continue;
+-        }).release_value_but_fixme_should_propagate_errors();
+-        return background_process_count;
++    auto shell_child_process_count = [&]() -> size_t {
++        // Linux does not expose SerenityOS's /proc/<pid>/children; the SDE
++        // system library provides the equivalent.
++        auto children = SerenitySystem::child_processes(shell_pid);
++        return children.is_error() ? 0 : children.value().size();
+     };
+ 
+     auto check_terminal_quit = [&]() -> GUI::Dialog::ExecResult {
