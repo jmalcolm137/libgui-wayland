@@ -45,7 +45,7 @@ index bc8de6a4..d11215b5 100644
      set(asm_file "${CMAKE_CURRENT_BINARY_DIR}/${target}-${section}.s")
      get_filename_component(input_file "${file}" ABSOLUTE)
 diff --git a/Meta/Lagom/CMakeLists.txt b/Meta/Lagom/CMakeLists.txt
-index 213a1e77..d6e66f35 100644
+index 213a1e77..dbfd6844 100644
 --- a/Meta/Lagom/CMakeLists.txt
 +++ b/Meta/Lagom/CMakeLists.txt
 @@ -187,6 +187,10 @@ include_directories(${CMAKE_BINARY_DIR})
@@ -114,7 +114,7 @@ index 213a1e77..d6e66f35 100644
  
      # FIXME: How about we don't include Kernel/API from random high-level libraries?
      install(FILES ${SERENITY_PROJECT_ROOT}/Kernel/API/KeyCode.h DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/Kernel/API")
-@@ -569,6 +582,121 @@ if (BUILD_LAGOM)
+@@ -569,6 +582,141 @@ if (BUILD_LAGOM)
          # Lagom Services
          add_serenity_subdirectory(Userland/Services)
  
@@ -145,6 +145,7 @@ index 213a1e77..d6e66f35 100644
 +        compile_ipc(${SERENITY_PROJECT_ROOT}/Userland/Services/AudioServer/AudioManagerClient.ipc Userland/Services/AudioServer/AudioManagerClientEndpoint.h)
 +        compile_ipc(${SERENITY_PROJECT_ROOT}/Userland/Services/AudioServer/AudioManagerServer.ipc Userland/Services/AudioServer/AudioManagerServerEndpoint.h)
 +
++        add_serenity_subdirectory(Userland/Libraries/LibLaunch)
 +        add_serenity_subdirectory(Userland/Libraries/LibConfig)
 +        add_serenity_subdirectory(Userland/Libraries/LibGUI)
 +        add_serenity_subdirectory(Userland/Libraries/LibDesktop)
@@ -163,6 +164,9 @@ index 213a1e77..d6e66f35 100644
 +        # libgui-wayland: LibSerenityAudio (the PipeWire <-> LibAudio compatibility layer).
 +        add_subdirectory("${SERENITY_PROJECT_ROOT}/../libserenity-audio" "${CMAKE_CURRENT_BINARY_DIR}/libserenity-audio")
 +
++        # libgui-wayland: EGLGPU (a Mesa/EGL-backed GPU::Device with a LibSoftGPU
++        # fallback; loaded at runtime by LibGPU's driver).
++        add_subdirectory("${SERENITY_PROJECT_ROOT}/../libeglgpu" "${CMAKE_CURRENT_BINARY_DIR}/libeglgpu")
 +        # ------------------------------------------------------------------
 +        # libgui-wayland: the SerenityOS applications we support on the host,
 +        # built from their own CMakeLists (the build system handles GML,
@@ -232,6 +236,22 @@ index 213a1e77..d6e66f35 100644
 +                target_compile_definitions(${app} PRIVATE THREAD_PRIORITY_MAX=99 MS_WXALLOWED=0 MS_AXALLOWED=0 MS_NOREGULAR=0)
 +            endif()
 +        endforeach()
++        # libgui-wayland: GL demo. Renders through the client-side LibGL/LibSoftGPU
++        # stack like 3DFileViewer; no GPU or compositor cooperation required.
++        add_serenity_subdirectory(Userland/Demos/Tubes)
++        target_link_options(Tubes PRIVATE "-Wl,--no-as-needed")
++        target_link_libraries(Tubes PRIVATE wm serenity-audio)
++
++        # Serenity Desktop Environment: the Taskbar. It is built when SDE_ROOT is
++        # set and links the WindowServer compatibility library only; the
++        # WindowServer serves the WindowManagerServer protocol itself.
++        if (DEFINED SDE_ROOT AND NOT "${SDE_ROOT}" STREQUAL "")
++            add_serenity_subdirectory(Userland/Services/Taskbar)
++            target_link_options(Taskbar PRIVATE "-Wl,--no-as-needed")
++            target_link_libraries(Taskbar PRIVATE windowserver serenity-audio)
++            target_include_directories(Taskbar BEFORE PRIVATE "${SDE_ROOT}/compat")
++            target_include_directories(Taskbar PRIVATE "${SERENITY_PROJECT_ROOT}/../compat")
++        endif()
 +
          # Lagom Utilities
          lagom_utility(abench SOURCES ../../Userland/Utilities/abench.cpp LIBS LibMain LibFileSystem LibAudio)

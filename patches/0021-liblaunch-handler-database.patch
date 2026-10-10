@@ -1,0 +1,238 @@
+diff --git a/Userland/Libraries/LibLaunch/CMakeLists.txt b/Userland/Libraries/LibLaunch/CMakeLists.txt
+new file mode 100644
+index 00000000..391d590e
+--- /dev/null
++++ b/Userland/Libraries/LibLaunch/CMakeLists.txt
+@@ -0,0 +1,6 @@
++set(SOURCES
++    HandlerDatabase.cpp
++)
++
++serenity_lib(LibLaunch launch)
++target_link_libraries(LibLaunch PRIVATE LibCore LibURL)
+diff --git a/Userland/Libraries/LibLaunch/HandlerDatabase.cpp b/Userland/Libraries/LibLaunch/HandlerDatabase.cpp
+new file mode 100644
+index 00000000..f8c8a0c4
+--- /dev/null
++++ b/Userland/Libraries/LibLaunch/HandlerDatabase.cpp
+@@ -0,0 +1,154 @@
++/*
++ * Copyright (c) 2026, Serenity Desktop Environment contributors
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#include <AK/LexicalPath.h>
++#include <LibLaunch/HandlerDatabase.h>
++#include <LibCore/ConfigFile.h>
++#include <LibCore/DirIterator.h>
++#include <LibCore/Directory.h>
++#include <LibCore/System.h>
++#include <stdlib.h>
++#include <sys/stat.h>
++
++namespace Launch {
++
++static ByteString resource_root()
++{
++    if (auto const* root = getenv("SERENITY_RES_ROOT"); root && *root)
++        return ByteString(root);
++    return {};
++}
++
++ErrorOr<HandlerDatabase> HandlerDatabase::load()
++{
++    HandlerDatabase database;
++
++    auto apps_directory = [&]() -> ByteString {
++        if (auto root = resource_root(); !root.is_empty())
++            return ByteString::formatted("{}/apps", root);
++        return ByteString { "/res/apps" };
++    }();
++
++    // Application-declared handlers first, so the ini defaults can override them.
++    TRY(Core::Directory::for_each_entry(apps_directory, Core::DirIterator::SkipParentAndBaseDir, [&](auto const& entry, auto&) -> ErrorOr<IterationDecision> {
++        if (!entry.name.ends_with(".af"sv))
++            return IterationDecision::Continue;
++        auto config = Core::ConfigFile::open(ByteString::formatted("{}/{}", apps_directory, entry.name));
++        if (config.is_error())
++            return IterationDecision::Continue;
++
++        Handler handler;
++        handler.name = config.value()->read_entry("App", "Name").trim_whitespace();
++        handler.executable = config.value()->read_entry("App", "Executable").trim_whitespace();
++        for (auto& argument : config.value()->read_entry("App", "Arguments").split(' ')) {
++            auto trimmed = argument.trim_whitespace();
++            if (!trimmed.is_empty())
++                handler.arguments.append(trimmed);
++        }
++        for (auto& type : config.value()->read_entry("Launcher", "FileTypes").split(',')) {
++            auto trimmed = type.trim_whitespace();
++            if (!trimmed.is_empty())
++                handler.file_types.append(trimmed.to_lowercase());
++        }
++        for (auto& mime : config.value()->read_entry("Launcher", "MimeTypes").split(',')) {
++            auto trimmed = mime.trim_whitespace();
++            if (!trimmed.is_empty())
++                handler.mime_types.append(trimmed.to_lowercase());
++        }
++        for (auto& protocol : config.value()->read_entry("Launcher", "Protocols").split(',')) {
++            auto trimmed = protocol.trim_whitespace();
++            if (!trimmed.is_empty())
++                handler.protocols.append(trimmed);
++        }
++
++        if (handler.executable.is_empty() || (handler.file_types.is_empty() && handler.mime_types.is_empty() && handler.protocols.is_empty()))
++            return IterationDecision::Continue;
++        database.m_app_handlers.append(move(handler));
++        return IterationDecision::Continue;
++    }));
++
++    ByteString config_path { "/etc/LaunchServer.ini" };
++    if (auto root = resource_root(); !root.is_empty()) {
++        auto candidate = ByteString::formatted("{}/../etc/LaunchServer.ini", root);
++        if (!Core::System::access(candidate, R_OK).is_error())
++            config_path = move(candidate);
++    }
++    auto config = TRY(Core::ConfigFile::open(config_path));
++    for (auto& key : config->keys("FileType"))
++        database.m_file_handlers.set(key.to_lowercase(), config->read_entry("FileType", key).trim_whitespace());
++    for (auto& key : config->keys("Protocol"))
++        database.m_protocol_handlers.set(key, config->read_entry("Protocol", key).trim_whitespace());
++
++    dbgln("Launch: loaded {} file, {} protocol and {} app-declared handlers from '{}'", database.m_file_handlers.size(), database.m_protocol_handlers.size(), database.m_app_handlers.size(), apps_directory);
++
++    return database;
++}
++
++ByteString HandlerDatabase::default_executable_for_url(URL::URL const& url) const
++{
++    if (url.scheme() == "file"sv) {
++        auto path = URL::percent_decode(url.serialize_path());
++        struct stat st;
++        if (!path.is_empty() && ::stat(path.characters(), &st) == 0 && S_ISDIR(st.st_mode)) {
++            if (auto handler = m_file_handlers.get("directory"sv); handler.has_value())
++                return *handler;
++            for (auto const& handler : m_app_handlers) {
++                if (handler.file_types.contains_slow("directory"sv))
++                    return handler.executable;
++            }
++        }
++
++        auto extension = LexicalPath(path).extension().to_byte_string().to_lowercase();
++        if (!extension.is_empty()) {
++            if (auto handler = m_file_handlers.get(extension); handler.has_value())
++                return *handler;
++            for (auto const& handler : m_app_handlers) {
++                if (handler.file_types.contains_slow(extension))
++                    return handler.executable;
++            }
++        }
++
++        if (auto handler = m_file_handlers.get("*"sv); handler.has_value())
++            return *handler;
++        return {};
++    }
++
++    if (auto handler = m_protocol_handlers.get(url.scheme().to_byte_string()); handler.has_value())
++        return *handler;
++    for (auto const& handler : m_app_handlers) {
++        if (handler.protocols.contains_slow(url.scheme().to_byte_string()))
++            return handler.executable;
++    }
++    return {};
++}
++
++Vector<ByteString> HandlerDatabase::handlers_for_url(URL::URL const& url) const
++{
++    Vector<ByteString> handlers;
++    if (auto resolved = default_executable_for_url(url); !resolved.is_empty())
++        handlers.append(move(resolved));
++
++    if (url.scheme() == "file"sv) {
++        auto extension = LexicalPath(URL::percent_decode(url.serialize_path())).extension().to_byte_string().to_lowercase();
++        for (auto const& handler : m_app_handlers) {
++            if (handler.file_types.contains_slow(extension) && !handlers.contains_slow(handler.executable))
++                handlers.append(handler.executable);
++        }
++    } else {
++        auto scheme = url.scheme().to_byte_string();
++        for (auto const& handler : m_app_handlers) {
++            if (handler.protocols.contains_slow(scheme) && !handlers.contains_slow(handler.executable))
++                handlers.append(handler.executable);
++        }
++    }
++
++    // The editor is always offered as a generic alternate.
++    if (!handlers.contains_slow("/bin/TextEditor"sv))
++        handlers.append(ByteString { "/bin/TextEditor" });
++    return handlers;
++}
++
++}
+diff --git a/Userland/Libraries/LibLaunch/HandlerDatabase.h b/Userland/Libraries/LibLaunch/HandlerDatabase.h
+new file mode 100644
+index 00000000..e04cb577
+--- /dev/null
++++ b/Userland/Libraries/LibLaunch/HandlerDatabase.h
+@@ -0,0 +1,60 @@
++/*
++ * Copyright (c) 2026, Serenity Desktop Environment contributors
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#pragma once
++
++#include <AK/ByteString.h>
++#include <AK/HashMap.h>
++#include <AK/NonnullOwnPtr.h>
++#include <AK/Vector.h>
++#include <LibURL/URL.h>
++
++namespace Launch {
++
++// A launch handler: an application that can open some file types and/or URL
++// protocols. Declared by an application's ".af" file ([Launcher] FileTypes=… /
++// MimeTypes=… / Protocols=…).
++struct Handler {
++    ByteString name;
++    ByteString executable;
++    Vector<ByteString> arguments;
++    Vector<ByteString> file_types;
++    Vector<ByteString> mime_types;
++    Vector<ByteString> protocols;
++};
++
++// Resolves a file or URL to the applications that can open it.
++//
++// This is the shared launch-handler resolution used by both libgui-wayland's
++// in-process LaunchServer fallback and the SDE LaunchServer service, so an
++// application's declared handlers behave the same whether or not SDE is
++// running. Keep it dependency-light (LibCore + LibURL only): LibDesktop's
++// AppFile cannot be used here because it pulls in LibGUI.
++class HandlerDatabase {
++public:
++    // Reads the LaunchServer.ini [FileType]/[Protocol] defaults and scans the
++    // application ".af" files for their declared handlers. Paths are resolved
++    // under SERENITY_RES_ROOT when set (the host build), else the SerenityOS
++    // /etc and /res defaults.
++    static ErrorOr<HandlerDatabase> load();
++
++    // The preferred handler's executable for a file/URL, or an empty string when
++    // nothing matches.
++    ByteString default_executable_for_url(URL::URL const& url) const;
++
++    // Every handler that can open the URL, most-preferred first, with the editor
++    // appended as a generic alternate. The shell turns these into "Open with".
++    Vector<ByteString> handlers_for_url(URL::URL const& url) const;
++
++    Vector<Handler> const& app_handlers() const { return m_app_handlers; }
++
++private:
++    HashMap<ByteString, ByteString> m_file_handlers;     // lowercased extension -> executable
++    HashMap<ByteString, ByteString> m_protocol_handlers; // scheme -> executable
++    Vector<Handler> m_app_handlers;
++};
++
++}

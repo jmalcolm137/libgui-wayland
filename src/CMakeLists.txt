@@ -106,7 +106,7 @@ target_include_directories(windowserver PRIVATE
 target_compile_definitions(windowserver PRIVATE "LIBWM_DEFAULT_RES=\"${SERENITY_PROJECT_ROOT}/Base/res\"")
 # The generated Wayland protocol code drops const in its listener trampolines.
 target_compile_options(windowserver PRIVATE -Wno-cast-qual)
-target_link_libraries(windowserver PRIVATE LibCore LibGfx LibIPC LibGUI LibThreading LibURL ${WAYLAND_CLIENT_LIBRARIES} ${XKBCOMMON_LIBRARIES})
+target_link_libraries(windowserver PRIVATE LibCore LibGfx LibIPC LibGUI LibLaunch LibThreading LibURL ${WAYLAND_CLIENT_LIBRARIES} ${XKBCOMMON_LIBRARIES})
 
 # A minimal unmodified-style LibGUI application used to exercise the shim.
 add_executable(libwm-test-window test/TestWindow.cpp)

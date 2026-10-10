@@ -6,30 +6,30 @@
 
 #pragma once
 
-#include <AK/HashMap.h>
 #include <AK/LexicalPath.h>
 #include <AK/NonnullOwnPtr.h>
 #include <AK/NonnullRefPtr.h>
-#include <LibCore/ConfigFile.h>
 #include <LibCore/Process.h>
 #include <LibCore/Socket.h>
 #include <LibCore/System.h>
 #include <LibIPC/Connection.h>
+#include <LibLaunch/HandlerDatabase.h>
 #include <LibURL/URL.h>
 #include <LaunchServer/LaunchClientEndpoint.h>
 #include <LaunchServer/LaunchServerEndpoint.h>
 #include <stdlib.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
 #include "LaunchServerDefaultStub.h"
 
 namespace LibWM {
 
-// A minimal in-process LaunchServer. It resolves a file or URL to a handler
-// using the LaunchServer.ini [FileType]/[Protocol] maps and spawns the matching
-// application from this build's bin directory (so "/bin/TextEditor" launches the
-// host binary next to the running executable).
+// The in-process LaunchServer fallback, used when no session LaunchServer is
+// present (i.e. libgui-wayland running stand-alone under any compositor).
+// Handler resolution is delegated to Launch::HandlerDatabase, the same shared
+// resolver the SDE session LaunchServer uses, so an application's declared
+// handlers behave identically either way. Spawning resolves "/bin/X" to the host
+// binary next to the running executable.
 class LaunchServerConnection final
     : public IPC::Connection<LaunchServerEndpoint, LaunchClientEndpoint>
     , public LaunchServerDefaultStub
@@ -63,7 +63,7 @@ private:
 
         auto executable = handler_name;
         if (executable.is_empty())
-            executable = default_executable_for_url(url);
+            executable = m_handlers.default_executable_for_url(url);
         if (executable.is_empty()) {
             dbgln("LibWM: LaunchServer: no handler for '{}'", url.to_byte_string());
             return false;
@@ -97,27 +97,16 @@ private:
     virtual Messages::LaunchServer::GetHandlersForUrlResponse get_handlers_for_url(URL::URL const& url) override
     {
         load_handlers_if_needed();
-        Vector<ByteString> handlers;
-        auto resolved = default_executable_for_url(url);
-        if (!resolved.is_empty())
-            handlers.append(resolved);
-        // Offer the editor as an alternate handler so the shell can show an
-        // "Open with" submenu.
-        if (resolved.is_empty() || resolved.view() != "/bin/TextEditor"sv)
-            handlers.append(ByteString { "/bin/TextEditor" });
-        return handlers;
+        return m_handlers.handlers_for_url(url);
     }
 
     virtual Messages::LaunchServer::GetHandlersWithDetailsForUrlResponse get_handlers_with_details_for_url(URL::URL const& url) override
     {
         load_handlers_if_needed();
-        Vector<ByteString> handlers;
-        auto resolved = default_executable_for_url(url);
-        if (!resolved.is_empty())
-            handlers.append(details_for(resolved));
-        if (resolved.is_empty() || resolved.view() != "/bin/TextEditor"sv)
-            handlers.append(details_for("/bin/TextEditor"sv));
-        return handlers;
+        Vector<ByteString> details;
+        for (auto const& executable : m_handlers.handlers_for_url(url))
+            details.append(details_for(executable));
+        return details;
     }
 
     void load_handlers_if_needed()
@@ -126,43 +115,10 @@ private:
             return;
         m_loaded = true;
 
-        ByteString config_path { "/etc/LaunchServer.ini" };
-        if (auto const* res_root = getenv("SERENITY_RES_ROOT"); res_root && *res_root) {
-            auto candidate = ByteString::formatted("{}/../etc/LaunchServer.ini", res_root);
-            if (!Core::System::access(candidate, R_OK).is_error())
-                config_path = move(candidate);
-        }
-
-        auto config = Core::ConfigFile::open(config_path).release_value_but_fixme_should_propagate_errors();
-        for (auto& key : config->keys("FileType"))
-            m_file_handlers.set(key, config->read_entry("FileType", key).trim_whitespace());
-        for (auto& key : config->keys("Protocol"))
-            m_protocol_handlers.set(key, config->read_entry("Protocol", key).trim_whitespace());
-    }
-
-    ByteString default_executable_for_url(URL::URL const& url)
-    {
-        if (url.scheme() == "file"sv) {
-            auto path = URL::percent_decode(url.serialize_path());
-            struct stat st;
-            if (!path.is_empty() && ::stat(path.characters(), &st) == 0) {
-                if (S_ISDIR(st.st_mode)) {
-                    if (auto handler = m_file_handlers.get("directory"sv); handler.has_value())
-                        return *handler;
-                }
-            }
-            auto extension = LexicalPath(path).extension();
-            if (!extension.is_empty()) {
-                if (auto handler = m_file_handlers.get(extension.to_byte_string()); handler.has_value())
-                    return *handler;
-            }
-            if (auto handler = m_file_handlers.get("*"sv); handler.has_value())
-                return *handler;
-            return {};
-        }
-        if (auto handler = m_protocol_handlers.get(url.scheme().to_byte_string()); handler.has_value())
-            return *handler;
-        return {};
+        if (auto database = Launch::HandlerDatabase::load(); database.is_error())
+            dbgln("LibWM: LaunchServer: could not load handlers: {}", database.error());
+        else
+            m_handlers = database.release_value();
     }
 
     // "/bin/TextEditor" -> "<dir of this executable>/TextEditor", so the handler
@@ -187,8 +143,7 @@ private:
         return ByteString::formatted(R"({{"executable":"{}","name":"{}","arguments":[]}})", executable, name);
     }
 
-    HashMap<ByteString, ByteString> m_file_handlers;
-    HashMap<ByteString, ByteString> m_protocol_handlers;
+    Launch::HandlerDatabase m_handlers;
     bool m_loaded { false };
 };
 
