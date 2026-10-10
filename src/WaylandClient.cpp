@@ -1348,6 +1348,15 @@ void WaylandClient::create_popup(i32 popup_id, i32 parent_window_id, i32 parent_
         zwlr_layer_surface_v1_add_listener(layer_surface, &s_menu_layer_listener, this);
         zwlr_layer_surface_v1_set_size(layer_surface, size.width(), size.height());
         zwlr_layer_surface_v1_set_anchor(layer_surface, ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
+        // Keep the menu on-screen: layer surfaces are placed by margin from the
+        // anchored corner and are not clamped for us.
+        int menu_x = layer_position.x();
+        int menu_y = layer_position.y();
+        if (!m_screen_size.is_empty()) {
+            menu_x = clamp(menu_x, 0, max(0, m_screen_size.width() - size.width()));
+            menu_y = clamp(menu_y, 0, max(0, m_screen_size.height() - size.height()));
+        }
+        layer_position = { menu_x, menu_y };
         zwlr_layer_surface_v1_set_margin(layer_surface, layer_position.y(), 0, 0, layer_position.x());
         zwlr_layer_surface_v1_set_exclusive_zone(layer_surface, -1);
         zwlr_layer_surface_v1_set_keyboard_interactivity(layer_surface, ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND);

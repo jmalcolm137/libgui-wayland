@@ -117,8 +117,7 @@ void WindowServerConnection::install_input_callbacks()
         // routed to the popup), so dismiss it first.
         if (m_menu.has_open_menu())
             m_menu.close_open_menus();
-        if (button == 2) // GUI::MouseButton::Secondary
-            m_context_menu_window_id = window_id;
+        m_last_mouse_down_window_id = window_id;
         async_mouse_down(window_id, position, button, buttons, modifiers, 0, 0, 0, 0);
     };
     callbacks.mouse_up = [this](i32 window_id, Gfx::IntPoint position, u32 button, u32 buttons, u32 modifiers) {
@@ -566,7 +565,7 @@ void WindowServerConnection::popup_menu(i32 menu_id, Gfx::IntPoint screen_positi
     // coordinates, so positions are treated as parent-surface-relative.
     i32 parent = m_menu.menu_window(menu_id);
     if (parent < 0)
-        parent = m_context_menu_window_id;
+        parent = m_last_mouse_down_window_id;
     if (parent < 0)
         parent = m_active_window_id;
     if (parent < 0)
