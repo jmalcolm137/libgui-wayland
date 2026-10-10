@@ -138,6 +138,14 @@ target_include_directories(libwm-submenu-test PRIVATE "${CMAKE_CURRENT_SOURCE_DI
 target_link_options(libwm-submenu-test PRIVATE "-Wl,--no-as-needed")
 target_link_libraries(libwm-submenu-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC windowserver)
 
+# Probes the launch and image session-service portals, with and without an
+# external session service (in-process fallback vs. deferral). Driven by
+# scripts/run-services-test.sh; see docs/06-service-layering.md.
+add_executable(libwm-services-test test/ServiceLayeringTest.cpp)
+target_include_directories(libwm-services-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_options(libwm-services-test PRIVATE "-Wl,--no-as-needed")
+target_link_libraries(libwm-services-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibURL LibDesktop LibImageDecoderClient windowserver)
+
 # --- Unmodified SerenityOS applications ---------------------------------------
 # Built directly from their upstream sources. No source is edited; only the GML
 # is precompiled (the app's own CMakeLists uses compile_gml, which requires a
