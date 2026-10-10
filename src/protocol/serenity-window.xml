@@ -76,5 +76,15 @@
       </description>
       <arg name="visible" type="int"/>
     </event>
+
+    <event name="position">
+      <description summary="the window's position on screen">
+        The compositor places the toplevel itself, so this tells the client
+        where the window actually is. The client keeps its screen-relative
+        coordinates (menus, popups, tooltips) consistent with it.
+      </description>
+      <arg name="x" type="int"/>
+      <arg name="y" type="int"/>
+    </event>
   </interface>
 </protocol>

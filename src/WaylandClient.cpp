@@ -235,8 +235,14 @@ static void serenity_toplevel_menubar_visibility(void* data, serenity_toplevel* 
     static_cast<WaylandClient*>(data)->on_menubar_visibility(resource, visible != 0);
 }
 
+static void serenity_toplevel_position(void* data, serenity_toplevel* resource, int32_t x, int32_t y)
+{
+    static_cast<WaylandClient*>(data)->on_toplevel_position(resource, x, y);
+}
+
 static serenity_toplevel_listener const s_serenity_toplevel_listener = {
     .menubar_visibility = serenity_toplevel_menubar_visibility,
+    .position = serenity_toplevel_position,
 };
 
 static void serenity_window_manager_dismiss_menus(void* data, serenity_window_manager*)
@@ -1142,8 +1148,7 @@ void WaylandClient::on_menu_layer_configure(zwlr_layer_surface_v1* layer_surface
 }
 
 void WaylandClient::on_menu_layer_closed(zwlr_layer_surface_v1* layer_surface)
-{
-    for (auto const& it : m_popups) {
+{    for (auto const& it : m_popups) {
         if (it.value->layer_surface == layer_surface) {
             // The compositor vetoed the menu (e.g. it was dismissed); drop it.
             destroy_popup(it.value->id);
@@ -1159,6 +1164,17 @@ void WaylandClient::on_menubar_visibility(serenity_toplevel* resource, bool visi
             it.value->menubar_visible = visible;
             if (m_menubar_visibility_changed)
                 m_menubar_visibility_changed(it.value->window_id, visible);
+            return;
+        }
+    }
+}
+
+void WaylandClient::on_toplevel_position(serenity_toplevel* resource, int32_t x, int32_t y)
+{
+    for (auto const& it : m_windows) {
+        if (it.value->chrome == resource) {
+            if (m_toplevel_position_changed)
+                m_toplevel_position_changed(it.value->window_id, Gfx::IntPoint { x, y });
             return;
         }
     }

@@ -233,6 +233,12 @@ void WindowServerConnection::install_menu_callbacks()
     m_menu.redraw_popup = [this](i32 menu_id) { present_menu_popup(menu_id); };
     WaylandClient::the().set_menubar_visibility_callback([this](i32 window_id, bool) { update_window_menubar(window_id); });
     WaylandClient::the().set_dismiss_menus_callback([this] { m_menu.close_open_menus(); });
+    // The compositor places windows itself; adopt its position so the client's
+    // screen-relative coordinates (menus, popups, tooltips) match reality.
+    WaylandClient::the().set_toplevel_position_callback([this](i32 window_id, Gfx::IntPoint position) {
+        if (auto* w = window(window_id))
+            w->rect.set_location(position);
+    });
 }
 
 void WindowServerConnection::present_menu_popup(i32 menu_id)

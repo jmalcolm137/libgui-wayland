@@ -162,6 +162,8 @@ public:
     void set_menubar_visibility_callback(Function<void(i32 window_id, bool visible)> callback) { m_menubar_visibility_changed = move(callback); }
     // The compositor asks the client to close its open menus (see the protocol).
     void set_dismiss_menus_callback(Function<void()> callback) { m_dismiss_menus = move(callback); }
+    // The compositor tells the client where it placed a window.
+    void set_toplevel_position_callback(Function<void(i32 window_id, Gfx::IntPoint position)> callback) { m_toplevel_position_changed = move(callback); }
     void set_data_device_manager(wl_data_device_manager* manager);
     void add_output(wl_output* output);
     void set_xdg_output_manager(zxdg_output_manager_v1* manager);
@@ -188,6 +190,7 @@ public:
     void on_menu_layer_configure(zwlr_layer_surface_v1*, Gfx::IntSize size);
     void on_menu_layer_closed(zwlr_layer_surface_v1*);
     void on_menubar_visibility(serenity_toplevel*, bool visible);
+    void on_toplevel_position(serenity_toplevel*, int32_t x, int32_t y);
     void on_dismiss_menus();
 
     void on_data_offer(wl_data_offer*);
@@ -316,6 +319,7 @@ private:
     u32 m_modifiers { 0 };
     Function<void(ByteString const&)> m_clipboard_changed;
     Function<void(i32 window_id, bool visible)> m_menubar_visibility_changed;
+    Function<void(i32 window_id, Gfx::IntPoint)> m_toplevel_position_changed;
     Function<void()> m_dismiss_menus;
 
     InputCallbacks m_input;
