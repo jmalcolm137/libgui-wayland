@@ -98,8 +98,13 @@ private:
     {
         load_handlers_if_needed();
         Vector<ByteString> handlers;
-        if (auto executable = default_executable_for_url(url); !executable.is_empty())
-            handlers.append(executable);
+        auto resolved = default_executable_for_url(url);
+        if (!resolved.is_empty())
+            handlers.append(resolved);
+        // Offer the editor as an alternate handler so the shell can show an
+        // "Open with" submenu.
+        if (resolved.is_empty() || resolved.view() != "/bin/TextEditor"sv)
+            handlers.append(ByteString { "/bin/TextEditor" });
         return handlers;
     }
 
@@ -107,8 +112,11 @@ private:
     {
         load_handlers_if_needed();
         Vector<ByteString> handlers;
-        if (auto executable = default_executable_for_url(url); !executable.is_empty())
-            handlers.append(details_for(executable));
+        auto resolved = default_executable_for_url(url);
+        if (!resolved.is_empty())
+            handlers.append(details_for(resolved));
+        if (resolved.is_empty() || resolved.view() != "/bin/TextEditor"sv)
+            handlers.append(details_for("/bin/TextEditor"sv));
         return handlers;
     }
 
@@ -173,7 +181,9 @@ private:
     static ByteString details_for(ByteString const& executable)
     {
         auto name = LexicalPath(executable).basename();
-        return ByteString::formatted(R"({{"executable":"{}","name":"{}","arguments":[],"type":"app"}})", executable, name);
+        // No "type" field: the client treats the default (non-Application) type
+        // as "open this file with the program", passing the path as an argument.
+        return ByteString::formatted(R"({{"executable":"{}","name":"{}","arguments":[]}})", executable, name);
     }
 
     HashMap<ByteString, ByteString> m_file_handlers;
