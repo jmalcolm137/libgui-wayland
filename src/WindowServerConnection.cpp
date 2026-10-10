@@ -6,7 +6,9 @@
 
 #include "WindowServerConnection.h"
 #include "WaylandClient.h"
+#include <AK/LexicalPath.h>
 #include <LibCore/AnonymousBuffer.h>
+#include <LibCore/File.h>
 #include <LibGfx/ImageFormats/PNGWriter.h>
 #include <LibGfx/Painter.h>
 #include <LibGfx/SystemTheme.h>
@@ -583,15 +585,87 @@ void WindowServerConnection::dismiss_menu(i32 menu_id)
     m_menu.close_menu(menu_id);
 }
 
-Messages::WindowServer::GetSystemThemeResponse WindowServerConnection::get_system_theme()
+namespace {
+ByteString theme_broker_path()
 {
-    return ByteString { "Default" };
+    if (auto const* runtime = getenv("XDG_RUNTIME_DIR"); runtime && *runtime)
+        return ByteString::formatted("{}/sde-theme", runtime);
+    return ByteString { "/tmp/sde-theme" };
 }
 
-Messages::WindowServer::SetSystemThemeResponse WindowServerConnection::set_system_theme(ByteString const&, ByteString const&, bool, Optional<ByteString> const&)
+ByteString resource_root_path()
 {
-    // FIXME: Apply the requested theme (reload theme/fonts) on the host.
+    if (auto const* res = getenv("SERENITY_RES_ROOT"); res && *res)
+        return ByteString(res);
+    return {};
+}
+
+ByteString host_path_for_resource(ByteString const& path)
+{
+    if (!path.starts_with("/res/"sv))
+        return path;
+    auto root = resource_root_path();
+    if (root.is_empty())
+        return path;
+    return ByteString::formatted("{}/{}", root, path.substring_view(5));
+}
+}
+
+Messages::WindowServer::GetSystemThemeResponse WindowServerConnection::get_system_theme()
+{
+    return m_theme_name;
+}
+
+Messages::WindowServer::SetSystemThemeResponse WindowServerConnection::set_system_theme(ByteString const& theme_path, ByteString const& theme_name, bool, Optional<ByteString> const& color_scheme_path)
+{
+    auto host_theme = host_path_for_resource(theme_path);
+    Optional<ByteString> host_scheme;
+    if (color_scheme_path.has_value())
+        host_scheme = host_path_for_resource(color_scheme_path.value());
+
+    auto buffer = Gfx::load_system_theme(host_theme, host_scheme);
+    if (buffer.is_error())
+        return false;
+
+    m_theme_name = theme_name;
+    // Restyle this client, then record the choice so other clients and the
+    // compositor pick it up from the shared broker file.
+    async_update_system_theme(buffer.value());
+    if (auto file = Core::File::open(theme_broker_path(), Core::File::OpenMode::Write); !file.is_error())
+        (void)file.value()->write_until_depleted(host_theme);
     return true;
+}
+
+void WindowServerConnection::watch_theme()
+{
+    if (m_theme_watcher)
+        return;
+    m_theme_watcher = Core::FileWatcher::create().release_value_but_fixme_should_propagate_errors();
+    m_theme_watcher->on_change = [this](Core::FileWatcherEvent const& event) {
+        if (event.event_path != theme_broker_path())
+            return;
+        apply_theme_from_broker();
+    };
+    // Watch the runtime directory so creation of the file is seen too.
+    if (auto directory = LexicalPath(theme_broker_path()).dirname(); !directory.is_empty())
+        (void)m_theme_watcher->add_watch(directory, Core::FileWatcherEvent::Type::ChildCreated | Core::FileWatcherEvent::Type::MetadataModified);
+}
+
+void WindowServerConnection::apply_theme_from_broker()
+{
+    auto file = Core::File::open(theme_broker_path(), Core::File::OpenMode::Read);
+    if (file.is_error())
+        return;
+    auto contents = file.value()->read_until_eof();
+    if (contents.is_error())
+        return;
+    auto host_theme = StringView { contents.value() }.trim_whitespace().to_byte_string();
+    if (host_theme.is_empty())
+        return;
+    if (auto buffer = Gfx::load_system_theme(host_theme, {}); !buffer.is_error()) {
+        m_theme_name = LexicalPath(host_theme).title();
+        async_update_system_theme(buffer.value());
+    }
 }
 
 Messages::WindowServer::IsSystemThemeOverriddenResponse WindowServerConnection::is_system_theme_overridden()

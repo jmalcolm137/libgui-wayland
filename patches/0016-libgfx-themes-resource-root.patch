@@ -1,0 +1,22 @@
+diff --git a/Userland/Libraries/LibGfx/SystemTheme.cpp b/Userland/Libraries/LibGfx/SystemTheme.cpp
+index 1a017dc5..01cc3ddd 100644
+--- a/Userland/Libraries/LibGfx/SystemTheme.cpp
++++ b/Userland/Libraries/LibGfx/SystemTheme.cpp
+@@ -224,10 +224,15 @@ ErrorOr<Core::AnonymousBuffer> load_system_theme(ByteString const& path, Optiona
+ ErrorOr<Vector<SystemThemeMetaData>> list_installed_system_themes()
+ {
+     Vector<SystemThemeMetaData> system_themes;
+-    Core::DirIterator dt("/res/themes", Core::DirIterator::SkipDots);
++    // Serenity installs themes under /res/themes; on the host they live under the
++    // resource root.
++    ByteString themes_directory { "/res/themes" };
++    if (auto const* res_root = getenv("SERENITY_RES_ROOT"); res_root && *res_root)
++        themes_directory = ByteString::formatted("{}/themes", res_root);
++    Core::DirIterator dt(themes_directory, Core::DirIterator::SkipDots);
+     while (dt.has_next()) {
+         auto theme_name = dt.next_path();
+-        auto theme_path = ByteString::formatted("/res/themes/{}", theme_name);
++        auto theme_path = ByteString::formatted("{}/{}", themes_directory, theme_name);
+         auto config_file = TRY(Core::ConfigFile::open(theme_path));
+         auto menu_name = config_file->read_entry("Menu", "Name", theme_name);
+         TRY(system_themes.try_append({ LexicalPath::title(theme_name), menu_name, theme_path }));

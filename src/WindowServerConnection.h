@@ -12,6 +12,7 @@
 #include <AK/RefPtr.h>
 #include <AK/Vector.h>
 #include <LibCore/ElapsedTimer.h>
+#include <LibCore/FileWatcher.h>
 #include <LibCore/Socket.h>
 #include <LibGfx/Bitmap.h>
 #include <LibIPC/Connection.h>
@@ -50,6 +51,7 @@ private:
         : IPC::Connection<WindowServerEndpoint, WindowClientEndpoint>(*this, move(socket))
         , WindowClientEndpoint::Proxy<WindowServerEndpoint>(*this, {})
     {
+        watch_theme();
     }
 
     struct Window {
@@ -127,6 +129,13 @@ private:
     Messages::WindowServer::SetSystemThemeResponse set_system_theme(ByteString const& theme_path, ByteString const& theme_name, bool keep_desktop_background, Optional<ByteString> const& color_scheme_path) override;
     Messages::WindowServer::IsSystemThemeOverriddenResponse is_system_theme_overridden() override;
     Messages::WindowServer::GetPreferredColorSchemeResponse get_preferred_color_scheme() override;
+
+    // Broadcasts theme changes between processes (each app has its own
+    // WindowServer shim) via a shared file the compositor and clients watch.
+    void watch_theme();
+    void apply_theme_from_broker();
+    ByteString m_theme_name { "Default" };
+    RefPtr<Core::FileWatcher> m_theme_watcher;
 
     Vector<NonnullOwnPtr<Window>> m_windows;
     Gfx::IntSize m_screen_size { 1280, 800 };
