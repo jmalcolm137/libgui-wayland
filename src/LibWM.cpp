@@ -172,8 +172,12 @@ static void start_server_thread()
         if (auto socket = Core::LocalSocket::adopt_fd(image_decoder_server); !socket.is_error()) {
             auto connection = ImageDecoder::ConnectionFromClient::construct(socket.release_value());
             // The decoder is an in-process portal server: a client disconnecting
-            // must not quit this application's event loop or thread pool.
+            // must not quit this application's event loop or thread pool, and a
+            // decode must not need the process-global background thread (the very
+            // thread a client such as FileSystemModel's thumbnail renderer is
+            // already blocking on). Decode inline on our own thread instead.
             connection->set_exit_when_client_disconnects(false);
+            connection->set_decode_on_connection_thread(true);
             image_decoder_server_slot() = connection;
         }
 

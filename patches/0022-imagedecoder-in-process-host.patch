@@ -1,5 +1,5 @@
 diff --git a/Userland/Services/ImageDecoder/ConnectionFromClient.cpp b/Userland/Services/ImageDecoder/ConnectionFromClient.cpp
-index a5f3c060..329f5c37 100644
+index a5f3c060..708686ec 100644
 --- a/Userland/Services/ImageDecoder/ConnectionFromClient.cpp
 +++ b/Userland/Services/ImageDecoder/ConnectionFromClient.cpp
 @@ -25,8 +25,10 @@ void ConnectionFromClient::die()
@@ -15,11 +15,30 @@ index a5f3c060..329f5c37 100644
  }
  
  namespace {
+@@ -118,6 +120,18 @@ Messages::ImageDecoderServer::DecodeImageResponse ConnectionFromClient::decode_i
+         return image_id;
+     }
+ 
++    if (m_decode_on_connection_thread) {
++        // Decode inline on our own thread; see set_decode_on_connection_thread().
++        auto result = decode_image_to_details(encoded_buffer, ideal_size, mime_type);
++        if (result.is_error()) {
++            async_did_fail_to_decode_image(image_id, MUST(String::formatted("Decoding failed: {}", result.error())));
++        } else {
++            auto decoded = result.release_value();
++            async_did_decode_image(image_id, decoded.is_animated, decoded.loop_count, move(decoded.bitmaps), move(decoded.durations), decoded.scale);
++        }
++        return image_id;
++    }
++
+     m_pending_jobs.set(image_id, make_decode_image_job(image_id, encoded_buffer, ideal_size, mime_type));
+ 
+     return image_id;
 diff --git a/Userland/Services/ImageDecoder/ConnectionFromClient.h b/Userland/Services/ImageDecoder/ConnectionFromClient.h
-index 7be87db1..3baaa8de 100644
+index 7be87db1..2cb708ad 100644
 --- a/Userland/Services/ImageDecoder/ConnectionFromClient.h
 +++ b/Userland/Services/ImageDecoder/ConnectionFromClient.h
-@@ -25,6 +25,12 @@ public:
+@@ -25,6 +25,19 @@ public:
  
      virtual void die() override;
  
@@ -29,14 +48,22 @@ index 7be87db1..3baaa8de 100644
 +    // that teardown.
 +    void set_exit_when_client_disconnects(bool exit_when_client_disconnects) { m_exit_when_client_disconnects = exit_when_client_disconnects; }
 +
++    // A decode job normally runs on the process-global `Threading::BackgroundAction`
++    // thread. A host whose client already occupies that one thread - e.g. LibGUI's
++    // `FileSystemModel` renders thumbnails on it - would deadlock waiting for a job
++    // that can never be scheduled. Such an in-process host decodes inline on the
++    // connection's own thread instead.
++    void set_decode_on_connection_thread(bool decode_on_connection_thread) { m_decode_on_connection_thread = decode_on_connection_thread; }
++
      struct DecodeResult {
          bool is_animated = false;
          u32 loop_count = 0;
-@@ -44,6 +50,7 @@ private:
+@@ -44,6 +57,8 @@ private:
      NonnullRefPtr<Job> make_decode_image_job(i64 image_id, Core::AnonymousBuffer, Optional<Gfx::IntSize> ideal_size, Optional<ByteString> mime_type);
  
      i64 m_next_image_id { 0 };
 +    bool m_exit_when_client_disconnects { true };
++    bool m_decode_on_connection_thread { false };
      HashMap<i64, NonnullRefPtr<Job>> m_pending_jobs;
  };
  
