@@ -85,6 +85,7 @@ add_library(windowserver SHARED
     MenuController.cpp
     WaylandClient.cpp
     WindowServerConnection.cpp
+    "${SERENITY_PROJECT_ROOT}/Userland/Services/ImageDecoder/ConnectionFromClient.cpp"
     "${WM_WAYLAND_DIR}/xdg-shell-protocol.c"
     "${WM_WAYLAND_DIR}/xdg-decoration-protocol.c"
     "${WM_WAYLAND_DIR}/xdg-output-protocol.c"

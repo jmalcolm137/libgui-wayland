@@ -13,6 +13,7 @@
 #include "WindowServerConnection.h"
 #include <AK/NonnullOwnPtr.h>
 #include <AK/Optional.h>
+#include <ImageDecoder/ConnectionFromClient.h>
 #include <LibCore/EventLoop.h>
 #include <LibCore/PortalServer.h>
 #include <LibCore/ResourceImplementationFile.h>
@@ -54,6 +55,11 @@ static RefPtr<ConfigServerConnection>& config_server_slot()
 static RefPtr<FileSystemAccessServerConnection>& file_system_access_server_slot()
 {
     static auto* slot = new RefPtr<FileSystemAccessServerConnection>;
+    return *slot;
+}
+static RefPtr<ImageDecoder::ConnectionFromClient>& image_decoder_server_slot()
+{
+    static auto* slot = new RefPtr<ImageDecoder::ConnectionFromClient>;
     return *slot;
 }
 
@@ -125,12 +131,14 @@ static void start_server_thread()
     int launch_server = -1;
     int config_server = -1;
     int file_system_access_server = -1;
+    int image_decoder_server = -1;
     int window_client = make_socketpair(window_server);
     int clipboard_client = make_socketpair(clipboard_server);
     int launch_client = make_socketpair(launch_server);
     int config_client = make_socketpair(config_server);
     int file_system_access_client = make_socketpair(file_system_access_server);
-    if (window_client < 0 || clipboard_client < 0 || launch_client < 0 || config_client < 0 || file_system_access_client < 0) {
+    int image_decoder_client = make_socketpair(image_decoder_server);
+    if (window_client < 0 || clipboard_client < 0 || launch_client < 0 || config_client < 0 || file_system_access_client < 0 || image_decoder_client < 0) {
         dbgln("LibWM: failed to create portal socketpairs");
         return;
     }
@@ -140,8 +148,9 @@ static void start_server_thread()
     s_client_fds.set(expanded_portal_path("/tmp/session/%sid/portal/launch"sv), launch_client);
     s_client_fds.set(expanded_portal_path("/tmp/session/%sid/portal/config"sv), config_client);
     s_client_fds.set(expanded_portal_path("/tmp/session/%sid/portal/filesystemaccess"sv), file_system_access_client);
+    s_client_fds.set(expanded_portal_path("/tmp/session/%sid/portal/image"sv), image_decoder_client);
 
-    auto thread = Threading::Thread::try_create([window_server, clipboard_server, launch_server, config_server, file_system_access_server]() -> intptr_t {
+    auto thread = Threading::Thread::try_create([window_server, clipboard_server, launch_server, config_server, file_system_access_server, image_decoder_server]() -> intptr_t {
         Core::EventLoop loop;
         MainThreadInvoker::install_server(loop);
 
@@ -160,6 +169,13 @@ static void start_server_thread()
             config_server_slot() = ConfigServerConnection::create(socket.release_value());
         if (auto socket = Core::LocalSocket::adopt_fd(file_system_access_server); !socket.is_error())
             file_system_access_server_slot() = FileSystemAccessServerConnection::create(socket.release_value());
+        if (auto socket = Core::LocalSocket::adopt_fd(image_decoder_server); !socket.is_error()) {
+            auto connection = ImageDecoder::ConnectionFromClient::construct(socket.release_value());
+            // The decoder is an in-process portal server: a client disconnecting
+            // must not quit this application's event loop or thread pool.
+            connection->set_exit_when_client_disconnects(false);
+            image_decoder_server_slot() = connection;
+        }
 
         loop.exec();
         return 0;
