@@ -270,7 +270,12 @@ void WindowServerConnection::create_window(i32 window_id, i32, Gfx::IntRect cons
     // confirms it with a configure. Serenity's WindowServer sizes such windows
     // synchronously, and apps query window->size() right after show() (e.g. the
     // Tubes screensaver calls create_buffer(window->size())).
-    if (fullscreen) {
+    //
+    // The same applies to a window created with an empty size: the Desktop fills
+    // the output via layer-shell anchors, but the app builds its backing store
+    // from window->size() before the configure arrives, and an empty size trips
+    // `VERIFY(!size.is_empty())`.
+    if (fullscreen || window->rect.size().is_empty()) {
         auto screen = WaylandClient::the().screen_size();
         if (!screen.is_empty())
             window->rect.set_size(screen);
