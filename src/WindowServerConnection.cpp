@@ -646,9 +646,14 @@ void WindowServerConnection::watch_theme()
             return;
         apply_theme_from_broker();
     };
-    // Watch the runtime directory so creation of the file is seen too.
+    // Watch the runtime directory so creation of the file is seen too, and the
+    // file itself (a write is IN_MODIFY, which a directory watch does not report).
     if (auto directory = LexicalPath(theme_broker_path()).dirname(); !directory.is_empty())
-        (void)m_theme_watcher->add_watch(directory, Core::FileWatcherEvent::Type::ChildCreated | Core::FileWatcherEvent::Type::MetadataModified);
+        (void)m_theme_watcher->add_watch(directory, Core::FileWatcherEvent::Type::ChildCreated);
+    auto path = theme_broker_path();
+    if (Core::File::open(path, Core::File::OpenMode::Read).is_error())
+        (void)Core::File::open(path, Core::File::OpenMode::Write);
+    (void)m_theme_watcher->add_watch(path, Core::FileWatcherEvent::Type::ContentModified | Core::FileWatcherEvent::Type::MetadataModified);
 }
 
 void WindowServerConnection::apply_theme_from_broker()
