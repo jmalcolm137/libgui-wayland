@@ -243,6 +243,21 @@ target_include_directories(NotificationServer PRIVATE "${NOTIFICATION_SERVER_SRC
 target_link_options(NotificationServer PRIVATE "-Wl,--no-as-needed")
 target_link_libraries(NotificationServer PRIVATE LibCore LibDesktop LibGfx LibGUI LibIPC LibMain LibURL windowserver)
 
+# --- The unmodified WorkspacePicker applet (WS1) ------------------------------
+set(WORKSPACEPICKER_SRC "${SERENITY_PROJECT_ROOT}/Userland/Applets/WorkspacePicker")
+add_executable(WorkspacePicker
+    "${WORKSPACEPICKER_SRC}/main.cpp"
+    "${WORKSPACEPICKER_SRC}/DesktopStatusWindow.cpp"
+)
+target_include_directories(WorkspacePicker PRIVATE "${WORKSPACEPICKER_SRC}")
+target_link_options(WorkspacePicker PRIVATE "-Wl,--no-as-needed")
+target_link_libraries(WorkspacePicker PRIVATE LibMain LibGUI LibGfx LibCore LibIPC windowserver)
+# Host stubs for Serenity-only headers (WindowServer/Window.h -> WMEventMask).
+if (DEFINED SDE_ROOT AND NOT "${SDE_ROOT}" STREQUAL "")
+    target_include_directories(WorkspacePicker BEFORE PRIVATE "${SDE_ROOT}/compat")
+endif()
+target_include_directories(WorkspacePicker PRIVATE "${SERENITY_PROJECT_ROOT}/../compat")
+
 # --- Unmodified SerenityOS applications ---------------------------------------
 # Built directly from their upstream sources. No source is edited; only the GML
 # is precompiled (the app's own CMakeLists uses compile_gml, which requires a

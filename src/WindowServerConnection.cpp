@@ -8,6 +8,7 @@
 #include "WaylandClient.h"
 #include <AK/LexicalPath.h>
 #include <LibCore/AnonymousBuffer.h>
+#include <LibCore/ConfigFile.h>
 #include <LibCore/Directory.h>
 #include <LibCore/File.h>
 #include <LibGfx/ImageFormats/PNGWriter.h>
@@ -126,6 +127,43 @@ void WindowServerConnection::remove_window(i32 id)
     m_windows.remove_first_matching([&](auto& window) { return window->id == id; });
 }
 
+// The workspace grid, read from the same config the compositor uses ([Workspaces]
+// in WindowServer.ini: the SerenityOS default overlaid by the user's file in the
+// session state directory). GUI::Desktop gets these with the screen rects, and the
+// WorkspacePicker applet sizes its grid from them.
+static Optional<int> config_dimension(ByteString const& path, StringView key)
+{
+    auto config = Core::ConfigFile::open(path);
+    if (config.is_error())
+        return {};
+    if (config.value()->read_entry("Workspaces"sv, key).is_empty())
+        return {};
+    return config.value()->read_num_entry("Workspaces"sv, key, 0);
+}
+
+static unsigned workspace_dimension(StringView key, unsigned fallback)
+{
+    ByteString user_path;
+    if (auto const* dir = getenv("SDE_STATE_DIR"); dir && *dir)
+        user_path = ByteString::formatted("{}/WindowServer.ini", dir);
+    else if (auto const* config = getenv("XDG_CONFIG_HOME"); config && *config)
+        user_path = ByteString::formatted("{}/sde/WindowServer.ini", config);
+    else if (auto const* home = getenv("HOME"); home && *home)
+        user_path = ByteString::formatted("{}/.config/sde/WindowServer.ini", home);
+
+    ByteString default_path;
+    if (auto const* root = getenv("SERENITY_RES_ROOT"); root && *root)
+        default_path = ByteString::formatted("{}/../etc/WindowServer.ini", root);
+
+    for (auto const& path : { user_path, default_path }) {
+        if (path.is_empty())
+            continue;
+        if (auto value = config_dimension(path, key); value.has_value() && value.value() > 0)
+            return static_cast<unsigned>(value.value());
+    }
+    return fallback;
+}
+
 void WindowServerConnection::send_fast_greet()
 {
     install_input_callbacks();
@@ -149,9 +187,12 @@ void WindowServerConnection::send_fast_greet()
     for (size_t i = 0; i < to_underlying(WindowServer::Effects::__Count); ++i)
         effects.append(false);
 
+    unsigned const workspace_rows = workspace_dimension("Rows"sv, 1);
+    unsigned const workspace_columns = workspace_dimension("Columns"sv, 1);
+
     async_fast_greet(
         move(screen_rects),
-        0, 1, 1,
+        0, workspace_rows, workspace_columns,
         Gfx::current_system_theme_buffer(),
         "Katica 10 400 0"sv,
         "Csilla 10 400 0"sv,
