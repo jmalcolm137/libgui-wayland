@@ -165,6 +165,13 @@ target_include_directories(libwm-tooltip-test PRIVATE "${CMAKE_CURRENT_SOURCE_DI
 target_link_options(libwm-tooltip-test PRIVATE "-Wl,--no-as-needed")
 target_link_libraries(libwm-tooltip-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC windowserver)
 
+# Confirms the font-parity decision (WS7): bitmap Katica has no 14pt face, so
+# size-based zoom is a no-op; a scalable face resolves (the R4/G5 path).
+add_executable(libwm-font-parity-test test/FontParityTest.cpp)
+target_include_directories(libwm-font-parity-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_options(libwm-font-parity-test PRIVATE "-Wl,--no-as-needed")
+target_link_libraries(libwm-font-parity-test PRIVATE LibMain LibGfx LibCore)
+
 # --- The out-of-process WebContent service ------------------------------------
 # Built from the upstream sources. It is a single-client system service; LibWM
 # spawns it on demand and hands it a socket via SOCKET_TAKEOVER (the same
