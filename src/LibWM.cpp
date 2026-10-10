@@ -183,6 +183,16 @@ static Optional<NonnullOwnPtr<Core::LocalSocket>> make_portal(ByteString const& 
 {
     dbgln("LibWM: portal connect request '{}'", path);
 
+    // Prefer a real session service listening on the portal path (e.g. SDE's
+    // LaunchServer): if a socket exists there, decline so LocalSocket::connect()
+    // reaches it. Otherwise serve the portal in-process below. This is what lets
+    // a session service take over without changing the client API.
+    struct stat st = {};
+    if (::stat(path.characters(), &st) == 0 && S_ISSOCK(st.st_mode)) {
+        dbgln("LibWM: deferring to the session service on '{}'", path);
+        return {};
+    }
+
     if (!s_server_started) {
         s_server_started = true;
         start_server_thread();
