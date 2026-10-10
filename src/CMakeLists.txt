@@ -152,11 +152,12 @@ target_include_directories(libwm-appfile-test PRIVATE "${CMAKE_CURRENT_SOURCE_DI
 target_link_options(libwm-appfile-test PRIVATE "-Wl,--no-as-needed")
 target_link_libraries(libwm-appfile-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibDesktop windowserver)
 
-# Shows a notification through LibGUI::Notification (spike §3: NotificationServer).
+# Shows notifications through LibGUI::Notification (spike §3: NotificationServer,
+# completed as WS5). The unmodified `notify` utility links LibURL, so we do too.
 add_executable(libwm-notify-test test/NotificationTest.cpp)
 target_include_directories(libwm-notify-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_options(libwm-notify-test PRIVATE "-Wl,--no-as-needed")
-target_link_libraries(libwm-notify-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC windowserver)
+target_link_libraries(libwm-notify-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibURL windowserver)
 
 # --- The out-of-process WebContent service ------------------------------------
 # Built from the upstream sources. It is a single-client system service; LibWM
