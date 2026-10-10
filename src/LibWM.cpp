@@ -28,6 +28,7 @@
 #include <fcntl.h>
 #include <stdlib.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 namespace LibWM {
@@ -183,6 +184,74 @@ static Optional<NonnullOwnPtr<Core::LocalSocket>> spawn_single_client_service(St
     return socket.release_value();
 }
 
+// A multi-client service (IPC::MultiServer) does not spawn per connection: it
+// accepts many clients on one listening socket. SystemServer owns that socket;
+// we bind and listen on the portal path ourselves, then hand the listening fd to
+// the service. Because we bind before returning, the caller's connect() queues
+// against the listener instead of racing the service's startup.
+static int bind_listening_socket(ByteString const& path)
+{
+    int fd = ::socket(AF_LOCAL, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (fd < 0)
+        return -1;
+
+    sockaddr_un address {};
+    address.sun_family = AF_LOCAL;
+    if (path.length() >= sizeof(address.sun_path)) {
+        ::close(fd);
+        return -1;
+    }
+    __builtin_memcpy(address.sun_path, path.characters(), path.length() + 1);
+
+    ::unlink(path.characters());
+    if (::bind(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 || ::listen(fd, 64) != 0) {
+        ::close(fd);
+        return -1;
+    }
+    return fd;
+}
+
+static void spawn_multi_client_service(StringView executable, ByteString const& path, StringView name)
+{
+    if (Core::System::access(executable, X_OK).is_error()) {
+        dbgln("LibWM: service '{}' not found at '{}'", name, executable);
+        return;
+    }
+
+    auto listen_fd = bind_listening_socket(path);
+    if (listen_fd < 0)
+        return; // someone else is already listening (or the bind failed)
+
+    // The service inherits the listening fd and accepts clients itself.
+    ::fcntl(listen_fd, F_SETFD, 0);
+
+    Optional<ByteString> previous_takeover;
+    if (auto const* existing = getenv("SOCKET_TAKEOVER"); existing && *existing)
+        previous_takeover = ByteString { existing };
+
+    auto takeover = ByteString::formatted("{}:{}", name, listen_fd);
+    if (auto set = Core::Environment::set("SOCKET_TAKEOVER"sv, takeover, Core::Environment::Overwrite::Yes); set.is_error()) {
+        dbgln("LibWM: could not set SOCKET_TAKEOVER: {}", set.error());
+        ::close(listen_fd);
+        return;
+    }
+
+    Vector<ByteString> arguments;
+    auto spawned = Core::Process::spawn(executable, arguments, {}, Core::Process::KeepAsChild::No);
+
+    if (previous_takeover.has_value())
+        (void)Core::Environment::set("SOCKET_TAKEOVER"sv, previous_takeover.value(), Core::Environment::Overwrite::Yes);
+    else
+        (void)Core::Environment::unset("SOCKET_TAKEOVER"sv);
+
+    ::close(listen_fd);
+
+    if (spawned.is_error())
+        dbgln("LibWM: failed to spawn '{}': {}", name, spawned.error());
+    else
+        dbgln("LibWM: spawned {} pid={} (listening on '{}')", name, spawned.value(), path);
+}
+
 // All portals are served from a single thread with a single Core::EventLoop.
 //
 // This matters for two reasons: the client makes synchronous portal calls
@@ -296,6 +365,12 @@ static Optional<NonnullOwnPtr<Core::LocalSocket>> make_portal(ByteString const& 
         return spawn_single_client_service(service_binary_path("WebContent"sv), "webcontent"sv);
     if (path == expanded_portal_path("/tmp/session/%sid/portal/request"sv))
         return spawn_single_client_service(service_binary_path("RequestServer"sv), "requestserver"sv);
+    if (path == expanded_portal_path("/tmp/session/%sid/portal/sql"sv)) {
+        // Bind the listener, hand it to SQLServer, then defer: the real connect
+        // below reaches the listener we just set up.
+        spawn_multi_client_service(service_binary_path("SQLServer"sv), path, "sql"sv);
+        return {};
+    }
 
     if (!s_server_started) {
         s_server_started = true;

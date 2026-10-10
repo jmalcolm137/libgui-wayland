@@ -190,6 +190,21 @@ target_include_directories(RequestServer PRIVATE "${SERENITY_PROJECT_ROOT}/Userl
 target_link_options(RequestServer PRIVATE "-Wl,--no-as-needed")
 target_link_libraries(RequestServer PRIVATE LibCore LibCrypto LibIPC LibGemini LibHTTP LibMain LibTLS LibWebSocket LibURL LibThreading)
 
+# --- The out-of-process SQLServer service -------------------------------------
+# A multi-client service (IPC::MultiServer). LibWM binds its listening socket and
+# hands that over, rather than spawning one per connection. Browser needs it for
+# history/bookmarks/cookies.
+set(SQLSERVER_SRC "${SERENITY_PROJECT_ROOT}/Userland/Services/SQLServer")
+add_executable(SQLServer
+    "${SQLSERVER_SRC}/ConnectionFromClient.cpp"
+    "${SQLSERVER_SRC}/DatabaseConnection.cpp"
+    "${SQLSERVER_SRC}/SQLStatement.cpp"
+    "${SQLSERVER_SRC}/main.cpp"
+)
+target_include_directories(SQLServer PRIVATE "${SERENITY_PROJECT_ROOT}/Userland/Services")
+target_link_options(SQLServer PRIVATE "-Wl,--no-as-needed")
+target_link_libraries(SQLServer PRIVATE LibCore LibIPC LibSQL LibMain)
+
 # --- Unmodified SerenityOS applications ---------------------------------------
 # Built directly from their upstream sources. No source is edited; only the GML
 # is precompiled (the app's own CMakeLists uses compile_gml, which requires a
