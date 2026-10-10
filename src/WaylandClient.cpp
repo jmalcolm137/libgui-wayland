@@ -239,6 +239,28 @@ static serenity_toplevel_listener const s_serenity_toplevel_listener = {
     .menubar_visibility = serenity_toplevel_menubar_visibility,
 };
 
+static void serenity_window_manager_dismiss_menus(void* data, serenity_window_manager*)
+{
+    static_cast<WaylandClient*>(data)->on_dismiss_menus();
+}
+
+static serenity_window_manager_listener const s_serenity_window_manager_listener = {
+    .dismiss_menus = serenity_window_manager_dismiss_menus,
+};
+
+void WaylandClient::set_serenity_window_manager(serenity_window_manager* manager)
+{
+    m_serenity_window_manager = manager;
+    if (manager)
+        serenity_window_manager_add_listener(manager, &s_serenity_window_manager_listener, this);
+}
+
+void WaylandClient::on_dismiss_menus()
+{
+    if (m_dismiss_menus)
+        m_dismiss_menus();
+}
+
 // --- zxdg_toplevel_decoration_v1 ----------------------------------------------
 
 static void decoration_configure(void*, zxdg_toplevel_decoration_v1*, uint32_t mode)

@@ -232,6 +232,7 @@ void WindowServerConnection::install_menu_callbacks()
     m_menu.menubar_changed = [this](i32 window_id) { update_window_menubar(window_id); };
     m_menu.redraw_popup = [this](i32 menu_id) { present_menu_popup(menu_id); };
     WaylandClient::the().set_menubar_visibility_callback([this](i32 window_id, bool) { update_window_menubar(window_id); });
+    WaylandClient::the().set_dismiss_menus_callback([this] { m_menu.close_open_menus(); });
 }
 
 void WindowServerConnection::present_menu_popup(i32 menu_id)

@@ -48,6 +48,15 @@
       <arg name="id" type="new_id" interface="serenity_toplevel"/>
       <arg name="surface" type="object" interface="wl_surface"/>
     </request>
+
+    <event name="dismiss_menus">
+      <description summary="ask the client to close its open menus">
+        The compositor sends this when a pointer press lands outside any open
+        menu on a surface owned by another client. Menus opened from layer
+        surfaces (the Taskbar/Desktop) take no input grab, so the compositor
+        cannot dismiss them itself; the client closes them on this event.
+      </description>
+    </event>
   </interface>
 
   <interface name="serenity_toplevel" version="1">
