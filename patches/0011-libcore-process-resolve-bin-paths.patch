@@ -1,0 +1,93 @@
+diff --git a/Userland/Libraries/LibCore/Process.cpp b/Userland/Libraries/LibCore/Process.cpp
+index 02a3ce57..4bc66db5 100644
+--- a/Userland/Libraries/LibCore/Process.cpp
++++ b/Userland/Libraries/LibCore/Process.cpp
+@@ -8,6 +8,7 @@
+  */
+ 
+ #include <AK/ByteString.h>
++#include <AK/LexicalPath.h>
+ #include <AK/ScopeGuard.h>
+ #include <AK/String.h>
+ #include <AK/Vector.h>
+@@ -18,6 +19,7 @@
+ #include <LibCore/SocketAddress.h>
+ #include <LibCore/StandardPaths.h>
+ #include <LibCore/System.h>
++#include <unistd.h>
+ #include <errno.h>
+ #include <signal.h>
+ #include <spawn.h>
+@@ -80,8 +82,8 @@ ErrorOr<Process> Process::spawn(ProcessSpawnOptions const& options)
+ #ifdef AK_OS_SERENITY
+         CHECK(posix_spawn_file_actions_addchdir(&spawn_actions, options.working_directory->characters()));
+ #else
+-        // FIXME: Support ProcessSpawnOptions::working_directory n platforms that support it.
+-        TODO();
++        // glibc and musl provide the non-POSIX _np variant on Linux.
++        CHECK(posix_spawn_file_actions_addchdir_np(&spawn_actions, options.working_directory->characters()));
+ #endif
+     }
+ 
+@@ -108,19 +110,43 @@ ErrorOr<Process> Process::spawn(ProcessSpawnOptions const& options)
+ 
+ #undef CHECK
+ 
+-    ArgvList argv_list(options.executable, options.arguments.size());
++    ArgvList argv_list(resolve_executable_path(options.executable), options.arguments.size());
+     for (auto const& argument : options.arguments)
+         argv_list.append(argument.characters());
+ 
++    auto executable = resolve_executable_path(options.executable);
++
+     pid_t pid;
+     if (options.search_for_executable_in_path) {
+-        pid = TRY(System::posix_spawnp(options.executable.view(), &spawn_actions, nullptr, const_cast<char**>(argv_list.get().data()), Core::Environment::raw_environ()));
++        pid = TRY(System::posix_spawnp(executable.view(), &spawn_actions, nullptr, const_cast<char**>(argv_list.get().data()), Core::Environment::raw_environ()));
+     } else {
+-        pid = TRY(System::posix_spawn(options.executable.view(), &spawn_actions, nullptr, const_cast<char**>(argv_list.get().data()), Core::Environment::raw_environ()));
++        pid = TRY(System::posix_spawn(executable.view(), &spawn_actions, nullptr, const_cast<char**>(argv_list.get().data()), Core::Environment::raw_environ()));
+     }
+     return Process { pid };
+ }
+ 
++ByteString Process::resolve_executable_path(StringView path)
++{
++    // SerenityOS installs applications under /bin, but on the host they live
++    // next to the running executable. Map "/bin/X" to that binary when "/bin/X"
++    // does not exist, so unmodified apps can spawn Serenity applications.
++    if (!path.starts_with("/bin/"sv))
++        return path.to_byte_string();
++
++    auto as_byte_string = path.to_byte_string();
++    if (::access(as_byte_string.characters(), X_OK) == 0)
++        return as_byte_string;
++
++    char buffer[4096];
++    auto length = ::readlink("/proc/self/exe", buffer, sizeof(buffer) - 1);
++    if (length <= 0)
++        return as_byte_string;
++    buffer[length] = '\0';
++
++    auto directory = LexicalPath { StringView { buffer, static_cast<size_t>(length) } }.dirname();
++    return ByteString::formatted("{}/{}", directory, LexicalPath(path).basename());
++}
++
+ ErrorOr<pid_t> Process::spawn(StringView path, ReadonlySpan<ByteString> arguments, ByteString working_directory, KeepAsChild keep_as_child)
+ {
+     auto process = TRY(spawn({
+diff --git a/Userland/Libraries/LibCore/Process.h b/Userland/Libraries/LibCore/Process.h
+index 21f09928..f66157f8 100644
+--- a/Userland/Libraries/LibCore/Process.h
++++ b/Userland/Libraries/LibCore/Process.h
+@@ -80,6 +80,10 @@ public:
+ 
+     static ErrorOr<Process> spawn(ProcessSpawnOptions const& options);
+ 
++    // Maps a SerenityOS "/bin/X" path to the host binary next to this executable
++    // when "/bin/X" does not exist. Returns the path unchanged otherwise.
++    static ByteString resolve_executable_path(StringView path);
++
+     // FIXME: Make the following 2 functions return Process instance or delete them.
+     static ErrorOr<pid_t> spawn(StringView path, ReadonlySpan<ByteString> arguments, ByteString working_directory = {}, KeepAsChild keep_as_child = KeepAsChild::No);
+     static ErrorOr<pid_t> spawn(StringView path, ReadonlySpan<StringView> arguments, ByteString working_directory = {}, KeepAsChild keep_as_child = KeepAsChild::No);
