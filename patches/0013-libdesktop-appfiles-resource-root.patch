@@ -1,0 +1,68 @@
+diff --git a/Userland/Libraries/LibDesktop/AppFile.cpp b/Userland/Libraries/LibDesktop/AppFile.cpp
+index af84468d..6c3479f0 100644
+--- a/Userland/Libraries/LibDesktop/AppFile.cpp
++++ b/Userland/Libraries/LibDesktop/AppFile.cpp
+@@ -15,12 +15,22 @@
+ #include <LibDesktop/AppFile.h>
+ #include <LibFileSystem/FileSystem.h>
+ #include <LibGUI/MessageBox.h>
++#include <stdlib.h>
+ 
+ namespace Desktop {
+ 
++// Serenity installs application files under /res/apps; on the host they live
++// under the resource root. Falls back to the Serenity path when it is not set.
++static ByteString app_files_directory()
++{
++    if (auto const* res_root = getenv("SERENITY_RES_ROOT"); res_root && *res_root)
++        return ByteString::formatted("{}/apps", res_root);
++    return ByteString { AppFile::APP_FILES_DIRECTORY };
++}
++
+ ByteString AppFile::app_file_path_for_app(StringView app_name)
+ {
+-    return ByteString::formatted("{}/{}.af", APP_FILES_DIRECTORY, app_name);
++    return ByteString::formatted("{}/{}.af", app_files_directory(), app_name);
+ }
+ 
+ bool AppFile::exists_for_app(StringView app_name)
+@@ -40,14 +50,15 @@ NonnullRefPtr<AppFile> AppFile::open(StringView path)
+ 
+ void AppFile::for_each(Function<void(NonnullRefPtr<AppFile>)> callback, StringView directory)
+ {
+-    Core::DirIterator di(directory, Core::DirIterator::SkipDots);
++    auto dir = directory.is_empty() ? app_files_directory() : directory.to_byte_string();
++    Core::DirIterator di(dir, Core::DirIterator::SkipDots);
+     if (di.has_error())
+         return;
+     while (di.has_next()) {
+         auto name = di.next_path();
+         if (!name.ends_with(".af"sv))
+             continue;
+-        auto path = ByteString::formatted("{}/{}", directory, name);
++        auto path = ByteString::formatted("{}/{}", dir, name);
+         auto af = AppFile::open(path);
+         if (!af->is_valid())
+             continue;
+@@ -124,7 +135,7 @@ GUI::Icon AppFile::icon() const
+     if (!override_icon.is_empty())
+         return GUI::FileIconProvider::icon_for_path(override_icon);
+ 
+-    return GUI::FileIconProvider::icon_for_path(executable());
++    return GUI::FileIconProvider::icon_for_path(Core::Process::resolve_executable_path(executable()));
+ }
+ 
+ bool AppFile::run_in_terminal() const
+diff --git a/Userland/Libraries/LibDesktop/AppFile.h b/Userland/Libraries/LibDesktop/AppFile.h
+index e1eb49d6..b4f4fea6 100644
+--- a/Userland/Libraries/LibDesktop/AppFile.h
++++ b/Userland/Libraries/LibDesktop/AppFile.h
+@@ -24,7 +24,7 @@ public:
+ 
+     static NonnullRefPtr<AppFile> get_for_app(StringView app_name);
+     static NonnullRefPtr<AppFile> open(StringView path);
+-    static void for_each(Function<void(NonnullRefPtr<AppFile>)>, StringView directory = APP_FILES_DIRECTORY);
++    static void for_each(Function<void(NonnullRefPtr<AppFile>)>, StringView directory = {});
+     ~AppFile() = default;
+ 
+     bool is_valid() const { return m_valid; }

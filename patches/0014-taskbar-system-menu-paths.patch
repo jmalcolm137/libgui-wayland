@@ -1,0 +1,48 @@
+diff --git a/Userland/Services/Taskbar/main.cpp b/Userland/Services/Taskbar/main.cpp
+index 9668cb00..89cbfead 100644
+--- a/Userland/Services/Taskbar/main.cpp
++++ b/Userland/Services/Taskbar/main.cpp
+@@ -13,6 +13,7 @@
+ #include <LibConfig/Client.h>
+ #include <LibCore/ConfigFile.h>
+ #include <LibCore/EventLoop.h>
++#include <LibCore/Process.h>
+ #include <LibCore/StandardPaths.h>
+ #include <LibCore/System.h>
+ #include <LibDesktop/AppFile.h>
+@@ -114,12 +115,13 @@ ErrorOr<Vector<ByteString>> discover_apps_and_categories()
+     Desktop::AppFile::for_each([&](auto af) {
+         if (af->exclude_from_system_menu())
+             return;
+-        if (access(af->executable().characters(), X_OK) == 0) {
++        if (access(Core::Process::resolve_executable_path(af->executable()).characters(), X_OK) == 0) {
+             seen_app_categories.set(af->category());
+             g_apps.append(move(af));
+         }
+     });
+     quick_sort(g_apps, [](auto& a, auto& b) { return a->name() < b->name(); });
++    dbgln("Taskbar: system menu discovered {} apps in {} categories", g_apps.size(), seen_app_categories.size());
+ 
+     Vector<ByteString> sorted_app_categories;
+     TRY(sorted_app_categories.try_ensure_capacity(seen_app_categories.size()));
+@@ -142,7 +144,7 @@ ErrorOr<NonnullRefPtr<GUI::Menu>> build_system_menu(GUI::Window& window)
+     system_menu->add_separator();
+ 
+     // First we construct all the necessary app category submenus.
+-    auto category_icons = TRY(Core::ConfigFile::open("/res/icons/SystemMenu.ini"));
++    auto category_icons = TRY(Core::ConfigFile::open("resource://icons/SystemMenu.ini"sv));
+     HashMap<ByteString, NonnullRefPtr<GUI::Menu>> app_category_menus;
+ 
+     Function<void(ByteString const&)> create_category_menu;
+@@ -165,7 +167,10 @@ ErrorOr<NonnullRefPtr<GUI::Menu>> build_system_menu(GUI::Window& window)
+         auto category_menu = parent_menu->add_submenu(String::from_byte_string(child_category).release_value_but_fixme_should_propagate_errors());
+         auto category_icon_path = category_icons->read_entry("16x16", category);
+         if (!category_icon_path.is_empty()) {
+-            auto icon_or_error = Gfx::Bitmap::load_from_file(category_icon_path);
++            auto icon_uri = category_icon_path.starts_with("/res/"sv)
++                ? ByteString::formatted("resource://{}", category_icon_path.substring_view(5))
++                : category_icon_path;
++            auto icon_or_error = Gfx::Bitmap::load_from_uri(icon_uri);
+             if (!icon_or_error.is_error())
+                 category_menu->set_icon(icon_or_error.release_value());
+         }
