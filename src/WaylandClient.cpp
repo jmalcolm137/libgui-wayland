@@ -1323,7 +1323,8 @@ void WaylandClient::create_popup(i32 popup_id, i32 parent_window_id, i32 parent_
             return;
         if (parent_popup->is_layer) {
             layer_parent = true;
-            layer_position = parent_popup->layer_position.translated(anchor.location());
+            // A submenu opens to the right of the parent menu, at the item's row.
+            layer_position = parent_popup->layer_position.translated(anchor.right(), anchor.y());
         } else {
             parent_xdg = parent_popup->xdg_surface_object;
         }
@@ -1355,7 +1356,7 @@ void WaylandClient::create_popup(i32 popup_id, i32 parent_window_id, i32 parent_
         int menu_y = layer_position.y();
         if (!m_screen_size.is_empty()) {
             if (menu_y + size.height() > m_screen_size.height())
-                menu_y -= size.height();
+                menu_y -= size.height() + max(0, anchor.height() - 1);
             menu_x = clamp(menu_x, 0, max(0, m_screen_size.width() - size.width()));
             menu_y = clamp(menu_y, 0, max(0, m_screen_size.height() - size.height()));
         }
