@@ -1669,6 +1669,43 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::In
         return;
     }
 
+    // Popup windows (ComboBox dropdowns, autocomplete, tooltips, menus opened as
+    // windows) are frameless overlays the client positions itself. As xdg
+    // toplevels the compositor would decorate and place them, so they would not
+    // work as dropdowns. Mirror the server-rendered menu popups: an overlay layer
+    // surface anchored top-left at the client's requested position.
+    if (m_layer_shell && (type == WindowServer::WindowType::Popup || type == WindowServer::WindowType::Autocomplete || type == WindowServer::WindowType::Tooltip || type == WindowServer::WindowType::Menu)) {
+        auto* surface = wl_compositor_create_surface(m_compositor);
+        auto* layer_surface = zwlr_layer_shell_v1_get_layer_surface(m_layer_shell, surface, nullptr, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, "serenity-popup");
+        zwlr_layer_surface_v1_add_listener(layer_surface, &s_layer_surface_listener, this);
+        zwlr_layer_surface_v1_set_size(layer_surface, size.width(), size.height());
+        zwlr_layer_surface_v1_set_anchor(layer_surface, ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
+        zwlr_layer_surface_v1_set_exclusive_zone(layer_surface, -1);
+        zwlr_layer_surface_v1_set_keyboard_interactivity(layer_surface, ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND);
+        zwlr_layer_surface_v1_set_margin(layer_surface, position.y(), 0, 0, position.x());
+        wl_surface_commit(surface);
+
+        auto window_surface = make<WindowSurface>();
+        window_surface->window_id = window_id;
+        window_surface->surface = surface;
+        window_surface->layer_surface = layer_surface;
+        window_surface->is_layer = true;
+        window_surface->requested_position = position;
+        window_surface->layer_output_position = position;
+        window_surface->title = title;
+        window_surface->size = size;
+        window_surface->has_alpha = has_alpha;
+        window_surface->resizable = resizable;
+        window_surface->fixed_size = size;
+        if (m_viewporter)
+            window_surface->viewport = wp_viewporter_get_viewport(m_viewporter, surface);
+
+        m_windows.set(window_id, move(window_surface));
+        wl_display_flush(m_display);
+        dbgln("LibWM/Wayland: popup window {} ({}x{}) at {},{}", window_id, size.width(), size.height(), position.x(), position.y());
+        return;
+    }
+
     auto* surface = wl_compositor_create_surface(m_compositor);
     auto* xdg_surface_object = xdg_wm_base_get_xdg_surface(m_wm_base, surface);
     xdg_surface_add_listener(xdg_surface_object, &s_xdg_surface_listener, this);
