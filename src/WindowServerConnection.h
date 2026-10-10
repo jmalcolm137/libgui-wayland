@@ -108,6 +108,8 @@ private:
     Messages::WindowServer::GetColorUnderCursorResponse get_color_under_cursor() override;
     Messages::WindowServer::GetWallpaperResponse get_wallpaper() override;
     Messages::WindowServer::SetWallpaperResponse set_wallpaper(Gfx::ShareableBitmap const& wallpaper_bitmap) override;
+    void set_wallpaper_mode(ByteString const& mode) override;
+    void set_background_color(ByteString const& background_color) override;
     Messages::WindowServer::StartDragResponse start_drag(ByteString const& text, HashMap<String, ByteBuffer> const& mime_data, Gfx::ShareableBitmap const& drag_bitmap) override;
 
     // Menus (server-rendered).
@@ -142,6 +144,11 @@ private:
     void apply_theme_from_broker();
     ByteString m_theme_name { "Default" };
     RefPtr<Core::FileWatcher> m_theme_watcher;
+
+    // Wallpaper/background: the shim persists the chosen image, mode and colour
+    // to a shared state directory the compositor watches (no cross-process bus).
+    RefPtr<Gfx::Bitmap> m_wallpaper;
+    ByteString m_wallpaper_mode;
 
     Vector<NonnullOwnPtr<Window>> m_windows;
     Gfx::IntSize m_screen_size { 1280, 800 };

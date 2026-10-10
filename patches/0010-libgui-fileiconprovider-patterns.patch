@@ -1,8 +1,16 @@
 diff --git a/Userland/Libraries/LibGUI/FileIconProvider.cpp b/Userland/Libraries/LibGUI/FileIconProvider.cpp
-index 102d3dad..a6c3caf8 100644
+index 102d3dad..1392451b 100644
 --- a/Userland/Libraries/LibGUI/FileIconProvider.cpp
 +++ b/Userland/Libraries/LibGUI/FileIconProvider.cpp
-@@ -69,7 +69,15 @@ static void initialize_if_needed()
+@@ -8,6 +8,7 @@
+ #include <AK/Array.h>
+ #include <AK/ByteString.h>
+ #include <AK/LexicalPath.h>
++#include <AK/StringBuilder.h>
+ #include <LibCore/ConfigFile.h>
+ #include <LibCore/MappedFile.h>
+ #include <LibCore/StandardPaths.h>
+@@ -69,7 +70,15 @@ static void initialize_if_needed()
      if (s_initialized)
          return;
  
@@ -19,3 +27,50 @@ index 102d3dad..a6c3caf8 100644
  
      s_symlink_emblem = MUST(Gfx::Bitmap::load_from_uri("resource://icons/symlink-emblem.png"sv));
      s_symlink_emblem_small = MUST(Gfx::Bitmap::load_from_uri("resource://icons/symlink-emblem-small.png"sv));
+@@ -154,6 +163,31 @@ Icon FileIconProvider::icon_for_path(StringView path)
+     return icon_for_path(path, stat_or_error.release_value().st_mode);
+ }
+ 
++// libgui-wayland: host binaries are not linked with Serenity's embedded
++// serenity_icon_{s,m} sections, so map an executable to the named app icon
++// shipped under resource://icons (e.g. /bin/DisplaySettings ->
++// app-display-settings.png).
++static ByteString app_icon_resource_name(StringView executable_path)
++{
++    auto name = LexicalPath { executable_path }.basename();
++    StringBuilder builder;
++    builder.append("app-"sv);
++    for (size_t i = 0; i < name.length(); ++i) {
++        char ch = name[i];
++        bool upper = ch >= 'A' && ch <= 'Z';
++        if (upper && i > 0) {
++            char prev = name[i - 1];
++            bool prev_lower = prev >= 'a' && prev <= 'z';
++            bool prev_upper = prev >= 'A' && prev <= 'Z';
++            bool next_lower = i + 1 < name.length() && name[i + 1] >= 'a' && name[i + 1] <= 'z';
++            if (prev_lower || (prev_upper && next_lower))
++                builder.append('-');
++        }
++        builder.append(upper ? static_cast<char>(ch - 'A' + 'a') : ch);
++    }
++    return builder.to_byte_string();
++}
++
+ Icon FileIconProvider::icon_for_executable(ByteString const& path)
+ {
+     static HashMap<ByteString, Icon> app_icon_cache;
+@@ -208,7 +242,13 @@ Icon FileIconProvider::icon_for_executable(ByteString const& path)
+ 
+         RefPtr<Gfx::Bitmap const> bitmap;
+         if (!section.has_value()) {
+-            bitmap = s_executable_icon.bitmap_for_size(icon_section.image_size);
++            // libgui-wayland: host binaries have no embedded icon section, so use
++            // the named app icon from the resource bundle when one exists.
++            auto uri = ByteString::formatted("resource://icons/{}x{}/{}.png", icon_section.image_size, icon_section.image_size, app_icon_resource_name(path));
++            if (auto resource_icon = Gfx::Bitmap::load_from_uri(uri); !resource_icon.is_error())
++                bitmap = resource_icon.release_value();
++            else
++                bitmap = s_executable_icon.bitmap_for_size(icon_section.image_size);
+         } else {
+             // FIXME: Use the ImageDecoder service.
+             if (Gfx::PNGImageDecoderPlugin::sniff({ section->raw_data(), section->size() })) {

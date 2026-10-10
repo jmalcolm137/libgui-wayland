@@ -1,0 +1,17 @@
+diff --git a/Userland/Libraries/LibGUI/Desktop.cpp b/Userland/Libraries/LibGUI/Desktop.cpp
+index 5e11d949..4453f56f 100644
+--- a/Userland/Libraries/LibGUI/Desktop.cpp
++++ b/Userland/Libraries/LibGUI/Desktop.cpp
+@@ -92,6 +92,12 @@ bool Desktop::set_wallpaper(RefPtr<Gfx::Bitmap const> wallpaper_bitmap, Optional
+ 
+ bool Desktop::load_current_wallpaper()
+ {
++    // libgui-wayland: on the host build the compositor owns the wallpaper and
++    // persists it, while this per-process ConfigServer does not. Re-apply the
++    // wallpaper the shim already knows about, instead of reading an (empty)
++    // config which would clear the wallpaper on every desktop/app startup.
++    if (auto current_wallpaper_bitmap = wallpaper_bitmap())
++        return apply_wallpaper(current_wallpaper_bitmap, OptionalNone {});
+     auto current_wallpaper = Config::read_string("WindowManager"sv, "Background"sv, "Wallpaper"sv, ""sv);
+     return apply_wallpaper({}, current_wallpaper);
+ }

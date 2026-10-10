@@ -8,6 +8,7 @@
 #include "WaylandClient.h"
 #include <AK/LexicalPath.h>
 #include <LibCore/AnonymousBuffer.h>
+#include <LibCore/Directory.h>
 #include <LibCore/File.h>
 #include <LibGfx/ImageFormats/PNGWriter.h>
 #include <LibGfx/Painter.h>
@@ -16,6 +17,34 @@
 #include <fcntl.h>
 #include <stdlib.h>
 #include <unistd.h>
+
+namespace {
+
+// Wallpaper/background state: written by apps, read by the compositor. Kept in a
+// persistent directory so a chosen wallpaper survives a session restart.
+ByteString sde_state_dir()
+{
+    if (auto const* dir = getenv("SDE_STATE_DIR"); dir && *dir)
+        return ByteString(dir);
+    if (auto const* config = getenv("XDG_CONFIG_HOME"); config && *config)
+        return ByteString::formatted("{}/sde", config);
+    if (auto const* home = getenv("HOME"); home && *home)
+        return ByteString::formatted("{}/.config/sde", home);
+    return ByteString { "/tmp/sde" };
+}
+
+ByteString sde_state_file(StringView name)
+{
+    return ByteString::formatted("{}/{}", sde_state_dir(), name);
+}
+
+void write_sde_state_file(StringView name, ReadonlyBytes bytes)
+{
+    if (auto file = Core::File::open(sde_state_file(name), Core::File::OpenMode::Write); !file.is_error())
+        (void)file.value()->write_until_depleted(bytes);
+}
+
+}
 
 namespace LibWM {
 
@@ -498,12 +527,46 @@ Messages::WindowServer::GetColorUnderCursorResponse WindowServerConnection::get_
 
 Messages::WindowServer::GetWallpaperResponse WindowServerConnection::get_wallpaper()
 {
-    return Messages::WindowServer::GetWallpaperResponse { Gfx::ShareableBitmap { } };
+    if (m_wallpaper)
+        return m_wallpaper->to_shareable_bitmap();
+    // Fall back to the persisted image (e.g. after a restart).
+    if (auto bitmap = Gfx::Bitmap::load_from_file(sde_state_file("wallpaper.png"sv)); !bitmap.is_error()) {
+        m_wallpaper = bitmap.release_value();
+        return m_wallpaper->to_shareable_bitmap();
+    }
+    return Gfx::ShareableBitmap { };
 }
 
-Messages::WindowServer::SetWallpaperResponse WindowServerConnection::set_wallpaper(Gfx::ShareableBitmap const&)
+Messages::WindowServer::SetWallpaperResponse WindowServerConnection::set_wallpaper(Gfx::ShareableBitmap const& wallpaper_bitmap)
 {
-    return Messages::WindowServer::SetWallpaperResponse { true };
+    m_wallpaper = wallpaper_bitmap.bitmap();
+
+    (void)Core::Directory::create(sde_state_dir(), Core::Directory::CreateDirectories::Yes);
+    if (!m_wallpaper) {
+        // No wallpaper: keep the file present but empty so the compositor's
+        // content watch stays attached ("None" is an empty image).
+        write_sde_state_file("wallpaper.png"sv, {});
+        return true;
+    }
+
+    auto encoded = Gfx::PNGWriter::encode(*m_wallpaper);
+    if (encoded.is_error())
+        return false;
+    write_sde_state_file("wallpaper.png"sv, encoded.value());
+    return true;
+}
+
+void WindowServerConnection::set_wallpaper_mode(ByteString const& mode)
+{
+    m_wallpaper_mode = mode;
+    (void)Core::Directory::create(sde_state_dir(), Core::Directory::CreateDirectories::Yes);
+    write_sde_state_file("wallpaper.mode"sv, mode.bytes());
+}
+
+void WindowServerConnection::set_background_color(ByteString const& background_color)
+{
+    (void)Core::Directory::create(sde_state_dir(), Core::Directory::CreateDirectories::Yes);
+    write_sde_state_file("wallpaper.color"sv, background_color.bytes());
 }
 
 Messages::WindowServer::StartDragResponse WindowServerConnection::start_drag(ByteString const&, HashMap<String, ByteBuffer> const&, Gfx::ShareableBitmap const&)
