@@ -98,6 +98,12 @@ public:
     Gfx::IntSize screen_size() const { return m_screen_size; }
     int output_scale() const { return m_scale; }
 
+    // The pointer's position in output coordinates, reconstructed from the
+    // surface under the pointer and that surface's known origin. The compositor
+    // owns window placement (and never reports the cursor directly), so this is
+    // how the client places tooltips near the cursor.
+    Gfx::IntPoint global_pointer_position();
+
     void set_input_callbacks(InputCallbacks callbacks) { m_input = move(callbacks); }
 
     // --- Clipboard (native Wayland data device) ---
@@ -226,6 +232,12 @@ private:
         // client's anchor.
         Gfx::IntPoint requested_position;
         Gfx::IntPoint layer_output_position;
+        // For ordinary xdg_toplevels (no layer_output_position): the compositor's
+        // placement, from the serenity_toplevel.position event. Screen-relative
+        // pointer coordinates are built from this.
+        Gfx::IntPoint global_position;
+        // An xdg_toplevel must not attach a buffer before its first configure.
+        bool toplevel_configured { false };
         // Whether the compositor currently wants this window's menu bar shown.
         bool menubar_visible { true };
         ByteString title;

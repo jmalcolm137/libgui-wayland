@@ -159,6 +159,12 @@ target_include_directories(libwm-notify-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR
 target_link_options(libwm-notify-test PRIVATE "-Wl,--no-as-needed")
 target_link_libraries(libwm-notify-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibURL windowserver)
 
+# Requests a tooltip through GUI::Application::show_tooltip (WS6).
+add_executable(libwm-tooltip-test test/TooltipTest.cpp)
+target_include_directories(libwm-tooltip-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_options(libwm-tooltip-test PRIVATE "-Wl,--no-as-needed")
+target_link_libraries(libwm-tooltip-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC windowserver)
+
 # --- The out-of-process WebContent service ------------------------------------
 # Built from the upstream sources. It is a single-client system service; LibWM
 # spawns it on demand and hands it a socket via SOCKET_TAKEOVER (the same

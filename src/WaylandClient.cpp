@@ -1182,11 +1182,31 @@ void WaylandClient::on_toplevel_position(serenity_toplevel* resource, int32_t x,
 {
     for (auto const& it : m_windows) {
         if (it.value->chrome == resource) {
+            it.value->global_position = { x, y };
             if (m_toplevel_position_changed)
                 m_toplevel_position_changed(it.value->window_id, Gfx::IntPoint { x, y });
             return;
         }
     }
+}
+
+Gfx::IntPoint WaylandClient::global_pointer_position()
+{
+    // Popups (server-rendered menus) are layer surfaces with a known position.
+    if (m_pointer_popup >= 0) {
+        if (auto* popup = find_popup(m_pointer_popup))
+            return popup->layer_position.translated(m_pointer_position);
+    }
+    if (m_pointer_window >= 0) {
+        if (auto* window_surface = find(m_pointer_window)) {
+            // Layer surfaces (Taskbar, Desktop) know their output position; for
+            // toplevels it comes from the compositor's position event.
+            auto origin = window_surface->is_layer ? window_surface->layer_output_position
+                                                   : window_surface->global_position;
+            return origin.translated(m_pointer_position);
+        }
+    }
+    return m_pointer_position;
 }
 
 bool WaylandClient::window_menubar_visible(i32 window_id) const
@@ -1506,6 +1526,27 @@ void WaylandClient::on_surface_configured(xdg_surface* surface)
         }
         return;
     }
+
+    // The first configure on an xdg_toplevel: it is now safe to attach a buffer,
+    // so flush a frame that arrived before we were allowed to.
+    for (auto const& it : m_windows) {
+        auto& w = *it.value;
+        if (w.xdg_surface_object != surface)
+            continue;
+        w.toplevel_configured = true;
+        if (w.has_pending && w.pending_fd >= 0) {
+            int fd = w.pending_fd;
+            auto pending_size = w.pending_size;
+            auto pending_visible_size = w.pending_visible_size;
+            auto pending_pitch = w.pending_pitch;
+            auto pending_has_alpha = w.pending_has_alpha;
+            w.pending_fd = -1;
+            w.has_pending = false;
+            commit_window_content(w, fd, pending_size, pending_visible_size, pending_pitch, pending_has_alpha);
+            ::close(fd);
+        }
+        return;
+    }
 }
 
 void WaylandClient::destroy_popup(i32 popup_id)
@@ -1731,13 +1772,20 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::In
     // (top-right) and they must not be decorated or enter the window list.
     if (m_layer_shell && (type == WindowServer::WindowType::Popup || type == WindowServer::WindowType::Autocomplete || type == WindowServer::WindowType::Tooltip || type == WindowServer::WindowType::Menu || type == WindowServer::WindowType::Notification)) {
         bool const is_notification = type == WindowServer::WindowType::Notification;
+        bool const is_tooltip = type == WindowServer::WindowType::Tooltip;
+        // Notifications and tooltips take no keyboard focus (they must never
+        // steal input); dropdowns need it on demand.
+        bool const takes_focus = !is_notification && !is_tooltip;
+        char const* layer_namespace = is_notification ? "serenity-notification"
+            : is_tooltip                            ? "serenity-tooltip"
+                                                    : "serenity-popup";
         auto* surface = wl_compositor_create_surface(m_compositor);
-        auto* layer_surface = zwlr_layer_shell_v1_get_layer_surface(m_layer_shell, surface, nullptr, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, is_notification ? "serenity-notification" : "serenity-popup");
+        auto* layer_surface = zwlr_layer_shell_v1_get_layer_surface(m_layer_shell, surface, nullptr, ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY, layer_namespace);
         zwlr_layer_surface_v1_add_listener(layer_surface, &s_layer_surface_listener, this);
         zwlr_layer_surface_v1_set_size(layer_surface, size.width(), size.height());
         zwlr_layer_surface_v1_set_anchor(layer_surface, ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP | ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT);
         zwlr_layer_surface_v1_set_exclusive_zone(layer_surface, -1);
-        zwlr_layer_surface_v1_set_keyboard_interactivity(layer_surface, is_notification ? ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE : ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND);
+        zwlr_layer_surface_v1_set_keyboard_interactivity(layer_surface, takes_focus ? ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND : ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE);
         zwlr_layer_surface_v1_set_margin(layer_surface, position.y(), 0, 0, position.x());
         wl_surface_commit(surface);
 
@@ -1932,9 +1980,11 @@ void WaylandClient::attach_and_commit(i32 window_id, int client_fd, Gfx::IntSize
     if (visible_size.is_empty())
         visible_size = size;
 
-    // A layer surface must not attach a buffer before its first configure; hold
-    // the frame and present it from on_layer_configure().
-    if (window_surface->is_layer && !window_surface->layer_configured) {
+    // A layer surface or an xdg_toplevel must not attach a buffer before its
+    // first configure; hold the frame and present it from the configure handler.
+    bool const awaiting_first_configure = (window_surface->is_layer && !window_surface->layer_configured)
+        || (window_surface->toplevel && !window_surface->toplevel_configured);
+    if (awaiting_first_configure) {
         if (window_surface->pending_fd >= 0)
             ::close(window_surface->pending_fd);
         window_surface->pending_fd = ::dup(client_fd);
