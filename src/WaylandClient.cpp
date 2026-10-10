@@ -1355,7 +1355,10 @@ void WaylandClient::create_popup(i32 popup_id, i32 parent_window_id, i32 parent_
         int menu_x = layer_position.x();
         int menu_y = layer_position.y();
         if (!m_screen_size.is_empty()) {
-            if (menu_y + size.height() > m_screen_size.height())
+            // A button menu flips above its button when it would run off the
+            // bottom. A submenu just slides up so it stays on-screen, keeping the
+            // item's row reachable (otherwise it would jump above its parent).
+            if (!is_submenu && menu_y + size.height() > m_screen_size.height())
                 menu_y -= size.height() + max(0, anchor.height() - 1);
             menu_x = clamp(menu_x, 0, max(0, m_screen_size.width() - size.width()));
             menu_y = clamp(menu_y, 0, max(0, m_screen_size.height() - size.height()));
