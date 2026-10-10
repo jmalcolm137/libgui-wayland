@@ -1,0 +1,15 @@
+diff --git a/Userland/Libraries/LibCore/Process.cpp b/Userland/Libraries/LibCore/Process.cpp
+index 02a3ce57..2860cbb1 100644
+--- a/Userland/Libraries/LibCore/Process.cpp
++++ b/Userland/Libraries/LibCore/Process.cpp
+@@ -80,8 +80,8 @@ ErrorOr<Process> Process::spawn(ProcessSpawnOptions const& options)
+ #ifdef AK_OS_SERENITY
+         CHECK(posix_spawn_file_actions_addchdir(&spawn_actions, options.working_directory->characters()));
+ #else
+-        // FIXME: Support ProcessSpawnOptions::working_directory n platforms that support it.
+-        TODO();
++        // glibc and musl provide the non-POSIX _np variant on Linux.
++        CHECK(posix_spawn_file_actions_addchdir_np(&spawn_actions, options.working_directory->characters()));
+ #endif
+     }
+ 
