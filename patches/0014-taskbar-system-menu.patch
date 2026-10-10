@@ -1,3 +1,40 @@
+diff --git a/Userland/Services/Taskbar/QuickLaunchWidget.cpp b/Userland/Services/Taskbar/QuickLaunchWidget.cpp
+index 904ec537..2ee80eaa 100644
+--- a/Userland/Services/Taskbar/QuickLaunchWidget.cpp
++++ b/Userland/Services/Taskbar/QuickLaunchWidget.cpp
+@@ -41,7 +41,7 @@ OwnPtr<QuickLaunchEntry> QuickLaunchEntry::create_from_path(StringView path)
+     if (path.ends_with(".af"sv)) {
+         auto af_path = path.to_byte_string();
+         if (!path.starts_with('/'))
+-            af_path = ByteString::formatted("{}/{}", Desktop::AppFile::APP_FILES_DIRECTORY, path);
++            af_path = ByteString::formatted("{}/{}", Desktop::AppFile::app_files_directory(), path);
+ 
+         return make<QuickLaunchEntryAppFile>(Desktop::AppFile::open(af_path));
+     }
+@@ -262,6 +262,10 @@ void QuickLaunchWidget::paint_event(GUI::PaintEvent& event)
+         Gfx::StylePainter::paint_button(painter, rect, palette(), Gfx::ButtonStyle::Coolbar, entry->is_pressed(), entry->is_hovered());
+ 
+         auto const* icon = entry->icon().bitmap_for_size(16);
++        // Serenity Desktop Environment host compat: an entry's icon may not
++        // resolve on the host; skip drawing it rather than crashing.
++        if (!icon)
++            return;
+         auto content_rect = rect.shrunken(8, 2);
+         auto icon_location = content_rect.center().translated(-(icon->width() / 2), -(icon->height() / 2));
+         if (entry->is_pressed())
+diff --git a/Userland/Services/Taskbar/TaskbarWindow.cpp b/Userland/Services/Taskbar/TaskbarWindow.cpp
+index 82fc0b57..bc43a319 100644
+--- a/Userland/Services/Taskbar/TaskbarWindow.cpp
++++ b/Userland/Services/Taskbar/TaskbarWindow.cpp
+@@ -158,7 +158,7 @@ ErrorOr<void> TaskbarWindow::populate_taskbar()
+ 
+ ErrorOr<void> TaskbarWindow::load_assistant()
+ {
+-    auto af_path = TRY(String::formatted("{}/{}", Desktop::AppFile::APP_FILES_DIRECTORY, "Assistant.af"));
++    auto af_path = TRY(String::formatted("{}/{}", Desktop::AppFile::app_files_directory(), "Assistant.af"));
+     m_assistant_app_file = Desktop::AppFile::open(af_path);
+ 
+     return {};
 diff --git a/Userland/Services/Taskbar/main.cpp b/Userland/Services/Taskbar/main.cpp
 index 9668cb00..89cbfead 100644
 --- a/Userland/Services/Taskbar/main.cpp

@@ -1,5 +1,5 @@
 diff --git a/Userland/Libraries/LibCore/Process.cpp b/Userland/Libraries/LibCore/Process.cpp
-index 02a3ce57..4bc66db5 100644
+index 02a3ce57..5c44a7f2 100644
 --- a/Userland/Libraries/LibCore/Process.cpp
 +++ b/Userland/Libraries/LibCore/Process.cpp
 @@ -8,6 +8,7 @@
@@ -29,7 +29,7 @@ index 02a3ce57..4bc66db5 100644
  #endif
      }
  
-@@ -108,19 +110,43 @@ ErrorOr<Process> Process::spawn(ProcessSpawnOptions const& options)
+@@ -108,19 +110,44 @@ ErrorOr<Process> Process::spawn(ProcessSpawnOptions const& options)
  
  #undef CHECK
  
@@ -69,7 +69,8 @@ index 02a3ce57..4bc66db5 100644
 +        return as_byte_string;
 +    buffer[length] = '\0';
 +
-+    auto directory = LexicalPath { StringView { buffer, static_cast<size_t>(length) } }.dirname();
++    LexicalPath const self_path { StringView { buffer, static_cast<size_t>(length) } };
++    auto directory = self_path.dirname();
 +    return ByteString::formatted("{}/{}", directory, LexicalPath(path).basename());
 +}
 +

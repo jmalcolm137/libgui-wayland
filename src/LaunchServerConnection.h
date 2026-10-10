@@ -175,7 +175,8 @@ private:
         if (length <= 0)
             return executable.to_byte_string();
         buffer[length] = '\0';
-        return ByteString::formatted("{}/{}", LexicalPath { StringView { buffer, static_cast<size_t>(length) } }.dirname(), name);
+        LexicalPath const self_path { StringView { buffer, static_cast<size_t>(length) } };
+        return ByteString::formatted("{}/{}", self_path.dirname(), name);
     }
 
     static ByteString details_for(ByteString const& executable)

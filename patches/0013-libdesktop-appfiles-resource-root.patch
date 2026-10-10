@@ -1,5 +1,5 @@
 diff --git a/Userland/Libraries/LibDesktop/AppFile.cpp b/Userland/Libraries/LibDesktop/AppFile.cpp
-index af84468d..6c3479f0 100644
+index af84468d..faa28970 100644
 --- a/Userland/Libraries/LibDesktop/AppFile.cpp
 +++ b/Userland/Libraries/LibDesktop/AppFile.cpp
 @@ -15,12 +15,22 @@
@@ -12,7 +12,7 @@ index af84468d..6c3479f0 100644
  
 +// Serenity installs application files under /res/apps; on the host they live
 +// under the resource root. Falls back to the Serenity path when it is not set.
-+static ByteString app_files_directory()
++ByteString AppFile::app_files_directory()
 +{
 +    if (auto const* res_root = getenv("SERENITY_RES_ROOT"); res_root && *res_root)
 +        return ByteString::formatted("{}/apps", res_root);
@@ -54,10 +54,16 @@ index af84468d..6c3479f0 100644
  
  bool AppFile::run_in_terminal() const
 diff --git a/Userland/Libraries/LibDesktop/AppFile.h b/Userland/Libraries/LibDesktop/AppFile.h
-index e1eb49d6..b4f4fea6 100644
+index e1eb49d6..21b802d1 100644
 --- a/Userland/Libraries/LibDesktop/AppFile.h
 +++ b/Userland/Libraries/LibDesktop/AppFile.h
-@@ -24,7 +24,7 @@ public:
+@@ -21,10 +21,13 @@ public:
+     static bool exists_for_app(StringView app_name);
+     static ByteString file_for_app(StringView app_name);
+     static ByteString app_file_path_for_app(StringView app_name);
++    // The directory holding the .af application files ("/res/apps" on Serenity,
++    // under the resource root on the host).
++    static ByteString app_files_directory();
  
      static NonnullRefPtr<AppFile> get_for_app(StringView app_name);
      static NonnullRefPtr<AppFile> open(StringView path);
