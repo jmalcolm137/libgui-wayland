@@ -1,5 +1,5 @@
 diff --git a/Userland/Applications/FileManager/DirectoryView.cpp b/Userland/Applications/FileManager/DirectoryView.cpp
-index 6f6bf08b..f5531fbd 100644
+index 6f6bf08b..e2208bde 100644
 --- a/Userland/Applications/FileManager/DirectoryView.cpp
 +++ b/Userland/Applications/FileManager/DirectoryView.cpp
 @@ -13,6 +13,7 @@
@@ -10,31 +10,60 @@ index 6f6bf08b..f5531fbd 100644
  #include <LibCore/StandardPaths.h>
  #include <LibFileSystem/FileSystem.h>
  #include <LibGUI/FileIconProvider.h>
-@@ -496,6 +497,9 @@ void DirectoryView::launch(URL::URL const&, LauncherHandler const& launcher_hand
-     // FIXME: Add posix_spawnattr_t support to Core::Process and use it here.
-     pid_t child;
+@@ -491,49 +492,14 @@ void DirectoryView::set_should_show_dotfiles(bool show_dotfiles)
+     m_model->set_should_show_dotfiles(show_dotfiles);
+ }
  
-+    // Map a SerenityOS "/bin/X" handler to the host binary next to us.
-+    auto executable = Core::Process::resolve_executable_path(launcher_handler.details().executable);
-+
-     posix_spawnattr_t spawn_attributes;
-     posix_spawnattr_init(&spawn_attributes);
- 
-@@ -518,7 +522,7 @@ void DirectoryView::launch(URL::URL const&, LauncherHandler const& launcher_hand
- 
-         argv.append(nullptr);
- 
+-void DirectoryView::launch(URL::URL const&, LauncherHandler const& launcher_handler) const
++void DirectoryView::launch(URL::URL const& url, LauncherHandler const& launcher_handler) const
+ {
+-    // FIXME: Add posix_spawnattr_t support to Core::Process and use it here.
+-    pid_t child;
+-
+-    posix_spawnattr_t spawn_attributes;
+-    posix_spawnattr_init(&spawn_attributes);
+-
+-    posix_spawnattr_setpgroup(&spawn_attributes, getsid(0));
+-
+-    short current_flag;
+-    posix_spawnattr_getflags(&spawn_attributes, &current_flag);
+-    posix_spawnattr_setflags(&spawn_attributes, static_cast<short>(current_flag | POSIX_SPAWN_SETPGROUP));
+-
+-    if (launcher_handler.details().launcher_type == Desktop::Launcher::LauncherType::Application) {
+-        posix_spawn_file_actions_t spawn_actions;
+-        posix_spawn_file_actions_init(&spawn_actions);
+-        posix_spawn_file_actions_addchdir(&spawn_actions, path().characters());
+-
+-        Vector<char const*, 2> argv;
+-        argv.append(launcher_handler.details().name.characters());
+-
+-        for (auto const& argument : launcher_handler.details().arguments)
+-            argv.append(argument.characters());
+-
+-        argv.append(nullptr);
+-
 -        errno = posix_spawn(&child, launcher_handler.details().executable.characters(), &spawn_actions, &spawn_attributes, const_cast<char**>(argv.data()), environ);
-+        errno = posix_spawn(&child, executable.characters(), &spawn_actions, &spawn_attributes, const_cast<char**>(argv.data()), environ);
-         if (errno) {
-             perror("posix_spawn");
-         } else if (disown(child) < 0) {
-@@ -528,7 +532,7 @@ void DirectoryView::launch(URL::URL const&, LauncherHandler const& launcher_hand
-     } else {
-         for (auto& path : selected_file_paths()) {
-             char const* argv[] = { launcher_handler.details().name.characters(), path.characters(), nullptr };
+-        if (errno) {
+-            perror("posix_spawn");
+-        } else if (disown(child) < 0) {
+-            perror("disown");
+-        }
+-        posix_spawn_file_actions_destroy(&spawn_actions);
+-    } else {
+-        for (auto& path : selected_file_paths()) {
+-            char const* argv[] = { launcher_handler.details().name.characters(), path.characters(), nullptr };
 -            if ((errno = posix_spawn(&child, launcher_handler.details().executable.characters(), nullptr, &spawn_attributes, const_cast<char**>(argv), environ)))
-+            if ((errno = posix_spawn(&child, executable.characters(), nullptr, &spawn_attributes, const_cast<char**>(argv), environ)))
-                 continue;
-             if (disown(child) < 0)
-                 perror("disown");
+-                continue;
+-            if (disown(child) < 0)
+-                perror("disown");
+-        }
+-    }
++    // Launch through the launch server: the in-process fallback, or the SDE
++    // session LaunchServer when it is running (see docs/06-service-layering.md).
++    // It resolves the handler and passes the file argument itself, so the path is
++    // not lost.
++    if (!Desktop::Launcher::open(url, launcher_handler.details().executable))
++        dbgln("DirectoryView: failed to launch '{}'", url.to_byte_string());
+ }
+ 
+ Vector<ByteString> DirectoryView::selected_file_paths() const
