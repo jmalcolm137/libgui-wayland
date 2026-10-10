@@ -1,5 +1,5 @@
 diff --git a/Userland/Services/Taskbar/QuickLaunchWidget.cpp b/Userland/Services/Taskbar/QuickLaunchWidget.cpp
-index 904ec537..2ee80eaa 100644
+index 904ec537..86c2ad61 100644
 --- a/Userland/Services/Taskbar/QuickLaunchWidget.cpp
 +++ b/Userland/Services/Taskbar/QuickLaunchWidget.cpp
 @@ -41,7 +41,7 @@ OwnPtr<QuickLaunchEntry> QuickLaunchEntry::create_from_path(StringView path)
@@ -11,7 +11,16 @@ index 904ec537..2ee80eaa 100644
  
          return make<QuickLaunchEntryAppFile>(Desktop::AppFile::open(af_path));
      }
-@@ -262,6 +262,10 @@ void QuickLaunchWidget::paint_event(GUI::PaintEvent& event)
+@@ -233,6 +233,8 @@ void QuickLaunchWidget::context_menu_event(GUI::ContextMenuEvent& event)
+             return;
+ 
+         m_context_menu_app_name = entry->name();
++        // Show the entry's own icon on the default "Launch" action.
++        m_context_menu_default_action->set_icon(entry->icon().bitmap_for_size(16));
+         m_context_menu->popup(event.screen_position(), m_context_menu_default_action);
+     });
+ }
+@@ -262,6 +264,10 @@ void QuickLaunchWidget::paint_event(GUI::PaintEvent& event)
          Gfx::StylePainter::paint_button(painter, rect, palette(), Gfx::ButtonStyle::Coolbar, entry->is_pressed(), entry->is_hovered());
  
          auto const* icon = entry->icon().bitmap_for_size(16);
@@ -22,6 +31,58 @@ index 904ec537..2ee80eaa 100644
          auto content_rect = rect.shrunken(8, 2);
          auto icon_location = content_rect.center().translated(-(icon->width() / 2), -(icon->height() / 2));
          if (entry->is_pressed())
+@@ -301,17 +307,36 @@ QuickLaunchWidget::QuickLaunchWidget()
+ 
+ ErrorOr<void> QuickLaunchWidget::create_context_menu()
+ {
+-    auto icon = TRY(Gfx::Bitmap::load_from_uri("resource://icons/16x16/delete.png"sv));
++    auto remove_icon = TRY(Gfx::Bitmap::load_from_uri("resource://icons/16x16/delete.png"sv));
+     m_context_menu = GUI::Menu::construct();
+-    m_context_menu_default_action = GUI::Action::create("&Remove", icon, [this](auto&) {
++
++    // "Launch" is listed first and is the default action, so a stray click on the
++    // popup launches the entry rather than removing it.
++    m_context_menu_default_action = GUI::Action::create("&Launch", [this](auto&) {
++        launch_entry(m_context_menu_app_name);
++    });
++    m_context_menu->add_action(*m_context_menu_default_action);
++
++    auto remove_action = GUI::Action::create("&Remove", remove_icon, [this](auto&) {
+         remove_entry(m_context_menu_app_name);
+         repaint();
+     });
+-    m_context_menu->add_action(*m_context_menu_default_action);
++    m_context_menu->add_action(*remove_action);
+ 
+     return {};
+ }
+ 
++void QuickLaunchWidget::launch_entry(ByteString const& name)
++{
++    for (auto const& entry : m_entries) {
++        if (entry->name() != name)
++            continue;
++        if (auto result = entry->launch(); result.is_error())
++            GUI::MessageBox::show_error(window(), ByteString::formatted("Failed to open quick launch entry: {}", result.release_error()));
++        return;
++    }
++}
++
+ void QuickLaunchWidget::load_entries(bool save)
+ {
+     struct ConfigEntry {
+diff --git a/Userland/Services/Taskbar/QuickLaunchWidget.h b/Userland/Services/Taskbar/QuickLaunchWidget.h
+index 70439224..c97ca716 100644
+--- a/Userland/Services/Taskbar/QuickLaunchWidget.h
++++ b/Userland/Services/Taskbar/QuickLaunchWidget.h
+@@ -131,6 +131,7 @@ private:
+ 
+     ErrorOr<void> create_context_menu();
+ 
++    void launch_entry(ByteString const& name);
+     void load_entries(bool save = true);
+     ErrorOr<void> update_entry(ByteString const&, NonnullOwnPtr<QuickLaunchEntry>, bool save = true);
+     void add_entries(Vector<NonnullOwnPtr<QuickLaunchEntry>> entries, bool save = true);
 diff --git a/Userland/Services/Taskbar/TaskbarWindow.cpp b/Userland/Services/Taskbar/TaskbarWindow.cpp
 index 82fc0b57..bc43a319 100644
 --- a/Userland/Services/Taskbar/TaskbarWindow.cpp
