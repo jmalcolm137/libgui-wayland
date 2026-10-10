@@ -1045,9 +1045,14 @@ void WaylandClient::on_layer_configure(zwlr_layer_surface_v1* layer_surface, Gfx
         if (w.layer_surface != layer_surface)
             continue;
         dbgln("LibWM/Wayland: layer configure {}x{}", size.width(), size.height());
+        // Always deliver the first configure: the client's Window may still be at
+        // its requested size (the Desktop is created zero-sized and sized by the
+        // compositor), so skipping an equal-sized configure would leave it
+        // unsized and the widget tree unlaid-out.
+        bool const first_configure = !w.layer_configured;
         w.layer_configured = true;
 
-        if (size.width() > 0 && size.height() > 0 && size != w.size) {
+        if (size.width() > 0 && size.height() > 0 && (first_configure || size != w.size)) {
             w.size = size;
             if (m_input.window_resize)
                 m_input.window_resize(w.window_id, size);
