@@ -146,6 +146,12 @@ target_include_directories(libwm-services-test PRIVATE "${CMAKE_CURRENT_SOURCE_D
 target_link_options(libwm-services-test PRIVATE "-Wl,--no-as-needed")
 target_link_libraries(libwm-services-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibURL LibDesktop LibLaunch LibImageDecoderClient windowserver)
 
+# Spawns an app through Desktop::AppFile - the Taskbar system menu's launch path.
+add_executable(libwm-appfile-test test/AppFileLaunchTest.cpp)
+target_include_directories(libwm-appfile-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_options(libwm-appfile-test PRIVATE "-Wl,--no-as-needed")
+target_link_libraries(libwm-appfile-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibDesktop windowserver)
+
 # --- The out-of-process WebContent service ------------------------------------
 # Built from the upstream sources. It is a single-client system service; LibWM
 # spawns it on demand and hands it a socket via SOCKET_TAKEOVER (the same
