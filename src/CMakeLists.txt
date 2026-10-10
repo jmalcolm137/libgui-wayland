@@ -56,6 +56,18 @@ add_custom_command(
     VERBATIM
 )
 
+# wlr-layer-shell: the Serenity Taskbar/Desktop/applets map to layer surfaces.
+set(WLR_LAYER_SHELL_XML "${CMAKE_CURRENT_SOURCE_DIR}/protocol/wlr-layer-shell-unstable-v1.xml")
+add_custom_command(
+    OUTPUT
+        "${WM_WAYLAND_DIR}/wlr-layer-shell-unstable-v1-client-protocol.h"
+        "${WM_WAYLAND_DIR}/wlr-layer-shell-unstable-v1-protocol.c"
+    COMMAND "${WAYLAND_SCANNER}" client-header "${WLR_LAYER_SHELL_XML}" "${WM_WAYLAND_DIR}/wlr-layer-shell-unstable-v1-client-protocol.h"
+    COMMAND "${WAYLAND_SCANNER}" private-code "${WLR_LAYER_SHELL_XML}" "${WM_WAYLAND_DIR}/wlr-layer-shell-unstable-v1-protocol.c"
+    DEPENDS "${WLR_LAYER_SHELL_XML}"
+    VERBATIM
+)
+
 add_library(windowserver SHARED
     LibWM.cpp
     MenuController.cpp
@@ -65,6 +77,7 @@ add_library(windowserver SHARED
     "${WM_WAYLAND_DIR}/xdg-decoration-protocol.c"
     "${WM_WAYLAND_DIR}/xdg-output-protocol.c"
     "${WM_WAYLAND_DIR}/viewporter-protocol.c"
+    "${WM_WAYLAND_DIR}/wlr-layer-shell-unstable-v1-protocol.c"
 )
 
 # LibWM was renamed to LibWindowServer. Keep the old target name working for

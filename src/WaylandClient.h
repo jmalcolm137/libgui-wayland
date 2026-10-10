@@ -12,8 +12,8 @@
 #include <AK/Function.h>
 #include <AK/HashMap.h>
 #include <AK/NonnullOwnPtr.h>
-#include <AK/Span.h>
 #include <AK/RefPtr.h>
+#include <AK/Span.h>
 #include <AK/Vector.h>
 #include <LibCore/AnonymousBuffer.h>
 #include <LibGfx/Point.h>
@@ -44,6 +44,8 @@ struct zxdg_output_manager_v1;
 struct zxdg_output_v1;
 struct zxdg_decoration_manager_v1;
 struct zxdg_toplevel_decoration_v1;
+struct zwlr_layer_shell_v1;
+struct zwlr_layer_surface_v1;
 
 struct xkb_context;
 struct xkb_keymap;
@@ -110,6 +112,11 @@ public:
     void destroy_window(i32 window_id);
     void set_title(i32 window_id, ByteString const& title);
 
+    // Update the size of a layer-surface window (the panel height, say). The
+    // compositor controls the position of layer surfaces; for ordinary xdg
+    // toplevels this is a no-op (their size is driven by a configure).
+    void set_window_rect(i32 window_id, Gfx::IntSize size);
+
     // Window state (maps to xdg_toplevel).
     void set_fullscreen(i32 window_id, bool fullscreen);
     void set_maximized(i32 window_id, bool maximized);
@@ -144,6 +151,7 @@ public:
     void add_wm_base(xdg_wm_base* wm_base);
     void set_decoration_manager(zxdg_decoration_manager_v1* manager) { m_decoration_manager = manager; }
     void set_viewporter(wp_viewporter* viewporter) { m_viewporter = viewporter; }
+    void set_layer_shell(zwlr_layer_shell_v1* shell) { m_layer_shell = shell; }
     void set_data_device_manager(wl_data_device_manager* manager);
     void add_output(wl_output* output);
     void set_xdg_output_manager(zxdg_output_manager_v1* manager);
@@ -165,6 +173,8 @@ public:
     void on_keyboard_focus(wl_surface*, bool entered);
     void on_toplevel_configure(xdg_toplevel*, Gfx::IntSize size, bool activated, bool fullscreen, bool maximized, bool resizing);
     void on_toplevel_close(xdg_toplevel*);
+    void on_layer_configure(zwlr_layer_surface_v1*, Gfx::IntSize size);
+    void on_layer_closed(zwlr_layer_surface_v1*);
 
     void on_data_offer(wl_data_offer*);
     void on_data_offer_mime(wl_data_offer*, char const* mime_type);
@@ -185,6 +195,13 @@ private:
         xdg_surface* xdg_surface_object { nullptr };
         xdg_toplevel* toplevel { nullptr };
         zxdg_toplevel_decoration_v1* decoration { nullptr };
+        // Set for layer-surface windows (the Taskbar, the Desktop, applets):
+        // these have no xdg_toplevel/xdg_surface, so their lifecycle differs.
+        zwlr_layer_surface_v1* layer_surface { nullptr };
+        bool is_layer { false };
+        // A panel stretches along its anchored edges and reserves space.
+        bool layer_panel { false };
+        bool layer_configured { false };
         ByteString title;
         Gfx::IntSize size;
         bool has_alpha { false };
@@ -252,6 +269,7 @@ private:
     xdg_wm_base* m_wm_base { nullptr };
     zxdg_decoration_manager_v1* m_decoration_manager { nullptr };
     wp_viewporter* m_viewporter { nullptr };
+    zwlr_layer_shell_v1* m_layer_shell { nullptr };
     RefPtr<Core::Notifier> m_notifier;
 
     xkb_context* m_xkb_context { nullptr };

@@ -220,7 +220,7 @@ void WindowServerConnection::update_window_menubar(i32 window_id)
             m_menu.render_menubar(window_id, painter, rect);
         });
     } else {
-        wayland.set_window_inset(window_id, 0, {});
+        wayland.set_window_inset(window_id, 0, { });
     }
     if (auto* w = window(window_id)) {
         Vector<Gfx::IntRect> rects;
@@ -309,6 +309,8 @@ Messages::WindowServer::SetWindowRectResponse WindowServerConnection::set_window
         w->rect.set_size(rect.size());
         w->rect.set_location(rect.location());
     }
+    // Layer-surface windows (the panel) derive their size from this.
+    WaylandClient::the().set_window_rect(window_id, rect.size());
     return Messages::WindowServer::SetWindowRectResponse { rect };
 }
 
@@ -316,14 +318,14 @@ Messages::WindowServer::GetWindowRectResponse WindowServerConnection::get_window
 {
     if (auto* w = window(window_id))
         return Messages::WindowServer::GetWindowRectResponse { w->rect };
-    return Messages::WindowServer::GetWindowRectResponse { Gfx::IntRect {} };
+    return Messages::WindowServer::GetWindowRectResponse { Gfx::IntRect { } };
 }
 
 Messages::WindowServer::GetWindowFloatingRectResponse WindowServerConnection::get_window_floating_rect(i32 window_id)
 {
     if (auto* w = window(window_id))
         return Messages::WindowServer::GetWindowFloatingRectResponse { w->rect };
-    return Messages::WindowServer::GetWindowFloatingRectResponse { Gfx::IntRect {} };
+    return Messages::WindowServer::GetWindowFloatingRectResponse { Gfx::IntRect { } };
 }
 
 void WindowServerConnection::set_window_minimum_size(i32 window_id, Gfx::IntSize size)
@@ -336,14 +338,14 @@ Messages::WindowServer::GetWindowMinimumSizeResponse WindowServerConnection::get
 {
     if (auto* w = window(window_id))
         return Messages::WindowServer::GetWindowMinimumSizeResponse { w->minimum_size };
-    return Messages::WindowServer::GetWindowMinimumSizeResponse { Gfx::IntSize {} };
+    return Messages::WindowServer::GetWindowMinimumSizeResponse { Gfx::IntSize { } };
 }
 
 Messages::WindowServer::GetWindowTitleResponse WindowServerConnection::get_window_title(i32 window_id)
 {
     if (auto* w = window(window_id))
         return Messages::WindowServer::GetWindowTitleResponse { w->title };
-    return Messages::WindowServer::GetWindowTitleResponse { ByteString {} };
+    return Messages::WindowServer::GetWindowTitleResponse { ByteString { } };
 }
 
 Messages::WindowServer::IsWindowModifiedResponse WindowServerConnection::is_window_modified(i32)
@@ -353,14 +355,14 @@ Messages::WindowServer::IsWindowModifiedResponse WindowServerConnection::is_wind
 
 Messages::WindowServer::GetAppletRectOnScreenResponse WindowServerConnection::get_applet_rect_on_screen(i32)
 {
-    return Messages::WindowServer::GetAppletRectOnScreenResponse { Gfx::IntRect {} };
+    return Messages::WindowServer::GetAppletRectOnScreenResponse { Gfx::IntRect { } };
 }
 
 Messages::WindowServer::GetWindowRectFromClientResponse WindowServerConnection::get_window_rect_from_client(i32, i32 window_id)
 {
     if (auto* w = window(window_id))
         return Messages::WindowServer::GetWindowRectFromClientResponse { w->rect };
-    return Messages::WindowServer::GetWindowRectFromClientResponse { Gfx::IntRect {} };
+    return Messages::WindowServer::GetWindowRectFromClientResponse { Gfx::IntRect { } };
 }
 
 void WindowServerConnection::set_window_backing_store(i32 window_id, i32, i32 pitch, IPC::File const& anon_file, i32 serial, bool has_alpha_channel, Gfx::IntSize size, Gfx::IntSize visible_size, bool)
@@ -469,17 +471,17 @@ void WindowServerConnection::move_window_to_front(i32)
 
 Messages::WindowServer::GetGlobalCursorPositionResponse WindowServerConnection::get_global_cursor_position()
 {
-    return Messages::WindowServer::GetGlobalCursorPositionResponse { Gfx::IntPoint {} };
+    return Messages::WindowServer::GetGlobalCursorPositionResponse { Gfx::IntPoint { } };
 }
 
 Messages::WindowServer::GetColorUnderCursorResponse WindowServerConnection::get_color_under_cursor()
 {
-    return Messages::WindowServer::GetColorUnderCursorResponse { Optional<Gfx::Color> {} };
+    return Messages::WindowServer::GetColorUnderCursorResponse { Optional<Gfx::Color> { } };
 }
 
 Messages::WindowServer::GetWallpaperResponse WindowServerConnection::get_wallpaper()
 {
-    return Messages::WindowServer::GetWallpaperResponse { Gfx::ShareableBitmap {} };
+    return Messages::WindowServer::GetWallpaperResponse { Gfx::ShareableBitmap { } };
 }
 
 Messages::WindowServer::SetWallpaperResponse WindowServerConnection::set_wallpaper(Gfx::ShareableBitmap const&)

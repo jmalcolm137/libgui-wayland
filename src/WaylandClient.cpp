@@ -21,10 +21,11 @@
 #include <wayland-client.h>
 #include <xkbcommon/xkbcommon.h>
 
+#include "viewporter-client-protocol.h"
+#include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "xdg-decoration-client-protocol.h"
 #include "xdg-output-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
-#include "viewporter-client-protocol.h"
 
 namespace LibWM {
 
@@ -53,6 +54,8 @@ static void registry_global(void* data, wl_registry* registry, uint32_t name, ch
         self.set_xdg_output_manager(reinterpret_cast<zxdg_output_manager_v1*>(wl_registry_bind(registry, name, &zxdg_output_manager_v1_interface, min(version, 3u))));
     } else if (!strcmp(interface, wp_viewporter_interface.name)) {
         self.set_viewporter(reinterpret_cast<wp_viewporter*>(wl_registry_bind(registry, name, &wp_viewporter_interface, 1)));
+    } else if (!strcmp(interface, zwlr_layer_shell_v1_interface.name)) {
+        self.set_layer_shell(reinterpret_cast<zwlr_layer_shell_v1*>(wl_registry_bind(registry, name, &zwlr_layer_shell_v1_interface, min(version, 4u))));
     }
 }
 
@@ -153,11 +156,20 @@ static void toplevel_configure(void* data, xdg_toplevel* toplevel, int32_t width
     auto* state_data = static_cast<uint32_t const*>(states->data);
     for (size_t i = 0; i < states->size / sizeof(uint32_t); ++i) {
         switch (state_data[i]) {
-        case XDG_TOPLEVEL_STATE_ACTIVATED: activated = true; break;
-        case XDG_TOPLEVEL_STATE_FULLSCREEN: fullscreen = true; break;
-        case XDG_TOPLEVEL_STATE_MAXIMIZED: maximized = true; break;
-        case XDG_TOPLEVEL_STATE_RESIZING: resizing = true; break;
-        default: break;
+        case XDG_TOPLEVEL_STATE_ACTIVATED:
+            activated = true;
+            break;
+        case XDG_TOPLEVEL_STATE_FULLSCREEN:
+            fullscreen = true;
+            break;
+        case XDG_TOPLEVEL_STATE_MAXIMIZED:
+            maximized = true;
+            break;
+        case XDG_TOPLEVEL_STATE_RESIZING:
+            resizing = true;
+            break;
+        default:
+            break;
         }
     }
     self.on_toplevel_configure(toplevel, { width, height }, activated, fullscreen, maximized, resizing);
@@ -176,6 +188,24 @@ static xdg_toplevel_listener const s_toplevel_listener = {
     .close = toplevel_close,
     .configure_bounds = toplevel_configure_bounds,
     .wm_capabilities = toplevel_wm_capabilities,
+};
+
+// --- zwlr_layer_surface_v1 (panels, the desktop, applets) ---------------------
+
+static void layer_surface_configure(void* data, zwlr_layer_surface_v1* layer_surface, uint32_t serial, uint32_t width, uint32_t height)
+{
+    zwlr_layer_surface_v1_ack_configure(layer_surface, serial);
+    static_cast<WaylandClient*>(data)->on_layer_configure(layer_surface, { static_cast<int>(width), static_cast<int>(height) });
+}
+
+static void layer_surface_closed(void* data, zwlr_layer_surface_v1* layer_surface)
+{
+    static_cast<WaylandClient*>(data)->on_layer_closed(layer_surface);
+}
+
+static zwlr_layer_surface_v1_listener const s_layer_surface_listener = {
+    .configure = layer_surface_configure,
+    .closed = layer_surface_closed,
 };
 
 // --- zxdg_toplevel_decoration_v1 ----------------------------------------------
@@ -234,92 +264,178 @@ static wl_callback_listener const s_frame_listener = {
 static KeyCode serenity_key_code_from_evdev(u32 key)
 {
     switch (key) {
-    case KEY_ESC: return Key_Escape;
-    case KEY_TAB: return Key_Tab;
-    case KEY_BACKSPACE: return Key_Backspace;
-    case KEY_ENTER: return Key_Return;
-    case KEY_INSERT: return Key_Insert;
-    case KEY_DELETE: return Key_Delete;
-    case KEY_HOME: return Key_Home;
-    case KEY_END: return Key_End;
-    case KEY_LEFT: return Key_Left;
-    case KEY_UP: return Key_Up;
-    case KEY_RIGHT: return Key_Right;
-    case KEY_DOWN: return Key_Down;
-    case KEY_PAGEUP: return Key_PageUp;
-    case KEY_PAGEDOWN: return Key_PageDown;
-    case KEY_LEFTSHIFT: return Key_LeftShift;
-    case KEY_RIGHTSHIFT: return Key_RightShift;
-    case KEY_LEFTCTRL: return Key_LeftControl;
-    case KEY_RIGHTCTRL: return Key_RightControl;
-    case KEY_LEFTALT: return Key_LeftAlt;
-    case KEY_RIGHTALT: return Key_RightAlt;
-    case KEY_LEFTMETA: return Key_LeftSuper;
-    case KEY_RIGHTMETA: return Key_RightSuper;
-    case KEY_CAPSLOCK: return Key_CapsLock;
-    case KEY_NUMLOCK: return Key_NumLock;
-    case KEY_SCROLLLOCK: return Key_ScrollLock;
-    case KEY_SPACE: return Key_Space;
-    case KEY_MINUS: return Key_Minus;
-    case KEY_EQUAL: return Key_Equal;
-    case KEY_LEFTBRACE: return Key_LeftBracket;
-    case KEY_RIGHTBRACE: return Key_RightBracket;
-    case KEY_BACKSLASH: return Key_Backslash;
-    case KEY_SEMICOLON: return Key_Semicolon;
-    case KEY_APOSTROPHE: return Key_Apostrophe;
-    case KEY_GRAVE: return Key_Backtick;
-    case KEY_COMMA: return Key_Comma;
-    case KEY_DOT: return Key_Period;
-    case KEY_SLASH: return Key_Slash;
-    case KEY_1: return Key_1;
-    case KEY_2: return Key_2;
-    case KEY_3: return Key_3;
-    case KEY_4: return Key_4;
-    case KEY_5: return Key_5;
-    case KEY_6: return Key_6;
-    case KEY_7: return Key_7;
-    case KEY_8: return Key_8;
-    case KEY_9: return Key_9;
-    case KEY_0: return Key_0;
-    case KEY_F1: return Key_F1;
-    case KEY_F2: return Key_F2;
-    case KEY_F3: return Key_F3;
-    case KEY_F4: return Key_F4;
-    case KEY_F5: return Key_F5;
-    case KEY_F6: return Key_F6;
-    case KEY_F7: return Key_F7;
-    case KEY_F8: return Key_F8;
-    case KEY_F9: return Key_F9;
-    case KEY_F10: return Key_F10;
-    case KEY_F11: return Key_F11;
-    case KEY_F12: return Key_F12;
-    case KEY_A: return Key_A;
-    case KEY_B: return Key_B;
-    case KEY_C: return Key_C;
-    case KEY_D: return Key_D;
-    case KEY_E: return Key_E;
-    case KEY_F: return Key_F;
-    case KEY_G: return Key_G;
-    case KEY_H: return Key_H;
-    case KEY_I: return Key_I;
-    case KEY_J: return Key_J;
-    case KEY_K: return Key_K;
-    case KEY_L: return Key_L;
-    case KEY_M: return Key_M;
-    case KEY_N: return Key_N;
-    case KEY_O: return Key_O;
-    case KEY_P: return Key_P;
-    case KEY_Q: return Key_Q;
-    case KEY_R: return Key_R;
-    case KEY_S: return Key_S;
-    case KEY_T: return Key_T;
-    case KEY_U: return Key_U;
-    case KEY_V: return Key_V;
-    case KEY_W: return Key_W;
-    case KEY_X: return Key_X;
-    case KEY_Y: return Key_Y;
-    case KEY_Z: return Key_Z;
-    default: return Key_Invalid;
+    case KEY_ESC:
+        return Key_Escape;
+    case KEY_TAB:
+        return Key_Tab;
+    case KEY_BACKSPACE:
+        return Key_Backspace;
+    case KEY_ENTER:
+        return Key_Return;
+    case KEY_INSERT:
+        return Key_Insert;
+    case KEY_DELETE:
+        return Key_Delete;
+    case KEY_HOME:
+        return Key_Home;
+    case KEY_END:
+        return Key_End;
+    case KEY_LEFT:
+        return Key_Left;
+    case KEY_UP:
+        return Key_Up;
+    case KEY_RIGHT:
+        return Key_Right;
+    case KEY_DOWN:
+        return Key_Down;
+    case KEY_PAGEUP:
+        return Key_PageUp;
+    case KEY_PAGEDOWN:
+        return Key_PageDown;
+    case KEY_LEFTSHIFT:
+        return Key_LeftShift;
+    case KEY_RIGHTSHIFT:
+        return Key_RightShift;
+    case KEY_LEFTCTRL:
+        return Key_LeftControl;
+    case KEY_RIGHTCTRL:
+        return Key_RightControl;
+    case KEY_LEFTALT:
+        return Key_LeftAlt;
+    case KEY_RIGHTALT:
+        return Key_RightAlt;
+    case KEY_LEFTMETA:
+        return Key_LeftSuper;
+    case KEY_RIGHTMETA:
+        return Key_RightSuper;
+    case KEY_CAPSLOCK:
+        return Key_CapsLock;
+    case KEY_NUMLOCK:
+        return Key_NumLock;
+    case KEY_SCROLLLOCK:
+        return Key_ScrollLock;
+    case KEY_SPACE:
+        return Key_Space;
+    case KEY_MINUS:
+        return Key_Minus;
+    case KEY_EQUAL:
+        return Key_Equal;
+    case KEY_LEFTBRACE:
+        return Key_LeftBracket;
+    case KEY_RIGHTBRACE:
+        return Key_RightBracket;
+    case KEY_BACKSLASH:
+        return Key_Backslash;
+    case KEY_SEMICOLON:
+        return Key_Semicolon;
+    case KEY_APOSTROPHE:
+        return Key_Apostrophe;
+    case KEY_GRAVE:
+        return Key_Backtick;
+    case KEY_COMMA:
+        return Key_Comma;
+    case KEY_DOT:
+        return Key_Period;
+    case KEY_SLASH:
+        return Key_Slash;
+    case KEY_1:
+        return Key_1;
+    case KEY_2:
+        return Key_2;
+    case KEY_3:
+        return Key_3;
+    case KEY_4:
+        return Key_4;
+    case KEY_5:
+        return Key_5;
+    case KEY_6:
+        return Key_6;
+    case KEY_7:
+        return Key_7;
+    case KEY_8:
+        return Key_8;
+    case KEY_9:
+        return Key_9;
+    case KEY_0:
+        return Key_0;
+    case KEY_F1:
+        return Key_F1;
+    case KEY_F2:
+        return Key_F2;
+    case KEY_F3:
+        return Key_F3;
+    case KEY_F4:
+        return Key_F4;
+    case KEY_F5:
+        return Key_F5;
+    case KEY_F6:
+        return Key_F6;
+    case KEY_F7:
+        return Key_F7;
+    case KEY_F8:
+        return Key_F8;
+    case KEY_F9:
+        return Key_F9;
+    case KEY_F10:
+        return Key_F10;
+    case KEY_F11:
+        return Key_F11;
+    case KEY_F12:
+        return Key_F12;
+    case KEY_A:
+        return Key_A;
+    case KEY_B:
+        return Key_B;
+    case KEY_C:
+        return Key_C;
+    case KEY_D:
+        return Key_D;
+    case KEY_E:
+        return Key_E;
+    case KEY_F:
+        return Key_F;
+    case KEY_G:
+        return Key_G;
+    case KEY_H:
+        return Key_H;
+    case KEY_I:
+        return Key_I;
+    case KEY_J:
+        return Key_J;
+    case KEY_K:
+        return Key_K;
+    case KEY_L:
+        return Key_L;
+    case KEY_M:
+        return Key_M;
+    case KEY_N:
+        return Key_N;
+    case KEY_O:
+        return Key_O;
+    case KEY_P:
+        return Key_P;
+    case KEY_Q:
+        return Key_Q;
+    case KEY_R:
+        return Key_R;
+    case KEY_S:
+        return Key_S;
+    case KEY_T:
+        return Key_T;
+    case KEY_U:
+        return Key_U;
+    case KEY_V:
+        return Key_V;
+    case KEY_W:
+        return Key_W;
+    case KEY_X:
+        return Key_X;
+    case KEY_Y:
+        return Key_Y;
+    case KEY_Z:
+        return Key_Z;
+    default:
+        return Key_Invalid;
     }
 }
 
@@ -503,7 +619,7 @@ WaylandClient& WaylandClient::the()
 ErrorOr<void> WaylandClient::ensure_connected()
 {
     if (m_display)
-        return {};
+        return { };
 
     m_display = wl_display_connect(nullptr);
     if (!m_display)
@@ -524,7 +640,7 @@ ErrorOr<void> WaylandClient::ensure_connected()
 
     dbgln("LibWM/Wayland: connected; screen {}x{} @{}x, output scale {}",
         m_screen_size.width(), m_screen_size.height(), m_scale, m_scale);
-    return {};
+    return { };
 }
 
 void WaylandClient::dispatch()
@@ -691,12 +807,23 @@ void WaylandClient::on_pointer_button(u32 button, bool pressed)
 {
     u32 serenity_button = 0;
     switch (button) {
-    case BTN_LEFT: serenity_button = static_cast<u32>(GUI::MouseButton::Primary); break;
-    case BTN_RIGHT: serenity_button = static_cast<u32>(GUI::MouseButton::Secondary); break;
-    case BTN_MIDDLE: serenity_button = static_cast<u32>(GUI::MouseButton::Middle); break;
-    case BTN_SIDE: serenity_button = static_cast<u32>(GUI::MouseButton::Backward); break;
-    case BTN_EXTRA: serenity_button = static_cast<u32>(GUI::MouseButton::Forward); break;
-    default: return;
+    case BTN_LEFT:
+        serenity_button = static_cast<u32>(GUI::MouseButton::Primary);
+        break;
+    case BTN_RIGHT:
+        serenity_button = static_cast<u32>(GUI::MouseButton::Secondary);
+        break;
+    case BTN_MIDDLE:
+        serenity_button = static_cast<u32>(GUI::MouseButton::Middle);
+        break;
+    case BTN_SIDE:
+        serenity_button = static_cast<u32>(GUI::MouseButton::Backward);
+        break;
+    case BTN_EXTRA:
+        serenity_button = static_cast<u32>(GUI::MouseButton::Forward);
+        break;
+    default:
+        return;
     }
 
     if (m_pointer_popup >= 0) {
@@ -897,11 +1024,53 @@ void WaylandClient::on_toplevel_close(xdg_toplevel* toplevel)
     }
 }
 
+void WaylandClient::on_layer_configure(zwlr_layer_surface_v1* layer_surface, Gfx::IntSize size)
+{
+    for (auto const& it : m_windows) {
+        auto& w = *it.value;
+        if (w.layer_surface != layer_surface)
+            continue;
+        dbgln("LibWM/Wayland: layer configure {}x{}", size.width(), size.height());
+        w.layer_configured = true;
+
+        if (size.width() > 0 && size.height() > 0 && size != w.size) {
+            w.size = size;
+            if (m_input.window_resize)
+                m_input.window_resize(w.window_id, size);
+        }
+
+        // Flush a frame that arrived before we were allowed to attach.
+        if (w.has_pending && w.pending_fd >= 0) {
+            int fd = w.pending_fd;
+            auto pending_size = w.pending_size;
+            auto pending_visible_size = w.pending_visible_size;
+            auto pending_pitch = w.pending_pitch;
+            auto pending_has_alpha = w.pending_has_alpha;
+            w.pending_fd = -1;
+            w.has_pending = false;
+            commit_window_content(w, fd, pending_size, pending_visible_size, pending_pitch, pending_has_alpha);
+            ::close(fd);
+        }
+        return;
+    }
+}
+
+void WaylandClient::on_layer_closed(zwlr_layer_surface_v1* layer_surface)
+{
+    for (auto const& it : m_windows) {
+        if (it.value->layer_surface == layer_surface) {
+            if (m_input.window_close_request)
+                m_input.window_close_request(it.value->window_id);
+            return;
+        }
+    }
+}
+
 ByteString WaylandClient::preferred_mime_for(wl_data_offer* offer) const
 {
     auto it = m_offer_mime_types.find(reinterpret_cast<u64>(offer));
     if (it == m_offer_mime_types.end() || it->value.is_empty())
-        return {};
+        return { };
     auto const& mimes = it->value;
     for (auto const& candidate : { "text/plain;charset=utf-8"sv, "text/plain"sv, "UTF8_STRING"sv, "STRING"sv, "text/uri-list"sv, "image/png"sv }) {
         for (auto const& mime : mimes) {
@@ -917,7 +1086,7 @@ void WaylandClient::on_data_offer(wl_data_offer* offer)
 {
     dbgln("LibWM/Wayland: data offer {}", static_cast<void*>(offer));
     m_pending_offers.append(offer);
-    m_offer_mime_types.set(reinterpret_cast<u64>(offer), {});
+    m_offer_mime_types.set(reinterpret_cast<u64>(offer), { });
     wl_data_offer_add_listener(offer, &s_data_offer_listener, this);
 }
 
@@ -1182,7 +1351,7 @@ void WaylandClient::on_popup_done(xdg_popup* popup)
 
 ErrorOr<ByteBuffer> WaylandClient::read_clipboard(ByteString& out_mime_type)
 {
-    out_mime_type = {};
+    out_mime_type = { };
     if (!m_current_offer || !m_display)
         return Error::from_string_literal("LibWM: no clipboard selection");
 
@@ -1267,21 +1436,78 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntSize size, ByteString c
     if (!m_compositor || !m_wm_base)
         return;
 
-    // Convey the Serenity window type to the compositor so it can apply the
-    // role (the Taskbar is a bottom panel, not a normal toplevel, etc.).
-    char const* app_id = "libwm";
-    switch (static_cast<WindowServer::WindowType>(window_type)) {
-    case WindowServer::WindowType::Taskbar:
-        app_id = "serenity-taskbar";
-        break;
-    case WindowServer::WindowType::Applet:
-        app_id = "serenity-applet";
-        break;
-    case WindowServer::WindowType::Desktop:
-        app_id = "serenity-desktop";
-        break;
-    default:
-        break;
+    // Serenity shell window types map directly onto wlr-layer-shell roles: the
+    // Taskbar is a bottom panel, the Desktop is a background surface, and
+    // applets are top-layer surfaces. This replaces the earlier app_id hint.
+    auto type = static_cast<WindowServer::WindowType>(window_type);
+    if (m_layer_shell && (type == WindowServer::WindowType::Taskbar || type == WindowServer::WindowType::Desktop || type == WindowServer::WindowType::Applet)) {
+        uint32_t layer = ZWLR_LAYER_SHELL_V1_LAYER_TOP;
+        uint32_t anchor = 0;
+        uint32_t width = size.width();
+        uint32_t height = size.height();
+        int exclusive_zone = 0;
+        char const* layer_namespace = "serenity-window";
+        bool is_panel = false;
+
+        switch (type) {
+        case WindowServer::WindowType::Taskbar:
+            // A bottom panel: stretch across the output and reserve its height.
+            anchor = ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM
+                | ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT
+                | ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT;
+            width = 0;
+            exclusive_zone = size.height();
+            layer_namespace = "serenity-taskbar";
+            is_panel = true;
+            break;
+        case WindowServer::WindowType::Desktop:
+            // A full-screen background surface behind everything else.
+            layer = ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND;
+            anchor = ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP
+                | ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM
+                | ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT
+                | ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT;
+            width = 0;
+            height = 0;
+            exclusive_zone = -1;
+            layer_namespace = "serenity-desktop";
+            break;
+        case WindowServer::WindowType::Applet:
+            // Applets sit in the top layer, anchored to the bottom-right.
+            anchor = ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM
+                | ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT;
+            layer_namespace = "serenity-applet";
+            break;
+        default:
+            VERIFY_NOT_REACHED();
+        }
+
+        auto* layer_surface_object = wl_compositor_create_surface(m_compositor);
+        auto* layer_surface = zwlr_layer_shell_v1_get_layer_surface(m_layer_shell, layer_surface_object, nullptr, layer, layer_namespace);
+        zwlr_layer_surface_v1_add_listener(layer_surface, &s_layer_surface_listener, this);
+        zwlr_layer_surface_v1_set_size(layer_surface, width, height);
+        zwlr_layer_surface_v1_set_anchor(layer_surface, anchor);
+        zwlr_layer_surface_v1_set_exclusive_zone(layer_surface, exclusive_zone);
+        zwlr_layer_surface_v1_set_keyboard_interactivity(layer_surface, ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE);
+        wl_surface_commit(layer_surface_object);
+
+        auto window_surface = make<WindowSurface>();
+        window_surface->window_id = window_id;
+        window_surface->surface = layer_surface_object;
+        window_surface->layer_surface = layer_surface;
+        window_surface->is_layer = true;
+        window_surface->layer_panel = is_panel;
+        window_surface->title = title;
+        window_surface->size = size;
+        window_surface->has_alpha = has_alpha;
+        window_surface->resizable = resizable;
+        window_surface->fixed_size = size;
+        if (m_viewporter)
+            window_surface->viewport = wp_viewporter_get_viewport(m_viewporter, layer_surface_object);
+
+        m_windows.set(window_id, move(window_surface));
+        wl_display_flush(m_display);
+        return;
     }
 
     auto* surface = wl_compositor_create_surface(m_compositor);
@@ -1290,7 +1516,7 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntSize size, ByteString c
     auto* toplevel = xdg_surface_get_toplevel(xdg_surface_object);
     xdg_toplevel_add_listener(toplevel, &s_toplevel_listener, this);
     xdg_toplevel_set_title(toplevel, title.characters());
-    xdg_toplevel_set_app_id(toplevel, app_id);
+    xdg_toplevel_set_app_id(toplevel, "libwm");
     wl_surface_commit(surface);
 
     auto window_surface = make<WindowSurface>();
@@ -1336,6 +1562,8 @@ void WaylandClient::destroy_window(i32 window_id)
         if (record->buffer)
             wl_buffer_destroy(record->buffer);
     }
+    if (window_surface.layer_surface)
+        zwlr_layer_surface_v1_destroy(window_surface.layer_surface);
     if (window_surface.toplevel)
         xdg_toplevel_destroy(window_surface.toplevel);
     if (window_surface.viewport)
@@ -1353,14 +1581,41 @@ void WaylandClient::set_title(i32 window_id, ByteString const& title)
 {
     if (auto* window_surface = find(window_id)) {
         window_surface->title = title;
-        xdg_toplevel_set_title(window_surface->toplevel, title.characters());
+        if (window_surface->toplevel)
+            xdg_toplevel_set_title(window_surface->toplevel, title.characters());
         wl_display_flush(m_display);
     }
+}
+
+void WaylandClient::set_window_rect(i32 window_id, Gfx::IntSize size)
+{
+    auto* window_surface = find(window_id);
+    if (!window_surface || !window_surface->is_layer || !window_surface->layer_surface)
+        return;
+
+    // Layer surfaces are positioned by the compositor; only the size is ours to
+    // request. Panels stretch across their anchored edges, so only the height
+    // (the panel thickness) is meaningful there.
+    if (window_surface->layer_panel) {
+        if (size.height() == window_surface->size.height())
+            return;
+        zwlr_layer_surface_v1_set_size(window_surface->layer_surface, 0, size.height());
+        zwlr_layer_surface_v1_set_exclusive_zone(window_surface->layer_surface, size.height());
+    } else {
+        if (size == window_surface->size)
+            return;
+        zwlr_layer_surface_v1_set_size(window_surface->layer_surface, size.width(), size.height());
+    }
+    window_surface->size = size;
+    wl_surface_commit(window_surface->surface);
+    wl_display_flush(m_display);
 }
 
 void WaylandClient::set_fullscreen(i32 window_id, bool fullscreen)
 {
     if (auto* window_surface = find(window_id)) {
+        if (!window_surface->toplevel)
+            return;
         if (fullscreen)
             xdg_toplevel_set_fullscreen(window_surface->toplevel, nullptr);
         else
@@ -1372,6 +1627,8 @@ void WaylandClient::set_fullscreen(i32 window_id, bool fullscreen)
 void WaylandClient::set_maximized(i32 window_id, bool maximized)
 {
     if (auto* window_surface = find(window_id)) {
+        if (!window_surface->toplevel)
+            return;
         if (maximized)
             xdg_toplevel_set_maximized(window_surface->toplevel);
         else
@@ -1383,6 +1640,8 @@ void WaylandClient::set_maximized(i32 window_id, bool maximized)
 void WaylandClient::set_minimized(i32 window_id)
 {
     if (auto* window_surface = find(window_id)) {
+        if (!window_surface->toplevel)
+            return;
         xdg_toplevel_set_minimized(window_surface->toplevel);
         wl_display_flush(m_display);
     }
@@ -1408,6 +1667,22 @@ void WaylandClient::attach_and_commit(i32 window_id, int client_fd, Gfx::IntSize
         return;
     if (visible_size.is_empty())
         visible_size = size;
+
+    // A layer surface must not attach a buffer before its first configure; hold
+    // the frame and present it from on_layer_configure().
+    if (window_surface->is_layer && !window_surface->layer_configured) {
+        if (window_surface->pending_fd >= 0)
+            ::close(window_surface->pending_fd);
+        window_surface->pending_fd = ::dup(client_fd);
+        if (window_surface->pending_fd < 0)
+            return;
+        window_surface->pending_size = size;
+        window_surface->pending_visible_size = visible_size;
+        window_surface->pending_pitch = pitch;
+        window_surface->pending_has_alpha = has_alpha;
+        window_surface->has_pending = true;
+        return;
+    }
 
     // Pace presents to the compositor: if a frame is still in flight, keep only
     // the newest content and attach it when the frame callback lands. A resize
