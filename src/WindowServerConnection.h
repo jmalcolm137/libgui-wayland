@@ -138,6 +138,14 @@ private:
     Messages::WindowServer::SetScreenLayoutResponse set_screen_layout(WindowServer::ScreenLayout const& screen_layout, bool save) override;
     Messages::WindowServer::SaveScreenLayoutResponse save_screen_layout() override;
 
+    // Settings the host compositor accepts but does not act on (fonts are fixed to
+    // the bundled bitmap family; workspaces are not implemented). Returning a valid
+    // response matters: Serenity's Display Settings Apply makes these calls
+    // synchronously, and an unhandled response blocks the application forever.
+    Messages::WindowServer::SetSystemFontsResponse set_system_fonts(ByteString const& default_font_query, ByteString const& fixed_width_font_query, ByteString const& window_title_font_query) override;
+    Messages::WindowServer::ApplyWorkspaceSettingsResponse apply_workspace_settings(u32 rows, u32 columns, bool save) override;
+    Messages::WindowServer::GetSystemThemeOverrideResponse get_system_theme_override() override;
+
     // Broadcasts theme changes between processes (each app has its own
     // WindowServer shim) via a shared file the compositor and clients watch.
     void watch_theme();

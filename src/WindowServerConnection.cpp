@@ -16,6 +16,7 @@
 #include <WindowServer/SystemEffects.h>
 #include <fcntl.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 namespace {
@@ -42,6 +43,69 @@ void write_sde_state_file(StringView name, ReadonlyBytes bytes)
 {
     if (auto file = Core::File::open(sde_state_file(name), Core::File::OpenMode::Write); !file.is_error())
         (void)file.value()->write_until_depleted(bytes);
+}
+
+ByteBuffer read_sde_state_bytes(StringView name)
+{
+    auto file = Core::File::open(sde_state_file(name), Core::File::OpenMode::Read);
+    if (file.is_error())
+        return {};
+    auto contents = file.value()->read_until_eof();
+    if (contents.is_error())
+        return {};
+    return contents.release_value();
+}
+
+// The wallpaper state is stored as raw pixels, not a PNG: encoding a full-screen
+// image to PNG takes several hundred milliseconds and would stall the UI thread
+// of whichever application applies it. Must match WallpaperHeader in the
+// compositor (WindowServer/src/main.cpp).
+struct WallpaperHeader {
+    u32 magic;
+    u32 format;
+    u32 width;
+    u32 height;
+    u32 pitch;
+};
+constexpr u32 wallpaper_magic = 0x53445750; // "SDWP"
+
+void write_sde_wallpaper(RefPtr<Gfx::Bitmap> const& bitmap)
+{
+    if (!bitmap) {
+        write_sde_state_file("wallpaper.raw"sv, {});
+        return;
+    }
+    auto const pixels = static_cast<size_t>(bitmap->pitch()) * bitmap->height();
+    WallpaperHeader header {
+        wallpaper_magic,
+        static_cast<u32>(bitmap->format()),
+        static_cast<u32>(bitmap->width()),
+        static_cast<u32>(bitmap->height()),
+        static_cast<u32>(bitmap->pitch()),
+    };
+    auto buffer = ByteBuffer::create_uninitialized(sizeof(header) + pixels).release_value_but_fixme_should_propagate_errors();
+    memcpy(buffer.data(), &header, sizeof(header));
+    memcpy(buffer.data() + sizeof(header), bitmap->scanline(0), pixels);
+    write_sde_state_file("wallpaper.raw"sv, buffer);
+}
+
+RefPtr<Gfx::Bitmap> read_sde_wallpaper()
+{
+    auto raw = read_sde_state_bytes("wallpaper.raw"sv);
+    if (raw.size() <= sizeof(WallpaperHeader))
+        return nullptr;
+    WallpaperHeader header {};
+    memcpy(&header, raw.data(), sizeof(header));
+    if (header.magic != wallpaper_magic || header.width == 0 || header.height == 0 || header.pitch == 0)
+        return nullptr;
+    auto bitmap = Gfx::Bitmap::create(static_cast<Gfx::BitmapFormat>(header.format), { static_cast<int>(header.width), static_cast<int>(header.height) });
+    if (bitmap.is_error())
+        return nullptr;
+    auto& created = *bitmap.value();
+    auto const row_bytes = min(static_cast<size_t>(header.pitch), static_cast<size_t>(created.pitch()));
+    for (int y = 0; y < created.height(); ++y)
+        memcpy(created.scanline(y), raw.data() + sizeof(header) + static_cast<size_t>(y) * header.pitch, row_bytes);
+    return bitmap.release_value();
 }
 
 }
@@ -537,8 +601,8 @@ Messages::WindowServer::GetWallpaperResponse WindowServerConnection::get_wallpap
     if (m_wallpaper)
         return m_wallpaper->to_shareable_bitmap();
     // Fall back to the persisted image (e.g. after a restart).
-    if (auto bitmap = Gfx::Bitmap::load_from_file(sde_state_file("wallpaper.png"sv)); !bitmap.is_error()) {
-        m_wallpaper = bitmap.release_value();
+    if (auto bitmap = read_sde_wallpaper()) {
+        m_wallpaper = move(bitmap);
         return m_wallpaper->to_shareable_bitmap();
     }
     return Gfx::ShareableBitmap { };
@@ -547,19 +611,10 @@ Messages::WindowServer::GetWallpaperResponse WindowServerConnection::get_wallpap
 Messages::WindowServer::SetWallpaperResponse WindowServerConnection::set_wallpaper(Gfx::ShareableBitmap const& wallpaper_bitmap)
 {
     m_wallpaper = wallpaper_bitmap.bitmap();
-
     (void)Core::Directory::create(sde_state_dir(), Core::Directory::CreateDirectories::Yes);
-    if (!m_wallpaper) {
-        // No wallpaper: keep the file present but empty so the compositor's
-        // content watch stays attached ("None" is an empty image).
-        write_sde_state_file("wallpaper.png"sv, {});
-        return true;
-    }
-
-    auto encoded = Gfx::PNGWriter::encode(*m_wallpaper);
-    if (encoded.is_error())
-        return false;
-    write_sde_state_file("wallpaper.png"sv, encoded.value());
+    // Raw pixels, not PNG: encoding costs hundreds of milliseconds and would
+    // stall this application's UI thread (the calling thread).
+    write_sde_wallpaper(m_wallpaper);
     return true;
 }
 
@@ -778,6 +833,26 @@ Messages::WindowServer::SetScreenLayoutResponse WindowServerConnection::set_scre
 Messages::WindowServer::SaveScreenLayoutResponse WindowServerConnection::save_screen_layout()
 {
     return { true, {} };
+}
+
+Messages::WindowServer::SetSystemFontsResponse WindowServerConnection::set_system_fonts(ByteString const&, ByteString const&, ByteString const&)
+{
+    // Fonts are fixed to the bundled bitmap family; accept and ignore. A valid
+    // response is required so synchronous callers do not block.
+    return true;
+}
+
+Messages::WindowServer::ApplyWorkspaceSettingsResponse WindowServerConnection::apply_workspace_settings(u32, u32, bool)
+{
+    // Workspaces are not implemented; accept and ignore.
+    return true;
+}
+
+Messages::WindowServer::GetSystemThemeOverrideResponse WindowServerConnection::get_system_theme_override()
+{
+    // The port has no theme override (set_system_theme_override); report none.
+    // Must be a valid response: the theme-change handler calls this synchronously.
+    return Optional<Core::AnonymousBuffer> { };
 }
 
 }
