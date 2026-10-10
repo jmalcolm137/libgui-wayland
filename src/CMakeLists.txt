@@ -56,7 +56,7 @@ add_custom_command(
     VERBATIM
 )
 
-add_library(wm SHARED
+add_library(windowserver SHARED
     LibWM.cpp
     MenuController.cpp
     WaylandClient.cpp
@@ -66,45 +66,50 @@ add_library(wm SHARED
     "${WM_WAYLAND_DIR}/xdg-output-protocol.c"
     "${WM_WAYLAND_DIR}/viewporter-protocol.c"
 )
-target_include_directories(wm PRIVATE
+
+# LibWM was renamed to LibWindowServer. Keep the old target name working for
+# existing references (patches/scripts) during the transition.
+add_library(wm ALIAS windowserver)
+
+target_include_directories(windowserver PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
     "${WM_WAYLAND_DIR}"
     ${WAYLAND_CLIENT_INCLUDE_DIRS}
     ${XKBCOMMON_INCLUDE_DIRS}
 )
-target_compile_definitions(wm PRIVATE "LIBWM_DEFAULT_RES=\"${SERENITY_PROJECT_ROOT}/Base/res\"")
+target_compile_definitions(windowserver PRIVATE "LIBWM_DEFAULT_RES=\"${SERENITY_PROJECT_ROOT}/Base/res\"")
 # The generated Wayland protocol code drops const in its listener trampolines.
-target_compile_options(wm PRIVATE -Wno-cast-qual)
-target_link_libraries(wm PRIVATE LibCore LibGfx LibIPC LibGUI LibThreading LibURL ${WAYLAND_CLIENT_LIBRARIES} ${XKBCOMMON_LIBRARIES})
+target_compile_options(windowserver PRIVATE -Wno-cast-qual)
+target_link_libraries(windowserver PRIVATE LibCore LibGfx LibIPC LibGUI LibThreading LibURL ${WAYLAND_CLIENT_LIBRARIES} ${XKBCOMMON_LIBRARIES})
 
 # A minimal unmodified-style LibGUI application used to exercise the shim.
 add_executable(libwm-test-window test/TestWindow.cpp)
 target_include_directories(libwm-test-window PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(libwm-test-window PRIVATE LibMain LibGUI LibGfx LibCore LibIPC wm)
+target_link_libraries(libwm-test-window PRIVATE LibMain LibGUI LibGfx LibCore LibIPC windowserver)
 
 # Reads the Wayland clipboard then publishes text, to exercise the clipboard bridge.
 add_executable(libwm-clipboard-test test/ClipboardTest.cpp)
 target_include_directories(libwm-clipboard-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_options(libwm-clipboard-test PRIVATE "-Wl,--no-as-needed")
-target_link_libraries(libwm-clipboard-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC wm)
+target_link_libraries(libwm-clipboard-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC windowserver)
 
 # Shows the About dialog directly, to reproduce the About crash.
 add_executable(libwm-about-test test/AboutTest.cpp)
 target_include_directories(libwm-about-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_options(libwm-about-test PRIVATE "-Wl,--no-as-needed")
-target_link_libraries(libwm-about-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC wm)
+target_link_libraries(libwm-about-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC windowserver)
 
 # Toggles fullscreen to verify xdg_toplevel fullscreen handling.
 add_executable(libwm-fullscreen-test test/FullscreenTest.cpp)
 target_include_directories(libwm-fullscreen-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_options(libwm-fullscreen-test PRIVATE "-Wl,--no-as-needed")
-target_link_libraries(libwm-fullscreen-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC wm)
+target_link_libraries(libwm-fullscreen-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC windowserver)
 
 # A menubar with a nested submenu, to verify submenu navigation.
 add_executable(libwm-submenu-test test/SubmenuTest.cpp)
 target_include_directories(libwm-submenu-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_options(libwm-submenu-test PRIVATE "-Wl,--no-as-needed")
-target_link_libraries(libwm-submenu-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC wm)
+target_link_libraries(libwm-submenu-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC windowserver)
 
 # --- Unmodified SerenityOS applications ---------------------------------------
 # Built directly from their upstream sources. No source is edited; only the GML
@@ -132,7 +137,7 @@ add_executable(Calculator
 target_include_directories(Calculator PRIVATE "${CALCULATOR_SRC}")
 # LibWM registers its portals from a static initializer; keep the library loaded.
 target_link_options(Calculator PRIVATE "-Wl,--no-as-needed")
-target_link_libraries(Calculator PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibCrypto LibDesktop LibURL wm)
+target_link_libraries(Calculator PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibCrypto LibDesktop LibURL windowserver)
 
 set(PDFVIEWER_SRC "${SERENITY_PROJECT_ROOT}/Userland/Applications/PDFViewer")
 add_executable(PDFViewer
@@ -146,7 +151,7 @@ add_executable(PDFViewer
 )
 target_include_directories(PDFViewer PRIVATE "${PDFVIEWER_SRC}")
 target_link_options(PDFViewer PRIVATE "-Wl,--no-as-needed")
-target_link_libraries(PDFViewer PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibPDF LibFileSystemAccessClient LibConfig LibURL wm)
+target_link_libraries(PDFViewer PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibPDF LibFileSystemAccessClient LibConfig LibURL windowserver)
 
 # --- Unmodified Piano (audio through LibSerenityAudio -> PipeWire) ------------
 set(PIANO_SRC "${SERENITY_PROJECT_ROOT}/Userland/Applications/Piano")
@@ -178,4 +183,4 @@ add_executable(Piano
 target_include_directories(Piano PRIVATE "${PIANO_SRC}" "${CMAKE_CURRENT_BINARY_DIR}")
 # LibWM and LibSerenityAudio register their portals from static initializers.
 target_link_options(Piano PRIVATE "-Wl,--no-as-needed")
-target_link_libraries(Piano PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibAudio LibDSP LibThreading wm serenity-audio)
+target_link_libraries(Piano PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibAudio LibDSP LibThreading windowserver serenity-audio)

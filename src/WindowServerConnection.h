@@ -122,6 +122,12 @@ private:
     void popup_menu(i32 menu_id, Gfx::IntPoint screen_position, Gfx::IntRect const& button_rect) override;
     void dismiss_menu(i32 menu_id) override;
 
+    // Theme (queried by the Taskbar's system menu).
+    Messages::WindowServer::GetSystemThemeResponse get_system_theme() override;
+    Messages::WindowServer::SetSystemThemeResponse set_system_theme(ByteString const& theme_path, ByteString const& theme_name, bool keep_desktop_background, Optional<ByteString> const& color_scheme_path) override;
+    Messages::WindowServer::IsSystemThemeOverriddenResponse is_system_theme_overridden() override;
+    Messages::WindowServer::GetPreferredColorSchemeResponse get_preferred_color_scheme() override;
+
     Vector<NonnullOwnPtr<Window>> m_windows;
     Gfx::IntSize m_screen_size { 1280, 800 };
     i32 m_client_id { 1 };

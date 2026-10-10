@@ -106,7 +106,7 @@ public:
     void write_clipboard(HashMap<ByteString, ByteBuffer> offers);
 
     // Window <-> xdg_toplevel lifecycle.
-    void create_window(i32 window_id, Gfx::IntSize, ByteString const& title, bool has_alpha, bool resizable);
+    void create_window(i32 window_id, Gfx::IntSize, ByteString const& title, bool has_alpha, bool resizable, i32 window_type);
     void destroy_window(i32 window_id);
     void set_title(i32 window_id, ByteString const& title);
 

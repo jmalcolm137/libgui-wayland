@@ -11,6 +11,7 @@
 #include <LibCore/Notifier.h>
 #include <LibGUI/Event.h>
 #include <LibGfx/Painter.h>
+#include <WindowServer/WindowType.h>
 #include <errno.h>
 #include <linux/input-event-codes.h>
 #include <poll.h>
@@ -1261,10 +1262,27 @@ WaylandClient::WindowSurface* WaylandClient::find(i32 window_id)
     return it->value.ptr();
 }
 
-void WaylandClient::create_window(i32 window_id, Gfx::IntSize size, ByteString const& title, bool has_alpha, bool resizable)
+void WaylandClient::create_window(i32 window_id, Gfx::IntSize size, ByteString const& title, bool has_alpha, bool resizable, i32 window_type)
 {
     if (!m_compositor || !m_wm_base)
         return;
+
+    // Convey the Serenity window type to the compositor so it can apply the
+    // role (the Taskbar is a bottom panel, not a normal toplevel, etc.).
+    char const* app_id = "libwm";
+    switch (static_cast<WindowServer::WindowType>(window_type)) {
+    case WindowServer::WindowType::Taskbar:
+        app_id = "serenity-taskbar";
+        break;
+    case WindowServer::WindowType::Applet:
+        app_id = "serenity-applet";
+        break;
+    case WindowServer::WindowType::Desktop:
+        app_id = "serenity-desktop";
+        break;
+    default:
+        break;
+    }
 
     auto* surface = wl_compositor_create_surface(m_compositor);
     auto* xdg_surface_object = xdg_wm_base_get_xdg_surface(m_wm_base, surface);
@@ -1272,7 +1290,7 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntSize size, ByteString c
     auto* toplevel = xdg_surface_get_toplevel(xdg_surface_object);
     xdg_toplevel_add_listener(toplevel, &s_toplevel_listener, this);
     xdg_toplevel_set_title(toplevel, title.characters());
-    xdg_toplevel_set_app_id(toplevel, "libwm");
+    xdg_toplevel_set_app_id(toplevel, app_id);
     wl_surface_commit(surface);
 
     auto window_surface = make<WindowSurface>();

@@ -28,7 +28,7 @@ if [[ ${#TARGETS[@]} -eq 0 ]]; then
     # apps -- Terminal, SystemMonitor, Debugger, CrashReporter, MouseSettings --
     # are excluded; see README).
     TARGETS=(
-        LibGfx LibGUI wm serenity-audio eglgpu
+        LibGfx LibGUI windowserver serenity-audio eglgpu
         Calculator PDFViewer Piano libwm-test-window
         3DFileViewer Tubes About AnalogClock Assistant Browser BrowserSettings
         Calendar CalendarSettings CharacterMap ClockSettings Escalator FileManager
