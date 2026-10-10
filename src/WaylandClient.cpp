@@ -8,6 +8,7 @@
 #include <AK/Assertions.h>
 #include <AK/ByteBuffer.h>
 #include <Kernel/API/KeyCode.h>
+#include <LibCore/EventLoop.h>
 #include <LibCore/Notifier.h>
 #include <LibGUI/Event.h>
 #include <LibGfx/Painter.h>
@@ -706,7 +707,15 @@ void WaylandClient::dispatch()
 {
     if (!m_display)
         return;
-    wl_display_dispatch(m_display);
+    if (wl_display_dispatch(m_display) < 0) {
+        // The compositor is gone (or a protocol error occurred). Reading a dead
+        // connection again would spin the notifier on an always-readable fd, so
+        // stop and ask the application to exit for a clean teardown.
+        if (m_notifier)
+            m_notifier->set_enabled(false);
+        Core::EventLoop::current().quit(0);
+        return;
+    }
     // Requests queued while handling events (notably xdg_wm_base.pong) must be
     // flushed now; waiting for the next event would make the compositor think we
     // are unresponsive.
