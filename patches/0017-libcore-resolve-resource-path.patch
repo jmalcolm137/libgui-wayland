@@ -1,0 +1,108 @@
+diff --git a/Userland/Libraries/LibCore/DirIterator.cpp b/Userland/Libraries/LibCore/DirIterator.cpp
+index 7e4acb83..3d2f4e81 100644
+--- a/Userland/Libraries/LibCore/DirIterator.cpp
++++ b/Userland/Libraries/LibCore/DirIterator.cpp
+@@ -7,6 +7,7 @@
+ 
+ #include <AK/Vector.h>
+ #include <LibCore/DirIterator.h>
++#include <LibCore/System.h>
+ #include <errno.h>
+ #include <fcntl.h>
+ #include <sys/stat.h>
+@@ -17,7 +18,9 @@ DirIterator::DirIterator(ByteString path, Flags flags)
+     : m_path(move(path))
+     , m_flags(flags)
+ {
+-    m_dir = opendir(m_path.characters());
++    // libgui-wayland: opendir() bypasses System::open, so apply the host
++    // "/res/..." resource-root relocation here too.
++    m_dir = opendir(System::resolve_resource_path(m_path).characters());
+     if (!m_dir) {
+         m_error = Error::from_errno(errno);
+     }
+diff --git a/Userland/Libraries/LibCore/System.cpp b/Userland/Libraries/LibCore/System.cpp
+index 1ff2626b..fd48b0f5 100644
+--- a/Userland/Libraries/LibCore/System.cpp
++++ b/Userland/Libraries/LibCore/System.cpp
+@@ -596,6 +596,22 @@ ErrorOr<int> open(StringView path, int options, mode_t mode)
+     return openat(AT_FDCWD, path, options, mode);
+ }
+ 
++ByteString resolve_resource_path(StringView path)
++{
++#ifdef AK_OS_SERENITY
++    return path;
++#else
++    // Host build: redirect SerenityOS's absolute "/res/..." paths to the bundled
++    // resource root, so code that hardcodes "/res/..." (GML bitmaps, themes,
++    // emoji, wallpapers, ...) works unmodified.
++    if (path.starts_with("/res/"sv)) {
++        if (auto const* root = getenv("SERENITY_RES_ROOT"); root && *root)
++            return ByteString::formatted("{}{}", root, path.substring_view(4));
++    }
++    return path;
++#endif
++}
++
+ ErrorOr<int> openat(int fd, StringView path, int options, mode_t mode)
+ {
+     if (!path.characters_without_null_termination())
+@@ -607,6 +623,9 @@ ErrorOr<int> openat(int fd, StringView path, int options, mode_t mode)
+ #else
+     // NOTE: We have to ensure that the path is null-terminated.
+     ByteString path_string = path;
++    // Host build: "/res/..." paths are relocated under SERENITY_RES_ROOT.
++    if (fd == AT_FDCWD)
++        path_string = resolve_resource_path(path_string);
+     int rc = ::openat(fd, path_string.characters(), options, mode);
+     if (rc < 0)
+         return Error::from_syscall("open"sv, -errno);
+@@ -646,7 +665,7 @@ ErrorOr<struct stat> stat(StringView path)
+     int rc = syscall(SC_stat, &params);
+     HANDLE_SYSCALL_RETURN_VALUE("stat", rc, st);
+ #else
+-    ByteString path_string = path;
++    ByteString path_string = resolve_resource_path(path);
+     if (::stat(path_string.characters(), &st) < 0)
+         return Error::from_syscall("stat"sv, -errno);
+     return st;
+@@ -664,7 +683,7 @@ ErrorOr<struct stat> lstat(StringView path)
+     int rc = syscall(SC_stat, &params);
+     HANDLE_SYSCALL_RETURN_VALUE("lstat", rc, st);
+ #else
+-    ByteString path_string = path;
++    ByteString path_string = resolve_resource_path(path);
+     if (::lstat(path_string.characters(), &st) < 0)
+         return Error::from_syscall("lstat"sv, -errno);
+     return st;
+diff --git a/Userland/Libraries/LibCore/System.h b/Userland/Libraries/LibCore/System.h
+index d5d616c1..dc13c1fe 100644
+--- a/Userland/Libraries/LibCore/System.h
++++ b/Userland/Libraries/LibCore/System.h
+@@ -78,7 +78,12 @@ inline ErrorOr<void> unveil(StringView, StringView)
+ {
+     return {};
+ }
++inline ErrorOr<void> unveil_after_exec(StringView, StringView) { return {}; }
+ inline ErrorOr<void> pledge(StringView, StringView = {}) { return {}; }
++// libgui-wayland: Serenity-only operations become no-ops on the host.
++inline ErrorOr<void> enter_jail_mode_until_exit() { return {}; }
++inline ErrorOr<void> enter_jail_mode_until_exec() { return {}; }
++inline ErrorOr<void> beep(u16 = 440, u16 = 200) { return {}; }
+ #endif
+ 
+ template<size_t N>
+@@ -128,6 +133,12 @@ ErrorOr<void> munmap(void* address, size_t);
+ ErrorOr<int> anon_create(size_t size, int options);
+ ErrorOr<int> open(StringView path, int options, mode_t mode = 0);
+ ErrorOr<int> openat(int fd, StringView path, int options, mode_t mode = 0);
++
++// libgui-wayland: on the host build the Serenity resource root is relocated with
++// SERENITY_RES_ROOT, so absolute "/res/..." paths must be rewritten before they
++// reach libc. Bare syscalls that bypass System::open (opendir, stat) use this.
++// On SerenityOS it is the identity.
++ByteString resolve_resource_path(StringView path);
+ ErrorOr<void> close(int fd);
+ ErrorOr<void> ftruncate(int fd, off_t length);
+ ErrorOr<void> fsync(int fd);

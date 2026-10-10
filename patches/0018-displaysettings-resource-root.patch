@@ -1,0 +1,42 @@
+diff --git a/Userland/Applications/DisplaySettings/BackgroundSettingsWidget.cpp b/Userland/Applications/DisplaySettings/BackgroundSettingsWidget.cpp
+index 28843ec7..67e43b35 100644
+--- a/Userland/Applications/DisplaySettings/BackgroundSettingsWidget.cpp
++++ b/Userland/Applications/DisplaySettings/BackgroundSettingsWidget.cpp
+@@ -28,6 +28,7 @@
+ #include <LibGUI/MessageBox.h>
+ #include <LibGfx/Palette.h>
+ #include <LibGfx/SystemTheme.h>
++#include <stdlib.h>
+ 
+ namespace DisplaySettings {
+ 
+@@ -51,6 +52,20 @@ BackgroundSettingsWidget::BackgroundSettingsWidget(bool& background_settings_cha
+ {
+ }
+ 
++namespace {
++
++// libgui-wayland: the host build relocates the Serenity resource root, and
++// FileSystemModel stats/watches the path directly, so the redirect applied to
++// open() at the LibCore seam is not enough here.
++static ByteString wallpapers_directory()
++{
++    if (auto const* root = getenv("SERENITY_RES_ROOT"); root && *root)
++        return ByteString::formatted("{}/wallpapers", root);
++    return ByteString { "/res/wallpapers" };
++}
++
++}
++
+ /// A thin wrapper over FileSystemModel for wallpapers in /res/wallpapers. The
+ /// only change from a plain FileSystemModel is row zero reserved for "None"
+ /// (and this assumes no nested directories).
+@@ -59,7 +74,7 @@ class WallpapersModel final : public GUI::Model
+ public:
+     static NonnullRefPtr<WallpapersModel> create()
+     {
+-        return adopt_ref(*new WallpapersModel(GUI::FileSystemModel::create("/res/wallpapers")));
++        return adopt_ref(*new WallpapersModel(GUI::FileSystemModel::create(wallpapers_directory())));
+     }
+ 
+     virtual ~WallpapersModel() override

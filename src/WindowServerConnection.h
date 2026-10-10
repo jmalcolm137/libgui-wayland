@@ -130,6 +130,12 @@ private:
     Messages::WindowServer::IsSystemThemeOverriddenResponse is_system_theme_overridden() override;
     Messages::WindowServer::GetPreferredColorSchemeResponse get_preferred_color_scheme() override;
 
+    // Screen layout (queried by Display Settings). The host compositor presents
+    // one output; configuration is accepted but not yet honoured.
+    Messages::WindowServer::GetScreenLayoutResponse get_screen_layout() override;
+    Messages::WindowServer::SetScreenLayoutResponse set_screen_layout(WindowServer::ScreenLayout const& screen_layout, bool save) override;
+    Messages::WindowServer::SaveScreenLayoutResponse save_screen_layout() override;
+
     // Broadcasts theme changes between processes (each app has its own
     // WindowServer shim) via a shared file the compositor and clients watch.
     void watch_theme();

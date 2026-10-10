@@ -683,4 +683,31 @@ Messages::WindowServer::GetPreferredColorSchemeResponse WindowServerConnection::
     return ByteString { "Default" };
 }
 
+Messages::WindowServer::GetScreenLayoutResponse WindowServerConnection::get_screen_layout()
+{
+    WindowServer::ScreenLayout layout;
+    WindowServer::ScreenLayout::Screen screen {
+        .mode = WindowServer::ScreenLayout::Screen::Mode::Device,
+        .device = ByteString { "sde-0" },
+        .location = { 0, 0 },
+        .resolution = m_screen_size,
+        .scale_factor = 1,
+    };
+    layout.screens.append(move(screen));
+    layout.main_screen_index = 0;
+    return layout;
+}
+
+Messages::WindowServer::SetScreenLayoutResponse WindowServerConnection::set_screen_layout(WindowServer::ScreenLayout const&, bool)
+{
+    // Screen configuration is not honoured by the host compositor yet; report
+    // success so Display Settings' Monitor tab stays usable.
+    return { true, {} };
+}
+
+Messages::WindowServer::SaveScreenLayoutResponse WindowServerConnection::save_screen_layout()
+{
+    return { true, {} };
+}
+
 }
