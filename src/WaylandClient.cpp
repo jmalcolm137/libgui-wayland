@@ -21,6 +21,7 @@
 #include <wayland-client.h>
 #include <xkbcommon/xkbcommon.h>
 
+#include "serenity-window-client-protocol.h"
 #include "viewporter-client-protocol.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "xdg-decoration-client-protocol.h"
@@ -56,6 +57,8 @@ static void registry_global(void* data, wl_registry* registry, uint32_t name, ch
         self.set_viewporter(reinterpret_cast<wp_viewporter*>(wl_registry_bind(registry, name, &wp_viewporter_interface, 1)));
     } else if (!strcmp(interface, zwlr_layer_shell_v1_interface.name)) {
         self.set_layer_shell(reinterpret_cast<zwlr_layer_shell_v1*>(wl_registry_bind(registry, name, &zwlr_layer_shell_v1_interface, min(version, 4u))));
+    } else if (!strcmp(interface, serenity_window_manager_interface.name)) {
+        self.set_serenity_window_manager(reinterpret_cast<serenity_window_manager*>(wl_registry_bind(registry, name, &serenity_window_manager_interface, 1)));
     }
 }
 
@@ -206,6 +209,17 @@ static void layer_surface_closed(void* data, zwlr_layer_surface_v1* layer_surfac
 static zwlr_layer_surface_v1_listener const s_layer_surface_listener = {
     .configure = layer_surface_configure,
     .closed = layer_surface_closed,
+};
+
+// --- serenity_toplevel (compositor-driven window chrome) ----------------------
+
+static void serenity_toplevel_menubar_visibility(void* data, serenity_toplevel* resource, int32_t visible)
+{
+    static_cast<WaylandClient*>(data)->on_menubar_visibility(resource, visible != 0);
+}
+
+static serenity_toplevel_listener const s_serenity_toplevel_listener = {
+    .menubar_visibility = serenity_toplevel_menubar_visibility,
 };
 
 // --- zxdg_toplevel_decoration_v1 ----------------------------------------------
@@ -1066,6 +1080,26 @@ void WaylandClient::on_layer_closed(zwlr_layer_surface_v1* layer_surface)
     }
 }
 
+void WaylandClient::on_menubar_visibility(serenity_toplevel* resource, bool visible)
+{
+    for (auto const& it : m_windows) {
+        if (it.value->chrome == resource) {
+            it.value->menubar_visible = visible;
+            if (m_menubar_visibility_changed)
+                m_menubar_visibility_changed(it.value->window_id, visible);
+            return;
+        }
+    }
+}
+
+bool WaylandClient::window_menubar_visible(i32 window_id) const
+{
+    auto it = m_windows.find(window_id);
+    if (it == m_windows.end())
+        return true;
+    return it->value->menubar_visible;
+}
+
 ByteString WaylandClient::preferred_mime_for(wl_data_offer* offer) const
 {
     auto it = m_offer_mime_types.find(reinterpret_cast<u64>(offer));
@@ -1531,6 +1565,14 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntSize size, ByteString c
     window_surface->fixed_size = size;
     if (m_viewporter)
         window_surface->viewport = wp_viewporter_get_viewport(m_viewporter, surface);
+
+    // Let the compositor drive this window's chrome (the menu bar).
+    if (m_serenity_window_manager) {
+        if (auto* chrome = serenity_window_manager_get_toplevel(m_serenity_window_manager, surface)) {
+            window_surface->chrome = chrome;
+            serenity_toplevel_add_listener(chrome, &s_serenity_toplevel_listener, this);
+        }
+    }
 
     // A non-resizable window pins min == max (fullscreen still overrides this).
     if (!resizable) {

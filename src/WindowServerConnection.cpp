@@ -195,6 +195,7 @@ void WindowServerConnection::install_menu_callbacks()
     m_menu.visibility_changed = [this](i32 menu_id, bool visible) { async_menu_visibility_did_change(menu_id, visible); };
     m_menu.menubar_changed = [this](i32 window_id) { update_window_menubar(window_id); };
     m_menu.redraw_popup = [this](i32 menu_id) { present_menu_popup(menu_id); };
+    WaylandClient::the().set_menubar_visibility_callback([this](i32 window_id, bool) { update_window_menubar(window_id); });
 }
 
 void WindowServerConnection::present_menu_popup(i32 menu_id)
@@ -212,7 +213,11 @@ void WindowServerConnection::present_menu_popup(i32 menu_id)
 
 void WindowServerConnection::update_window_menubar(i32 window_id)
 {
-    int inset = m_menu.window_has_menubar(window_id) ? m_menu.menubar_height() : 0;
+    // The compositor's window menu can hide the menu bar; the client still
+    // decides whether it has one at all.
+    bool present = m_menu.window_has_menubar(window_id);
+    bool visible = WaylandClient::the().window_menubar_visible(window_id);
+    int inset = (present && visible) ? m_menu.menubar_height() : 0;
     auto& wayland = WaylandClient::the();
     if (inset > 0) {
         wayland.set_window_inset(window_id, inset, [this, window_id](Gfx::Bitmap& bitmap, Gfx::IntRect rect) {

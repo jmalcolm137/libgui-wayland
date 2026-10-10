@@ -68,6 +68,18 @@ add_custom_command(
     VERBATIM
 )
 
+# serenity-window: compositor -> LibWindowServer chrome control (window menu).
+set(SERENITY_WINDOW_XML "${CMAKE_CURRENT_SOURCE_DIR}/protocol/serenity-window.xml")
+add_custom_command(
+    OUTPUT
+        "${WM_WAYLAND_DIR}/serenity-window-client-protocol.h"
+        "${WM_WAYLAND_DIR}/serenity-window-protocol.c"
+    COMMAND "${WAYLAND_SCANNER}" client-header "${SERENITY_WINDOW_XML}" "${WM_WAYLAND_DIR}/serenity-window-client-protocol.h"
+    COMMAND "${WAYLAND_SCANNER}" private-code "${SERENITY_WINDOW_XML}" "${WM_WAYLAND_DIR}/serenity-window-protocol.c"
+    DEPENDS "${SERENITY_WINDOW_XML}"
+    VERBATIM
+)
+
 add_library(windowserver SHARED
     LibWM.cpp
     MenuController.cpp
@@ -78,6 +90,7 @@ add_library(windowserver SHARED
     "${WM_WAYLAND_DIR}/xdg-output-protocol.c"
     "${WM_WAYLAND_DIR}/viewporter-protocol.c"
     "${WM_WAYLAND_DIR}/wlr-layer-shell-unstable-v1-protocol.c"
+    "${WM_WAYLAND_DIR}/serenity-window-protocol.c"
 )
 
 # LibWM was renamed to LibWindowServer. Keep the old target name working for

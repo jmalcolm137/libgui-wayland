@@ -46,6 +46,8 @@ struct zxdg_decoration_manager_v1;
 struct zxdg_toplevel_decoration_v1;
 struct zwlr_layer_shell_v1;
 struct zwlr_layer_surface_v1;
+struct serenity_window_manager;
+struct serenity_toplevel;
 
 struct xkb_context;
 struct xkb_keymap;
@@ -112,6 +114,9 @@ public:
     void destroy_window(i32 window_id);
     void set_title(i32 window_id, ByteString const& title);
 
+    // Whether the compositor currently wants the window's menu bar shown.
+    bool window_menubar_visible(i32 window_id) const;
+
     // Update the size of a layer-surface window (the panel height, say). The
     // compositor controls the position of layer surfaces; for ordinary xdg
     // toplevels this is a no-op (their size is driven by a configure).
@@ -152,6 +157,9 @@ public:
     void set_decoration_manager(zxdg_decoration_manager_v1* manager) { m_decoration_manager = manager; }
     void set_viewporter(wp_viewporter* viewporter) { m_viewporter = viewporter; }
     void set_layer_shell(zwlr_layer_shell_v1* shell) { m_layer_shell = shell; }
+    void set_serenity_window_manager(serenity_window_manager* manager) { m_serenity_window_manager = manager; }
+    // The compositor asks the client to show/hide a window's menu bar.
+    void set_menubar_visibility_callback(Function<void(i32 window_id, bool visible)> callback) { m_menubar_visibility_changed = move(callback); }
     void set_data_device_manager(wl_data_device_manager* manager);
     void add_output(wl_output* output);
     void set_xdg_output_manager(zxdg_output_manager_v1* manager);
@@ -175,6 +183,7 @@ public:
     void on_toplevel_close(xdg_toplevel*);
     void on_layer_configure(zwlr_layer_surface_v1*, Gfx::IntSize size);
     void on_layer_closed(zwlr_layer_surface_v1*);
+    void on_menubar_visibility(serenity_toplevel*, bool visible);
 
     void on_data_offer(wl_data_offer*);
     void on_data_offer_mime(wl_data_offer*, char const* mime_type);
@@ -195,6 +204,7 @@ private:
         xdg_surface* xdg_surface_object { nullptr };
         xdg_toplevel* toplevel { nullptr };
         zxdg_toplevel_decoration_v1* decoration { nullptr };
+        serenity_toplevel* chrome { nullptr };
         // Set for layer-surface windows (the Taskbar, the Desktop, applets):
         // these have no xdg_toplevel/xdg_surface, so their lifecycle differs.
         zwlr_layer_surface_v1* layer_surface { nullptr };
@@ -202,6 +212,8 @@ private:
         // A panel stretches along its anchored edges and reserves space.
         bool layer_panel { false };
         bool layer_configured { false };
+        // Whether the compositor currently wants this window's menu bar shown.
+        bool menubar_visible { true };
         ByteString title;
         Gfx::IntSize size;
         bool has_alpha { false };
@@ -270,6 +282,7 @@ private:
     zxdg_decoration_manager_v1* m_decoration_manager { nullptr };
     wp_viewporter* m_viewporter { nullptr };
     zwlr_layer_shell_v1* m_layer_shell { nullptr };
+    serenity_window_manager* m_serenity_window_manager { nullptr };
     RefPtr<Core::Notifier> m_notifier;
 
     xkb_context* m_xkb_context { nullptr };
@@ -286,6 +299,7 @@ private:
     u32 m_last_input_serial { 0 };
     u32 m_modifiers { 0 };
     Function<void(ByteString const&)> m_clipboard_changed;
+    Function<void(i32 window_id, bool visible)> m_menubar_visibility_changed;
 
     InputCallbacks m_input;
     i32 m_pointer_window { -1 };
