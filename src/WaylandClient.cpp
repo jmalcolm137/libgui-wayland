@@ -1182,7 +1182,12 @@ void WaylandClient::on_toplevel_position(serenity_toplevel* resource, int32_t x,
 {
     for (auto const& it : m_windows) {
         if (it.value->chrome == resource) {
-            it.value->global_position = { x, y };
+            // Layer surfaces (applets) are laid out by the compositor, so their
+            // origin comes from here, not from their anchored corner.
+            if (it.value->is_layer)
+                it.value->layer_output_position = { x, y };
+            else
+                it.value->global_position = { x, y };
             if (m_toplevel_position_changed)
                 m_toplevel_position_changed(it.value->window_id, Gfx::IntPoint { x, y });
             return;
@@ -1757,6 +1762,16 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::In
         window_surface->fixed_size = size;
         if (m_viewporter)
             window_surface->viewport = wp_viewporter_get_viewport(m_viewporter, layer_surface_object);
+
+        // Let the compositor report this layer surface's real output position:
+        // the applet area moves applets away from their anchored corner, so the
+        // client's own origin would otherwise be stale.
+        if (m_serenity_window_manager) {
+            if (auto* chrome = serenity_window_manager_get_toplevel(m_serenity_window_manager, layer_surface_object)) {
+                window_surface->chrome = chrome;
+                serenity_toplevel_add_listener(chrome, &s_serenity_toplevel_listener, this);
+            }
+        }
 
         m_windows.set(window_id, move(window_surface));
         wl_display_flush(m_display);
