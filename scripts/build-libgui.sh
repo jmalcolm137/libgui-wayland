@@ -25,8 +25,9 @@ for arg in "$@"; do
 done
 if [[ ${#TARGETS[@]} -eq 0 ]]; then
     # Everything that can run on the host (the SERENITYOS-service/kernel-facing
-    # apps -- Terminal, SystemMonitor, Debugger, CrashReporter, MouseSettings --
-    # are excluded; see README).
+    # apps -- Terminal, Debugger, CrashReporter, MouseSettings -- are excluded;
+    # see README). SystemMonitor is now Linux-native (reads /proc; a libunwind +
+    # libdw thread-stack backend), so it is built too.
     TARGETS=(
         LibGfx LibGUI windowserver serenity-audio eglgpu
         Calculator PDFViewer Piano libwm-test-window
@@ -35,7 +36,7 @@ if [[ ${#TARGETS[@]} -eq 0 ]]; then
         FontEditor GamesSettings Help HexEditor ImageViewer KeyboardMapper
         KeyboardSettings Mail MailSettings Maps MapsSettings NetworkSettings
         Presenter Run Screenshot Settings SoundPlayer SpaceAnalyzer Spreadsheet
-        TerminalSettings TextEditor ThemeEditor UsersSettings VideoPlayer Weather
+        SystemMonitor TerminalSettings TextEditor ThemeEditor UsersSettings VideoPlayer Weather
     )
 fi
 

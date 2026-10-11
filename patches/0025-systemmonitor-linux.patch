@@ -1,0 +1,651 @@
+diff --git a/Userland/Applications/SystemMonitor/CMakeLists.txt b/Userland/Applications/SystemMonitor/CMakeLists.txt
+index 36d135bc..fdae0bd0 100644
+--- a/Userland/Applications/SystemMonitor/CMakeLists.txt
++++ b/Userland/Applications/SystemMonitor/CMakeLists.txt
+@@ -26,4 +26,16 @@ set(GENERATED_SOURCES
+ )
+ 
+ serenity_app(SystemMonitor ICON app-system-monitor)
+-target_link_libraries(SystemMonitor PRIVATE LibConfig LibCore LibGfx LibGUI LibMain LibSymbolication LibThreading)
++if (SERENITYOS)
++    target_link_libraries(SystemMonitor PRIVATE LibConfig LibCore LibGfx LibGUI LibMain LibSymbolication LibThreading)
++else()
++    # Linux-native thread-stack symbolication: libunwind (ptrace remote access)
++    # plus elfutils (libdw). SerenityOS's LibSymbolication/LibDebug are
++    # kernel-specific and not used on the host.
++    find_package(PkgConfig REQUIRED)
++    pkg_check_modules(ELFUTILS REQUIRED libdw)
++    pkg_check_modules(UNWIND_PTRACE REQUIRED libunwind-ptrace)
++    target_include_directories(SystemMonitor PRIVATE ${ELFUTILS_INCLUDE_DIRS} ${UNWIND_PTRACE_INCLUDE_DIRS})
++    target_link_options(SystemMonitor PRIVATE "-Wl,--no-as-needed")
++    target_link_libraries(SystemMonitor PRIVATE LibConfig LibCore LibGfx LibGUI LibMain LibThreading ${ELFUTILS_LIBRARIES} ${UNWIND_PTRACE_LIBRARIES})
++endif()
+diff --git a/Userland/Applications/SystemMonitor/MemoryStatsWidget.cpp b/Userland/Applications/SystemMonitor/MemoryStatsWidget.cpp
+index e5543b55..d4af398e 100644
+--- a/Userland/Applications/SystemMonitor/MemoryStatsWidget.cpp
++++ b/Userland/Applications/SystemMonitor/MemoryStatsWidget.cpp
+@@ -101,20 +101,58 @@ static inline u64 page_count_to_bytes(size_t count)
+ 
+ void MemoryStatsWidget::refresh()
+ {
++    u32 kmalloc_allocated = 0;
++    u32 kmalloc_available = 0;
++    u64 physical_allocated = 0;
++    u64 physical_available = 0;
++    u64 physical_committed = 0;
++    u64 physical_uncommitted = 0;
++    u32 kmalloc_call_count = 0;
++    u32 kfree_call_count = 0;
++
++#if defined(AK_OS_SERENITY)
+     auto proc_memstat = Core::File::open("/sys/kernel/memstat"sv, Core::File::OpenMode::Read).release_value_but_fixme_should_propagate_errors();
+ 
+     auto file_contents = proc_memstat->read_until_eof().release_value_but_fixme_should_propagate_errors();
+     auto json_result = JsonValue::from_string(file_contents).release_value_but_fixme_should_propagate_errors();
+     auto const& json = json_result.as_object();
+ 
+-    u32 kmalloc_allocated = json.get_u32("kmalloc_allocated"sv).value_or(0);
+-    u32 kmalloc_available = json.get_u32("kmalloc_available"sv).value_or(0);
+-    u64 physical_allocated = json.get_u64("physical_allocated"sv).value_or(0);
+-    u64 physical_available = json.get_u64("physical_available"sv).value_or(0);
+-    u64 physical_committed = json.get_u64("physical_committed"sv).value_or(0);
+-    u64 physical_uncommitted = json.get_u64("physical_uncommitted"sv).value_or(0);
+-    u32 kmalloc_call_count = json.get_u32("kmalloc_call_count"sv).value_or(0);
+-    u32 kfree_call_count = json.get_u32("kfree_call_count"sv).value_or(0);
++    kmalloc_allocated = json.get_u32("kmalloc_allocated"sv).value_or(0);
++    kmalloc_available = json.get_u32("kmalloc_available"sv).value_or(0);
++    physical_allocated = json.get_u64("physical_allocated"sv).value_or(0);
++    physical_available = json.get_u64("physical_available"sv).value_or(0);
++    physical_committed = json.get_u64("physical_committed"sv).value_or(0);
++    physical_uncommitted = json.get_u64("physical_uncommitted"sv).value_or(0);
++    kmalloc_call_count = json.get_u32("kmalloc_call_count"sv).value_or(0);
++    kfree_call_count = json.get_u32("kfree_call_count"sv).value_or(0);
++#else
++    // Linux: derive the same figures from /proc/meminfo (values are in kB; page
++    // counts are 4 KiB, matching page_count_to_bytes()).
++    auto meminfo = Core::File::open("/proc/meminfo"sv, Core::File::OpenMode::Read);
++    if (!meminfo.is_error()) {
++        auto contents = meminfo.value()->read_until_eof();
++        if (!contents.is_error()) {
++            auto value_kb = [&](StringView key) -> u64 {
++                for (auto line : StringView { contents.value() }.split_view('\n')) {
++                    if (!line.starts_with(key))
++                        continue;
++                    for (auto token : line.substring_view(key.length()).split_view(' '))
++                        return token.to_number<u64>().value_or(0);
++                }
++                return 0;
++            };
++            auto kb_to_pages = [](u64 kb) { return (kb * 1024) / 4096; };
++            u64 mem_total_kb = value_kb("MemTotal:"sv);
++            u64 mem_available_kb = value_kb("MemAvailable:"sv);
++            u64 total_pages = kb_to_pages(mem_total_kb);
++            u64 used_pages = kb_to_pages(mem_total_kb > mem_available_kb ? mem_total_kb - mem_available_kb : 0);
++            physical_allocated = used_pages;
++            physical_available = total_pages > used_pages ? total_pages - used_pages : 0;
++            physical_committed = min(kb_to_pages(value_kb("Committed_AS:"sv)), total_pages);
++            physical_uncommitted = 0;
++        }
++    }
++#endif
+ 
+     u64 kmalloc_bytes_total = kmalloc_allocated + kmalloc_available;
+     u64 physical_pages_total = physical_allocated + physical_available;
+diff --git a/Userland/Applications/SystemMonitor/ProcessModel.cpp b/Userland/Applications/SystemMonitor/ProcessModel.cpp
+index 8369c9b9..20352468 100644
+--- a/Userland/Applications/SystemMonitor/ProcessModel.cpp
++++ b/Userland/Applications/SystemMonitor/ProcessModel.cpp
+@@ -30,6 +30,15 @@ ProcessModel::ProcessModel()
+     VERIFY(!s_the);
+     s_the = this;
+ 
++#if !defined(AK_OS_SERENITY)
++    // Linux: one CpuInfo per online CPU (the /sys/kernel/cpuinfo JSON file is
++    // Serenity-only).
++    long cpu_count = sysconf(_SC_NPROCESSORS_ONLN);
++    if (cpu_count < 1)
++        cpu_count = 1;
++    for (long cpu_id = 0; cpu_id < cpu_count; ++cpu_id)
++        m_cpus.append(make<CpuInfo>(static_cast<u32>(cpu_id)));
++#else
+     auto file_or_error = Core::File::open("/sys/kernel/cpuinfo"sv, Core::File::OpenMode::Read);
+     if (!file_or_error.is_error()) {
+         auto buffer_or_error = file_or_error.value()->read_until_eof();
+@@ -46,6 +55,7 @@ ProcessModel::ProcessModel()
+ 
+     if (m_cpus.is_empty())
+         m_cpus.append(make<CpuInfo>(0));
++#endif
+ 
+     m_kernel_process_icon = GUI::Icon::default_icon("gear"sv);
+ }
+@@ -453,6 +463,7 @@ ErrorOr<void> ProcessModel::ensure_process_statistics_file()
+ 
+ void ProcessModel::update()
+ {
++#if defined(AK_OS_SERENITY)
+     auto result = ensure_process_statistics_file();
+     if (result.is_error()) {
+         dbgln("Process model couldn't be updated: {}", result.release_error());
+@@ -460,6 +471,10 @@ void ProcessModel::update()
+     }
+ 
+     auto all_processes_or_error = Core::ProcessStatisticsReader::get_all(*m_process_statistics_file, true);
++#else
++    // Linux: ProcessStatisticsReader::get_all() reads /proc directly.
++    auto all_processes_or_error = Core::ProcessStatisticsReader::get_all(true);
++#endif
+ 
+     auto previous_tid_count = m_threads.size();
+ 
+diff --git a/Userland/Applications/SystemMonitor/ThreadStackWidget.cpp b/Userland/Applications/SystemMonitor/ThreadStackWidget.cpp
+index 9df72c86..02736ce8 100644
+--- a/Userland/Applications/SystemMonitor/ThreadStackWidget.cpp
++++ b/Userland/Applications/SystemMonitor/ThreadStackWidget.cpp
+@@ -6,17 +6,107 @@
+  */
+ 
+ #include "ThreadStackWidget.h"
++#include <AK/LexicalPath.h>
++#include <AK/StringView.h>
+ #include <LibCore/Timer.h>
+ #include <LibGUI/BoxLayout.h>
+ #include <LibGUI/Model.h>
+ #include <LibGUI/Widget.h>
+-#include <LibSymbolication/Symbolication.h>
+ #include <LibThreading/BackgroundAction.h>
+ 
++#if defined(__linux__)
++// Linux-native thread-stack symbolication. SerenityOS's LibSymbolication/LibDebug
++// are kernel-specific, so on Linux we unwind the target thread with libunwind
++// (ptrace remote access) and resolve addresses with elfutils (libdw). SystemMonitor
++// is a Linux application and knows it.
++#    include <elfutils/libdwfl.h>
++#    include <libunwind-ptrace.h>
++#    include <string.h>
++#    include <unistd.h>
++#endif
++
+ REGISTER_WIDGET(SystemMonitor, ThreadStackWidget)
+ 
+ namespace SystemMonitor {
+ 
++struct StackSymbol {
++    FlatPtr address { 0 };
++    ByteString name {};
++    ByteString object {};
++    u32 offset { 0 };
++    bool operator==(StackSymbol const&) const = default;
++};
++
++#if defined(__linux__)
++
++static StackSymbol resolve_address(Dwfl* dwfl, FlatPtr address)
++{
++    StackSymbol symbol;
++    symbol.address = address;
++
++    auto* module = dwfl_addrmodule(dwfl, address);
++    if (!module)
++        return symbol;
++
++    if (auto const* name = dwfl_module_addrname(module, address))
++        symbol.name = name;
++
++    Dwarf_Addr start = 0;
++    Dwarf_Addr end = 0;
++    char const* mainfile = nullptr;
++    dwfl_module_info(module, nullptr, &start, &end, nullptr, nullptr, &mainfile, nullptr);
++    if (mainfile)
++        symbol.object = LexicalPath::basename(mainfile);
++    if (address >= start)
++        symbol.offset = static_cast<u32>(address - start);
++    return symbol;
++}
++
++static Vector<StackSymbol> symbolize_thread_linux(pid_t pid, pid_t tid)
++{
++    Vector<StackSymbol> symbols;
++
++    Dwfl_Callbacks callbacks {};
++    callbacks.find_elf = dwfl_linux_proc_find_elf;
++    callbacks.find_debuginfo = dwfl_standard_find_debuginfo;
++
++    auto* dwfl = dwfl_begin(&callbacks);
++    if (!dwfl)
++        return symbols;
++    ScopeGuard end_dwfl = [dwfl] { dwfl_end(dwfl); };
++
++    if (dwfl_linux_proc_report(dwfl, pid) != 0)
++        return symbols;
++    dwfl_report_end(dwfl, nullptr, nullptr);
++
++    auto address_space = unw_create_addr_space(&_UPT_accessors, 0);
++    if (!address_space)
++        return symbols;
++    ScopeGuard destroy_as = [address_space] { unw_destroy_addr_space(address_space); };
++
++    auto* upt = _UPT_create(tid);
++    if (!upt)
++        return symbols;
++    ScopeGuard destroy_upt = [upt] { _UPT_destroy(upt); };
++
++    unw_cursor_t cursor;
++    if (unw_init_remote(&cursor, address_space, upt) < 0)
++        return symbols;
++
++    do {
++        unw_word_t ip = 0;
++        if (unw_get_reg(&cursor, UNW_REG_IP, &ip) < 0 || ip == 0)
++            break;
++        symbols.append(resolve_address(dwfl, static_cast<FlatPtr>(ip)));
++    } while (unw_step(&cursor) > 0);
++
++    return symbols;
++}
++
++#else
++static Vector<StackSymbol> symbolize_thread_linux(pid_t, pid_t) { return {}; }
++#endif
++
+ class ThreadStackModel final : public GUI::Model {
+ 
+     enum Column {
+@@ -59,7 +149,7 @@ public:
+         }
+     }
+ 
+-    void set_symbols(Vector<Symbolication::Symbol> const& symbols)
++    void set_symbols(Vector<StackSymbol> const& symbols)
+     {
+         if (m_symbols == symbols)
+             return;
+@@ -68,7 +158,7 @@ public:
+     }
+ 
+ private:
+-    Vector<Symbolication::Symbol> m_symbols;
++    Vector<StackSymbol> m_symbols;
+ };
+ 
+ ErrorOr<NonnullRefPtr<ThreadStackWidget>> ThreadStackWidget::try_create()
+@@ -104,23 +194,23 @@ void ThreadStackWidget::set_ids(pid_t pid, pid_t tid)
+ 
+ class CompletionEvent : public Core::CustomEvent {
+ public:
+-    explicit CompletionEvent(Vector<Symbolication::Symbol> symbols)
++    explicit CompletionEvent(Vector<StackSymbol> symbols)
+         : Core::CustomEvent(0)
+         , m_symbols(move(symbols))
+     {
+     }
+ 
+-    Vector<Symbolication::Symbol> const& symbols() const { return m_symbols; }
++    Vector<StackSymbol> const& symbols() const { return m_symbols; }
+ 
+ private:
+-    Vector<Symbolication::Symbol> m_symbols;
++    Vector<StackSymbol> m_symbols;
+ };
+ 
+ void ThreadStackWidget::refresh()
+ {
+-    (void)Threading::BackgroundAction<Vector<Symbolication::Symbol>>::construct(
++    (void)Threading::BackgroundAction<Vector<StackSymbol>>::construct(
+         [pid = m_pid, tid = m_tid](auto&) {
+-            return Symbolication::symbolicate_thread(pid, tid, Symbolication::IncludeSourcePosition::No);
++            return symbolize_thread_linux(pid, tid);
+         },
+ 
+         [weak_this = make_weak_ptr()](auto result) -> ErrorOr<void> {
+diff --git a/Userland/Applications/SystemMonitor/main.cpp b/Userland/Applications/SystemMonitor/main.cpp
+index 02eb0ab6..04593bd1 100644
+--- a/Userland/Applications/SystemMonitor/main.cpp
++++ b/Userland/Applications/SystemMonitor/main.cpp
+@@ -57,6 +57,21 @@
+ #include <stdio.h>
+ #include <unistd.h>
+ 
++#if defined(__linux__)
++// Linux provides the common mount flags; the Serenity-only ones are stubbed so
++// the storage tab's flag decoding compiles unchanged.
++#    include <sys/mount.h>
++#    ifndef MS_WXALLOWED
++#        define MS_WXALLOWED 0
++#    endif
++#    ifndef MS_AXALLOWED
++#        define MS_AXALLOWED 0
++#    endif
++#    ifndef MS_NOREGULAR
++#        define MS_NOREGULAR 0
++#    endif
++#endif
++
+ static ErrorOr<NonnullRefPtr<GUI::Window>> build_process_window(pid_t);
+ static ErrorOr<void> build_performance_tab(GUI::Widget&);
+ 
+@@ -167,10 +182,10 @@ public:
+                 [](JsonObject const& object) {
+                     return object.get_u64("free_block_count"sv).value_or(0) * object.get_u64("block_size"sv).value_or(0);
+                 });
+-            df_fields.empend("Access"_string, Gfx::TextAlignment::CenterLeft, [](JsonObject const& object) {
++            df_fields.empend("Access"_string, Gfx::TextAlignment::CenterLeft, [](JsonObject const& object) -> GUI::Variant {
+                 bool readonly = object.get_bool("readonly"sv).value_or(false);
+                 int mount_flags = object.get_i32("mount_flags"sv).value_or(0);
+-                return readonly || (mount_flags & MS_RDONLY) ? "Read-only" : "Read/Write";
++                return readonly || (mount_flags & MS_RDONLY) ? "Read-only"_string : "Read/Write"_string;
+             });
+             df_fields.empend("Mount flags"_string, Gfx::TextAlignment::CenterLeft, [](JsonObject const& object) {
+                 int mount_flags = object.get_i32("mount_flags"sv).value_or(0);
+diff --git a/Userland/Libraries/LibCore/ProcessStatisticsReader.cpp b/Userland/Libraries/LibCore/ProcessStatisticsReader.cpp
+index 8a4503f1..48ed3963 100644
+--- a/Userland/Libraries/LibCore/ProcessStatisticsReader.cpp
++++ b/Userland/Libraries/LibCore/ProcessStatisticsReader.cpp
+@@ -12,6 +12,15 @@
+ #include <LibCore/ProcessStatisticsReader.h>
+ #include <pwd.h>
+ 
++#if !defined(AK_OS_SERENITY)
++#    include <AK/ScopeGuard.h>
++#    include <AK/StringView.h>
++#    include <dirent.h>
++#    include <limits.h>
++#    include <stdlib.h>
++#    include <unistd.h>
++#endif
++
+ namespace Core {
+ 
+ HashMap<uid_t, ByteString> ProcessStatisticsReader::s_usernames;
+@@ -89,10 +98,291 @@ ErrorOr<AllProcessesStatistics> ProcessStatisticsReader::get_all(SeekableStream&
+     return all_processes_statistics;
+ }
+ 
++#if !defined(AK_OS_SERENITY)
++
++static ByteString read_link_contents(ByteString const& path)
++{
++    char buffer[PATH_MAX + 1] = {};
++    auto length = ::readlink(path.characters(), buffer, PATH_MAX);
++    if (length < 0)
++        return {};
++    return ByteString { StringView { buffer, static_cast<size_t>(length) } };
++}
++
++static ByteString linux_thread_state_name(char state)
++{
++    switch (state) {
++    case 'R':
++        return "Running";
++    case 'S':
++        return "Sleeping";
++    case 'D':
++        return "Uninterruptible";
++    case 'T':
++        return "Stopped";
++    case 't':
++        return "Tracing";
++    case 'Z':
++        return "Zombie";
++    case 'X':
++        return "Dead";
++    case 'I':
++        return "Idle";
++    default:
++        return ByteString::number(static_cast<int>(state));
++    }
++}
++
++struct LinuxProcStat {
++    char state { '?' };
++    pid_t ppid { 0 };
++    pid_t pgrp { 0 };
++    pid_t session { 0 };
++    unsigned long minflt { 0 };
++    unsigned long majflt { 0 };
++    unsigned long utime { 0 };
++    unsigned long stime { 0 };
++    long priority { 0 };
++    long nice { 0 };
++    long num_threads { 0 };
++    unsigned long starttime { 0 };
++    unsigned long vsize { 0 };
++    long rss { 0 };
++    long processor { 0 };
++    ByteString comm;
++};
++
++// Parse a /proc/<pid>/stat line. The comm field is parenthesised and may itself
++// contain spaces and parentheses, so split on the last ')' and index the tokens
++// that follow (field 3 onwards).
++static Optional<LinuxProcStat> parse_linux_stat(ByteString const& line)
++{
++    auto const* data = line.characters();
++    auto const* open = strchr(data, '(');
++    auto const* close = strrchr(data, ')');
++    if (!open || !close || close < open)
++        return {};
++
++    LinuxProcStat stat;
++    stat.comm = ByteString { StringView { open + 1, static_cast<size_t>(close - open - 1) } };
++
++    Vector<StringView> tokens;
++    for (auto token : StringView { close + 1, strlen(close + 1) }.split_view(' '))
++        tokens.append(token);
++
++    auto field = [&](size_t number) -> Optional<StringView> {
++        // `number` is the 1-based /proc/<pid>/stat field; field 3 is tokens[0].
++        if (number < 3 || number - 3 >= tokens.size())
++            return {};
++        return tokens[number - 3];
++    };
++    auto number = [&](size_t field_number) -> unsigned long {
++        auto token = field(field_number);
++        return token.has_value() ? token->to_number<unsigned long>().value_or(0) : 0;
++    };
++
++    if (tokens.is_empty())
++        return {};
++    stat.state = tokens[0][0];
++    stat.ppid = static_cast<pid_t>(number(4));
++    stat.pgrp = static_cast<pid_t>(number(5));
++    stat.session = static_cast<pid_t>(number(6));
++    stat.minflt = number(10);
++    stat.majflt = number(12);
++    stat.utime = number(14);
++    stat.stime = number(15);
++    stat.priority = static_cast<long>(number(18));
++    stat.nice = static_cast<long>(number(19));
++    stat.num_threads = static_cast<long>(number(20));
++    stat.starttime = number(22);
++    stat.vsize = number(23);
++    stat.rss = static_cast<long>(number(24));
++    stat.processor = static_cast<long>(number(39));
++    return stat;
++}
++
++static ErrorOr<ByteString> read_proc_file(ByteString const& path)
++{
++    auto file = TRY(Core::File::open(path, Core::File::OpenMode::Read));
++    auto contents = TRY(file->read_until_eof());
++    return ByteString { contents.bytes() };
++}
++
++static void parse_status_uid_gid(ByteString const& status, uid_t& uid, gid_t& gid)
++{
++    for (auto line : status.view().split_view('\n')) {
++        StringView prefix;
++        uid_t* target = nullptr;
++        if (line.starts_with("Uid:"sv)) {
++            prefix = "Uid:"sv;
++            target = &uid;
++        } else if (line.starts_with("Gid:"sv)) {
++            prefix = "Gid:"sv;
++            target = &gid;
++        } else {
++            continue;
++        }
++        for (auto token : line.substring_view(prefix.length()).split_view(' ')) {
++            *target = static_cast<uid_t>(token.to_number<unsigned>().value_or(0));
++            break;
++        }
++    }
++}
++
++static unsigned long read_statm_shared(pid_t pid)
++{
++    auto contents = read_proc_file(ByteString::formatted("/proc/{}/statm", pid));
++    if (contents.is_error())
++        return 0;
++    unsigned long size = 0;
++    unsigned long resident = 0;
++    unsigned long shared = 0;
++    sscanf(contents.value().characters(), "%lu %lu %lu", &size, &resident, &shared);
++    return shared;
++}
++
++static void append_linux_threads(ProcessStatistics& process, pid_t pid, u64 ns_per_tick)
++{
++    auto task_dir_path = ByteString::formatted("/proc/{}/task", pid);
++    auto* task_dir = opendir(task_dir_path.characters());
++    if (!task_dir)
++        return;
++    ScopeGuard close_task_dir = [task_dir] { closedir(task_dir); };
++
++    while (auto* entry = readdir(task_dir)) {
++        if (entry->d_name[0] < '0' || entry->d_name[0] > '9')
++            continue;
++        auto tid = static_cast<pid_t>(atoi(entry->d_name));
++        if (tid <= 0)
++            continue;
++        auto stat_contents = read_proc_file(ByteString::formatted("/proc/{}/task/{}/stat", pid, tid));
++        if (stat_contents.is_error())
++            continue;
++        auto parsed = parse_linux_stat(stat_contents.value());
++        if (!parsed.has_value())
++            continue;
++        auto const& stat = parsed.value();
++
++        ThreadStatistics thread {};
++        thread.tid = static_cast<pid_t>(tid);
++        thread.name = stat.comm;
++        thread.state = linux_thread_state_name(stat.state);
++        thread.time_user = stat.utime * ns_per_tick;
++        thread.time_kernel = stat.stime * ns_per_tick;
++        thread.cpu = static_cast<u32>(max(0l, stat.processor));
++        thread.priority = static_cast<u32>(max(0l, stat.priority));
++        thread.inode_faults = static_cast<unsigned>(stat.majflt);
++        thread.zero_faults = static_cast<unsigned>(stat.minflt);
++        process.threads.append(move(thread));
++    }
++}
++
++static ErrorOr<AllProcessesStatistics> get_all_from_linux_proc()
++{
++    AllProcessesStatistics result;
++
++    long ticks_per_second = sysconf(_SC_CLK_TCK);
++    if (ticks_per_second <= 0)
++        ticks_per_second = 100;
++    long page_size = sysconf(_SC_PAGESIZE);
++    if (page_size <= 0)
++        page_size = 4096;
++    u64 const ns_per_tick = 1'000'000'000ull / static_cast<u64>(ticks_per_second);
++
++    unsigned long long boot_time = 0;
++    unsigned long long total_ticks = 0;
++    unsigned long long kernel_ticks = 0;
++    if (auto stat_file = Core::File::open("/proc/stat"sv, Core::File::OpenMode::Read); !stat_file.is_error()) {
++        if (auto contents = stat_file.value()->read_until_eof(); !contents.is_error()) {
++            for (auto line : StringView { contents.value() }.split_view('\n')) {
++                if (line.starts_with("cpu "sv)) {
++                    unsigned long long values[8] = {};
++                    size_t index = 0;
++                    for (auto token : line.substring_view(4).split_view(' ')) {
++                        if (index >= 8)
++                            break;
++                        values[index++] = token.to_number<unsigned long long>().value_or(0);
++                    }
++                    for (size_t i = 0; i < 8; ++i)
++                        total_ticks += values[i];
++                    kernel_ticks = values[2] + values[5] + values[6]; // system, irq, softirq
++                } else if (line.starts_with("btime "sv)) {
++                    boot_time = line.substring_view(6).to_number<unsigned long long>().value_or(0);
++                }
++            }
++        }
++    }
++    result.total_time_scheduled = total_ticks * ns_per_tick;
++    result.total_time_scheduled_kernel = kernel_ticks * ns_per_tick;
++
++    auto* dir = opendir("/proc");
++    if (!dir)
++        return Error::from_errno(errno);
++    ScopeGuard close_dir = [dir] { closedir(dir); };
++
++    while (auto* entry = readdir(dir)) {
++        if (entry->d_name[0] < '0' || entry->d_name[0] > '9')
++            continue;
++        auto pid = static_cast<pid_t>(atoi(entry->d_name));
++        if (pid <= 0)
++            continue;
++
++        auto stat_contents = read_proc_file(ByteString::formatted("/proc/{}/stat", pid));
++        if (stat_contents.is_error())
++            continue;
++        auto parsed = parse_linux_stat(stat_contents.value());
++        if (!parsed.has_value())
++            continue;
++        auto const& stat = parsed.value();
++
++        ProcessStatistics process {};
++        process.pid = pid;
++        process.ppid = stat.ppid;
++        process.pgid = stat.pgrp;
++        process.pgp = stat.pgrp;
++        process.sid = stat.session;
++        process.kernel = false;
++        process.name = stat.comm;
++        process.executable = read_link_contents(ByteString::formatted("/proc/{}/exe", pid));
++        process.amount_virtual = stat.vsize;
++        process.amount_resident = static_cast<size_t>(max(0l, stat.rss)) * static_cast<size_t>(page_size);
++        process.amount_shared = read_statm_shared(pid) * static_cast<size_t>(page_size);
++        process.amount_dirty_private = 0;
++        process.amount_clean_inode = 0;
++        process.amount_purgeable_volatile = 0;
++        process.amount_purgeable_nonvolatile = 0;
++        process.creation_time = UnixDateTime::from_nanoseconds_since_epoch(
++            static_cast<i64>((boot_time + stat.starttime / static_cast<unsigned long>(ticks_per_second)) * 1'000'000'000ull));
++
++        if (auto status = read_proc_file(ByteString::formatted("/proc/{}/status", pid)); !status.is_error())
++            parse_status_uid_gid(status.value(), process.uid, process.gid);
++
++        append_linux_threads(process, pid, ns_per_tick);
++
++        result.processes.append(move(process));
++    }
++
++    return result;
++}
++
++#endif
++
+ ErrorOr<AllProcessesStatistics> ProcessStatisticsReader::get_all(bool include_usernames)
+ {
++#if defined(AK_OS_SERENITY)
+     auto proc_all_file = TRY(Core::File::open("/sys/kernel/processes"sv, Core::File::OpenMode::Read));
+     return get_all(*proc_all_file, include_usernames);
++#else
++    // Linux-native reader: fill the same Core::ProcessStatistics model from
++    // /proc, so SystemMonitor (and anything else) has the same end-user
++    // behaviour without a Serenity /sys/kernel shim.
++    auto result = TRY(get_all_from_linux_proc());
++    if (include_usernames) {
++        for (auto& process : result.processes)
++            process.username = username_from_uid(process.uid);
++    }
++    return result;
++#endif
+ }
+ 
+ ByteString ProcessStatisticsReader::username_from_uid(uid_t uid)
