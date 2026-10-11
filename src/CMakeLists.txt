@@ -186,6 +186,12 @@ target_include_directories(libwm-launch-exec-test PRIVATE "${CMAKE_CURRENT_SOURC
 target_link_options(libwm-launch-exec-test PRIVATE "-Wl,--no-as-needed")
 target_link_libraries(libwm-launch-exec-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibDesktop LibURL windowserver)
 
+# Opens a ComboBox dropdown: regression test for the popup collapsing.
+add_executable(libwm-combo-test test/ComboBoxTest.cpp)
+target_include_directories(libwm-combo-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_options(libwm-combo-test PRIVATE "-Wl,--no-as-needed")
+target_link_libraries(libwm-combo-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC windowserver)
+
 # --- The out-of-process WebContent service ------------------------------------
 # Built from the upstream sources. It is a single-client system service; LibWM
 # spawns it on demand and hands it a socket via SOCKET_TAKEOVER (the same
