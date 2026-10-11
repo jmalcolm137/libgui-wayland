@@ -1,0 +1,117 @@
+diff --git a/Userland/Applications/MouseSettings/ThemeWidget.cpp b/Userland/Applications/MouseSettings/ThemeWidget.cpp
+index 4d3fa458..023cad71 100644
+--- a/Userland/Applications/MouseSettings/ThemeWidget.cpp
++++ b/Userland/Applications/MouseSettings/ThemeWidget.cpp
+@@ -7,14 +7,48 @@
+ #include "ThemeWidget.h"
+ 
+ #include <AK/LexicalPath.h>
++#include <AK/QuickSort.h>
+ #include <LibCore/Directory.h>
+ #include <LibGUI/Button.h>
+ #include <LibGUI/ComboBox.h>
+ #include <LibGUI/ConnectionToWindowServer.h>
+ #include <LibGUI/SortingProxyModel.h>
+ #include <LibGUI/TableView.h>
++#include <stdlib.h>
+ 
+ namespace MouseSettings {
++
++// SDE: the XCursor theme roots (an X11-compatible cursor set), from XCURSOR_PATH
++// or the usual icon directories.
++static Vector<ByteString> xcursor_roots()
++{
++    Vector<ByteString> roots;
++    if (auto const* path = getenv("XCURSOR_PATH"); path && *path) {
++        for (auto& root : ByteString { path }.split(':'))
++            if (!root.is_empty())
++                roots.append(root);
++    } else {
++        if (auto const* home = getenv("HOME"); home && *home) {
++            roots.append(ByteString::formatted("{}/.icons", home));
++            roots.append(ByteString::formatted("{}/.local/share/icons", home));
++        }
++        roots.append("/usr/share/icons"sv);
++        roots.append("/usr/local/share/icons"sv);
++        roots.append("/usr/share/pixmaps"sv);
++    }
++    return roots;
++}
++
++static ByteString xcursor_theme_cursors_dir(ByteString const& theme)
++{
++    for (auto const& root : xcursor_roots()) {
++        auto dir = ByteString::formatted("{}/{}/cursors", root, theme);
++        if (access(dir.characters(), R_OK) == 0)
++            return dir;
++    }
++    return {};
++}
++
+ ErrorOr<String> MouseCursorModel::column_name(int column_index) const
+ {
+     switch (column_index) {
+@@ -50,27 +84,18 @@ void MouseCursorModel::invalidate()
+         return;
+ 
+     m_cursors.clear();
+-    // FIXME: Propagate errors.
+-    (void)Core::Directory::for_each_entry(ByteString::formatted("/res/cursor-themes/{}", m_theme_name), Core::DirIterator::Flags::SkipDots, [&](auto const& entry, auto const& directory) -> ErrorOr<IterationDecision> {
+-        auto path = LexicalPath::join(directory.path().string(), entry.name);
+-        if (path.has_extension(".ini"sv))
+-            return IterationDecision::Continue;
+-        if (path.title().contains("2x"sv))
++    // SDE: list the cursors of the selected XCursor theme. The files are XCursor
++    // archives (not loadable bitmaps), so only the names are shown.
++    auto cursors_dir = xcursor_theme_cursors_dir(m_theme_name);
++    if (!cursors_dir.is_empty()) {
++        // FIXME: Propagate errors.
++        (void)Core::Directory::for_each_entry(cursors_dir, Core::DirIterator::Flags::SkipDots, [&](auto const& entry, auto const&) -> ErrorOr<IterationDecision> {
++            Cursor cursor;
++            cursor.name = entry.name;
++            m_cursors.append(move(cursor));
+             return IterationDecision::Continue;
+-
+-        Cursor cursor;
+-        cursor.path = path.string();
+-        cursor.name = path.basename();
+-
+-        // FIXME: Animated cursor bitmaps
+-        auto cursor_bitmap = Gfx::Bitmap::load_from_file(cursor.path).release_value_but_fixme_should_propagate_errors();
+-        auto cursor_bitmap_rect = cursor_bitmap->rect();
+-        cursor.params = Gfx::CursorParams::parse_from_filename(cursor.name, cursor_bitmap_rect.center()).constrained(*cursor_bitmap);
+-        cursor.bitmap = cursor_bitmap->cropped(Gfx::IntRect(Gfx::FloatRect(cursor_bitmap_rect).scaled(1.0 / cursor.params.frames(), 1.0))).release_value_but_fixme_should_propagate_errors();
+-
+-        m_cursors.append(move(cursor));
+-        return IterationDecision::Continue;
+-    });
++        });
++    }
+ 
+     Model::invalidate();
+ }
+@@ -88,11 +113,19 @@ void ThemeModel::invalidate()
+     m_themes.clear();
+ 
+     // FIXME: Propagate errors.
+-    (void)Core::Directory::for_each_entry("/res/cursor-themes"sv, Core::DirIterator::Flags::SkipDots, [&](auto const& entry, auto&) -> ErrorOr<IterationDecision> {
+-        if (access(ByteString::formatted("/res/cursor-themes/{}/Config.ini", entry.name).characters(), R_OK) == 0)
+-            m_themes.append(entry.name);
+-        return IterationDecision::Continue;
+-    });
++    for (auto const& root : xcursor_roots()) {
++        (void)Core::Directory::for_each_entry(root, Core::DirIterator::Flags::SkipDots, [&](auto const& entry, auto const& directory) -> ErrorOr<IterationDecision> {
++            auto cursors = ByteString::formatted("{}/cursors", LexicalPath::join(directory.path().string(), entry.name));
++            if (access(cursors.characters(), R_OK) == 0 && !m_themes.contains_slow(entry.name))
++                m_themes.append(entry.name);
++            return IterationDecision::Continue;
++        });
++    }
++
++    quick_sort(m_themes);
++    // "Default" means "use the system default XCursor theme".
++    if (!m_themes.contains_slow("Default"sv))
++        m_themes.prepend("Default"sv);
+ 
+     Model::invalidate();
+ }
