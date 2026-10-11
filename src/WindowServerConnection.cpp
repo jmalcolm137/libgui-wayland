@@ -868,6 +868,44 @@ Messages::WindowServer::GetPreferredColorSchemeResponse WindowServerConnection::
 
 Messages::WindowServer::GetScreenLayoutResponse WindowServerConnection::get_screen_layout()
 {
+    // R4.5: the compositor keeps the live layout in screenlayout.ini (the Serenity
+    // ScreenLayout format). Read it so DisplaySettings' Monitor tab shows reality;
+    // fall back to a single synthetic screen when it is absent/unreadable.
+    auto config = Core::ConfigFile::open(sde_state_file("screenlayout.ini"sv));
+    if (!config.is_error()) {
+        auto& file = *config.value();
+        WindowServer::ScreenLayout layout;
+        layout.main_screen_index = file.read_num_entry<unsigned>("Screens"sv, "MainScreen"sv, 0);
+        for (size_t index = 0;; ++index) {
+            auto group = ByteString::formatted("Screen{}", index);
+            if (!file.has_group(group))
+                break;
+            auto mode_string = file.read_entry(group, "Mode"sv);
+            auto mode = WindowServer::ScreenLayout::Screen::Mode::Invalid;
+            if (mode_string == "Device"sv)
+                mode = WindowServer::ScreenLayout::Screen::Mode::Device;
+            else if (mode_string == "Virtual"sv)
+                mode = WindowServer::ScreenLayout::Screen::Mode::Virtual;
+            if (mode == WindowServer::ScreenLayout::Screen::Mode::Invalid) {
+                layout = {};
+                break;
+            }
+            Optional<ByteString> device;
+            if (mode == WindowServer::ScreenLayout::Screen::Mode::Device)
+                device = file.read_entry(group, "Device"sv);
+            WindowServer::ScreenLayout::Screen screen {
+                .mode = mode,
+                .device = move(device),
+                .location = { file.read_num_entry<int>(group, "Left"sv, 0), file.read_num_entry<int>(group, "Top"sv, 0) },
+                .resolution = { file.read_num_entry<int>(group, "Width"sv, 0), file.read_num_entry<int>(group, "Height"sv, 0) },
+                .scale_factor = file.read_num_entry<int>(group, "ScaleFactor"sv, 1),
+            };
+            layout.screens.append(move(screen));
+        }
+        if (!layout.screens.is_empty())
+            return layout;
+    }
+
     WindowServer::ScreenLayout layout;
     WindowServer::ScreenLayout::Screen screen {
         .mode = WindowServer::ScreenLayout::Screen::Mode::Device,
@@ -881,10 +919,33 @@ Messages::WindowServer::GetScreenLayoutResponse WindowServerConnection::get_scre
     return layout;
 }
 
-Messages::WindowServer::SetScreenLayoutResponse WindowServerConnection::set_screen_layout(WindowServer::ScreenLayout const&, bool)
+Messages::WindowServer::SetScreenLayoutResponse WindowServerConnection::set_screen_layout(WindowServer::ScreenLayout const& screen_layout, bool save)
 {
-    // Screen configuration is not honoured by the host compositor yet; report
-    // success so Display Settings' Monitor tab stays usable.
+    // R4.5: hand the layout to the compositor by writing screenlayout.ini; the
+    // compositor watches it and applies mode/scale/position. `save` only controls
+    // whether Serenity would persist it, and here the file *is* the channel.
+    (void)save;
+    (void)Core::Directory::create(sde_state_dir(), Core::Directory::CreateDirectories::Yes);
+    auto config = Core::ConfigFile::open(sde_state_file("screenlayout.ini"sv), Core::ConfigFile::AllowWriting::Yes);
+    if (config.is_error())
+        return { false, ByteString { "could not write screenlayout.ini" } };
+
+    auto& file = *config.value();
+    file.write_num_entry("Screens"sv, "MainScreen"sv, screen_layout.main_screen_index);
+    for (size_t index = 0; index < screen_layout.screens.size(); ++index) {
+        auto const& screen = screen_layout.screens[index];
+        auto group = ByteString::formatted("Screen{}", index);
+        file.write_entry(group, "Mode"sv, WindowServer::ScreenLayout::Screen::mode_to_string(screen.mode));
+        if (screen.mode == WindowServer::ScreenLayout::Screen::Mode::Device && screen.device.has_value())
+            file.write_entry(group, "Device"sv, screen.device.value());
+        file.write_num_entry(group, "Left"sv, screen.location.x());
+        file.write_num_entry(group, "Top"sv, screen.location.y());
+        file.write_num_entry(group, "Width"sv, screen.resolution.width());
+        file.write_num_entry(group, "Height"sv, screen.resolution.height());
+        file.write_num_entry(group, "ScaleFactor"sv, screen.scale_factor);
+    }
+    if (file.sync().is_error())
+        return { false, ByteString { "could not sync screenlayout.ini" } };
     return { true, {} };
 }
 
