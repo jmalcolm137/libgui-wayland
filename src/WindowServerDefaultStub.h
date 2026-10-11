@@ -103,6 +103,14 @@ public:
     virtual Messages::WindowServer::AreMouseButtonsSwitchedResponse are_mouse_buttons_switched() override { return Messages::WindowServer::AreMouseButtonsSwitchedResponse(nullptr); }
     virtual void set_natural_scroll([[maybe_unused]] bool inverted) override { }
     virtual Messages::WindowServer::IsNaturalScrollResponse is_natural_scroll() override { return Messages::WindowServer::IsNaturalScrollResponse(nullptr); }
+    virtual Messages::WindowServer::GetMouseAccelerationMinResponse get_mouse_acceleration_min() override { return Messages::WindowServer::GetMouseAccelerationMinResponse(0.5f); }
+    virtual Messages::WindowServer::GetMouseAccelerationMaxResponse get_mouse_acceleration_max() override { return Messages::WindowServer::GetMouseAccelerationMaxResponse(3.5f); }
+    virtual Messages::WindowServer::GetScrollStepSizeMinResponse get_scroll_step_size_min() override { return Messages::WindowServer::GetScrollStepSizeMinResponse(1u); }
+    virtual Messages::WindowServer::GetDoubleClickSpeedMinResponse get_double_click_speed_min() override { return Messages::WindowServer::GetDoubleClickSpeedMinResponse(100); }
+    virtual Messages::WindowServer::GetDoubleClickSpeedMaxResponse get_double_click_speed_max() override { return Messages::WindowServer::GetDoubleClickSpeedMaxResponse(900); }
+    virtual Messages::WindowServer::GetKeyboardLayoutResponse get_keyboard_layout() override { return Messages::WindowServer::GetKeyboardLayoutResponse({}, {}, {}, {}); }
+    virtual void set_keyboard_layout([[maybe_unused]] ByteString const& layouts, [[maybe_unused]] ByteString const& variant, [[maybe_unused]] ByteString const& model, [[maybe_unused]] ByteString const& options) override { }
+    virtual Messages::WindowServer::GetKeyboardLayoutNamesResponse get_keyboard_layout_names() override { return Messages::WindowServer::GetKeyboardLayoutNamesResponse({}); }
     virtual Messages::WindowServer::GetDesktopDisplayScaleResponse get_desktop_display_scale([[maybe_unused]] u32 screen_index) override { return Messages::WindowServer::GetDesktopDisplayScaleResponse(nullptr); }
     virtual void set_flash_flush([[maybe_unused]] bool enabled) override { }
     virtual void set_window_parent_from_client([[maybe_unused]] i32 client_id, [[maybe_unused]] i32 parent_id, [[maybe_unused]] i32 child_id) override { }

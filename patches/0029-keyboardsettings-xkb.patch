@@ -1,0 +1,113 @@
+diff --git a/Userland/Applications/KeyboardSettings/CMakeLists.txt b/Userland/Applications/KeyboardSettings/CMakeLists.txt
+index e87afc77..8582711f 100644
+--- a/Userland/Applications/KeyboardSettings/CMakeLists.txt
++++ b/Userland/Applications/KeyboardSettings/CMakeLists.txt
+@@ -15,4 +15,4 @@ set(SOURCES
+ )
+ 
+ serenity_app(KeyboardSettings ICON app-keyboard-settings)
+-target_link_libraries(KeyboardSettings PRIVATE LibCore LibGfx LibGUI LibKeyboard LibConfig LibMain)
++target_link_libraries(KeyboardSettings PRIVATE LibCore LibGfx LibGUI LibIPC LibKeyboard LibConfig LibMain)
+diff --git a/Userland/Applications/KeyboardSettings/KeyboardSettingsWidget.cpp b/Userland/Applications/KeyboardSettings/KeyboardSettingsWidget.cpp
+index 48636eb8..b6753c0e 100644
+--- a/Userland/Applications/KeyboardSettings/KeyboardSettingsWidget.cpp
++++ b/Userland/Applications/KeyboardSettings/KeyboardSettingsWidget.cpp
+@@ -16,6 +16,7 @@
+ #include <LibFileSystem/FileSystem.h>
+ #include <LibGUI/Application.h>
+ #include <LibGUI/ComboBox.h>
++#include <LibGUI/ConnectionToWindowServer.h>
+ #include <LibGUI/Dialog.h>
+ #include <LibGUI/ItemListModel.h>
+ #include <LibGUI/Label.h>
+@@ -72,16 +73,11 @@ private:
+ 
+         set_icon(parent_window->icon());
+ 
+-        auto iterator_result = Core::Directory::for_each_entry("/res/keymaps/"sv, Core::DirIterator::Flags::SkipDots, [&](auto const& entry, auto&) -> ErrorOr<IterationDecision> {
+-            auto basename = entry.name.replace(".json"sv, ""sv, ReplaceMode::FirstOnly);
+-            if (selected_keymaps.find(basename).is_end())
+-                m_character_map_files.append(basename);
+-            return IterationDecision::Continue;
+-        });
+-
+-        if (iterator_result.is_error()) {
+-            GUI::MessageBox::show(nullptr, ByteString::formatted("Error on reading mapping file list: {}", iterator_result.error()), "Keyboard settings"sv, GUI::MessageBox::Type::Error);
+-            GUI::Application::the()->quit(-1);
++        // SDE: the available layouts come from xkb (via the WindowServer
++        // protocol), not the SerenityOS /res/keymaps files.
++        for (auto& name : GUI::ConnectionToWindowServer::the().get_keyboard_layout_names()) {
++            if (selected_keymaps.find(name).is_end())
++                m_character_map_files.append(name);
+         }
+ 
+         quick_sort(m_character_map_files);
+@@ -170,19 +166,14 @@ ErrorOr<NonnullRefPtr<KeyboardSettingsWidget>> KeyboardSettingsWidget::create()
+ 
+ ErrorOr<void> KeyboardSettingsWidget::setup()
+ {
+-    auto proc_keymap = TRY(Core::File::open("/sys/kernel/keymap"sv, Core::File::OpenMode::Read));
+-
+-    auto keymap = TRY(proc_keymap->read_until_eof());
+-    auto json = TRY(JsonValue::from_string(keymap));
+-    auto const& keymap_object = json.as_object();
+-    VERIFY(keymap_object.has("keymap"sv));
+-    m_initial_active_keymap = keymap_object.get_byte_string("keymap"sv).value();
+-    dbgln("KeyboardSettings thinks the current keymap is: {}", m_initial_active_keymap);
+-
+-    auto mapper_config(TRY(Core::ConfigFile::open("/etc/Keyboard.ini")));
+-    auto keymaps = mapper_config->read_entry("Mapping", "Keymaps", "");
+-
+-    auto keymaps_vector = keymaps.split(',');
++    // SDE: the current layout comes from xkb (via the WindowServer protocol),
++    // not the SerenityOS kernel.
++    auto layout = GUI::ConnectionToWindowServer::the().get_keyboard_layout();
++    auto keymaps_vector = layout.layouts().split(',');
++    if (keymaps_vector.is_empty())
++        keymaps_vector.append("us");
++    m_initial_active_keymap = keymaps_vector.first();
++    dbgln("KeyboardSettings thinks the current layout is: {}", m_initial_active_keymap);
+ 
+     m_selected_keymaps_listview = find_descendant_of_type_named<GUI::ListView>("selected_keymaps");
+     m_selected_keymaps_listview->horizontal_scrollbar().set_visible(false);
+@@ -318,25 +309,28 @@ void KeyboardSettingsWidget::apply_settings()
+ 
+ void KeyboardSettingsWidget::set_keymaps(Vector<ByteString> const& keymaps, ByteString const& active_keymap)
+ {
+-    auto keymaps_string = ByteString::join(',', keymaps);
+-    GUI::Process::spawn_or_show_error(window(), "/bin/keymap"sv, Array { "-s", keymaps_string.characters(), "-m", active_keymap.characters() });
++    // SDE: apply the layouts by writing the SDE keyboard config (the compositor
++    // builds the xkb keymap from it), with the active layout first.
++    Vector<ByteString> ordered;
++    if (!active_keymap.is_empty())
++        ordered.append(active_keymap);
++    for (auto& keymap : keymaps) {
++        if (keymap != active_keymap)
++            ordered.append(keymap);
++    }
++    auto current = GUI::ConnectionToWindowServer::the().get_keyboard_layout();
++    GUI::ConnectionToWindowServer::the().async_set_keyboard_layout(ByteString::join(',', ordered), current.variant(), current.model(), current.options());
+ }
+ 
+-void KeyboardSettingsWidget::write_caps_lock_to_ctrl_sys_variable(bool caps_lock_to_ctrl)
++void KeyboardSettingsWidget::write_caps_lock_to_ctrl_sys_variable(bool)
+ {
+-    if (getuid() != 0)
+-        return;
+-
+-    auto write_command = ByteString::formatted("caps_lock_to_ctrl={}", caps_lock_to_ctrl ? "1" : "0");
+-    GUI::Process::spawn_or_show_error(window(), "/bin/sysctl"sv, Array { "-w", write_command.characters() });
++    // SDE: Caps Lock remapping is not a host kernel setting; it becomes an xkb
++    // option in R4.7.
+ }
+ 
+ ErrorOr<bool> KeyboardSettingsWidget::read_caps_lock_to_ctrl_sys_variable()
+ {
+-    auto file = TRY(Core::File::open("/sys/kernel/conf/caps_lock_to_ctrl"sv, Core::File::OpenMode::Read));
+-    auto buffer = TRY(file->read_until_eof());
+-    StringView contents_string((char const*)buffer.data(), min(1, buffer.size()));
+-    return contents_string == "1";
++    return false;
+ }
+ 
+ }

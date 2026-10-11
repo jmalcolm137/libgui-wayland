@@ -7,6 +7,7 @@
 #include "WindowServerConnection.h"
 #include "WaylandClient.h"
 #include <AK/LexicalPath.h>
+#include <AK/QuickSort.h>
 #include <LibCore/AnonymousBuffer.h>
 #include <LibCore/ConfigFile.h>
 #include <LibCore/Directory.h>
@@ -56,6 +57,48 @@ ByteBuffer read_sde_state_bytes(StringView name)
     if (contents.is_error())
         return {};
     return contents.release_value();
+}
+
+// Input settings (R4.6): a small input.ini the compositor watches and applies to
+// the (libinput) devices. Mouse Settings reads and writes it through here.
+ByteString read_input_entry(StringView group, StringView key, StringView fallback)
+{
+    auto config = Core::ConfigFile::open(sde_state_file("input.ini"sv));
+    if (config.is_error())
+        return ByteString { fallback };
+    auto value = config.value()->read_entry(group, key);
+    return value.is_empty() ? ByteString { fallback } : value;
+}
+
+void write_input_entry(StringView group, StringView key, StringView value)
+{
+    (void)Core::Directory::create(sde_state_dir(), Core::Directory::CreateDirectories::Yes);
+    auto config = Core::ConfigFile::open(sde_state_file("input.ini"sv), Core::ConfigFile::AllowWriting::Yes);
+    if (config.is_error())
+        return;
+    config.value()->write_entry(group, key, value);
+    (void)config.value()->sync();
+}
+
+// Cursor theme/highlight (cursor.ini): Mouse Settings' Highlight/Theme tabs. The
+// compositor applies these to the real cursor/highlight in R4.7.
+ByteString read_cursor_entry(StringView group, StringView key, StringView fallback)
+{
+    auto config = Core::ConfigFile::open(sde_state_file("cursor.ini"sv));
+    if (config.is_error())
+        return ByteString { fallback };
+    auto value = config.value()->read_entry(group, key);
+    return value.is_empty() ? ByteString { fallback } : value;
+}
+
+void write_cursor_entry(StringView group, StringView key, StringView value)
+{
+    (void)Core::Directory::create(sde_state_dir(), Core::Directory::CreateDirectories::Yes);
+    auto config = Core::ConfigFile::open(sde_state_file("cursor.ini"sv), Core::ConfigFile::AllowWriting::Yes);
+    if (config.is_error())
+        return;
+    config.value()->write_entry(group, key, value);
+    (void)config.value()->sync();
 }
 
 // The wallpaper state is stored as raw pixels, not a PNG: encoding a full-screen
@@ -163,6 +206,36 @@ static unsigned workspace_dimension(StringView key, unsigned fallback)
             return static_cast<unsigned>(value.value());
     }
     return fallback;
+}
+
+// R4.6: input-setting bounds from WindowServer.ini [Input] (the SDE config
+// schema, the same file the compositor reads). Returns the raw entry so callers
+// can parse the type they need.
+static ByteString input_range_entry(StringView key)
+{
+    ByteString user_path;
+    if (auto const* dir = getenv("SDE_STATE_DIR"); dir && *dir)
+        user_path = ByteString::formatted("{}/WindowServer.ini", dir);
+    else if (auto const* config = getenv("XDG_CONFIG_HOME"); config && *config)
+        user_path = ByteString::formatted("{}/sde/WindowServer.ini", config);
+    else if (auto const* home = getenv("HOME"); home && *home)
+        user_path = ByteString::formatted("{}/.config/sde/WindowServer.ini", home);
+
+    ByteString default_path;
+    if (auto const* root = getenv("SERENITY_RES_ROOT"); root && *root)
+        default_path = ByteString::formatted("{}/../etc/WindowServer.ini", root);
+
+    for (auto const& path : { user_path, default_path }) {
+        if (path.is_empty())
+            continue;
+        auto config = Core::ConfigFile::open(path);
+        if (config.is_error())
+            continue;
+        auto value = config.value()->read_entry("Input"sv, key);
+        if (!value.is_empty())
+            return value;
+    }
+    return {};
 }
 
 void WindowServerConnection::send_fast_greet()
@@ -952,6 +1025,172 @@ Messages::WindowServer::SetScreenLayoutResponse WindowServerConnection::set_scre
 Messages::WindowServer::SaveScreenLayoutResponse WindowServerConnection::save_screen_layout()
 {
     return { true, {} };
+}
+
+// --- mouse/pointer settings (R4.6) -----------------------------------------
+
+void WindowServerConnection::set_mouse_acceleration(float factor)
+{
+    write_input_entry("Mouse"sv, "Acceleration"sv, ByteString::formatted("{}", factor));
+}
+
+Messages::WindowServer::GetMouseAccelerationResponse WindowServerConnection::get_mouse_acceleration()
+{
+    return read_input_entry("Mouse"sv, "Acceleration"sv, "1.0"sv).to_number<double>().value_or(1.0);
+}
+
+void WindowServerConnection::set_scroll_step_size(u32 step_size)
+{
+    write_input_entry("Mouse"sv, "ScrollStepSize"sv, ByteString::number(step_size));
+}
+
+Messages::WindowServer::GetScrollStepSizeResponse WindowServerConnection::get_scroll_step_size()
+{
+    return read_input_entry("Mouse"sv, "ScrollStepSize"sv, "1"sv).to_number<u32>().value_or(1);
+}
+
+void WindowServerConnection::set_double_click_speed(int speed)
+{
+    m_double_click_speed = speed;
+    write_input_entry("Mouse"sv, "DoubleClickSpeed"sv, ByteString::number(speed));
+}
+
+Messages::WindowServer::GetDoubleClickSpeedResponse WindowServerConnection::get_double_click_speed()
+{
+    m_double_click_speed = read_input_entry("Mouse"sv, "DoubleClickSpeed"sv, "250"sv).to_number<int>().value_or(250);
+    return m_double_click_speed;
+}
+
+void WindowServerConnection::set_mouse_buttons_switched(bool switched)
+{
+    write_input_entry("Mouse"sv, "ButtonsSwitched"sv, switched ? "true"sv : "false"sv);
+}
+
+Messages::WindowServer::AreMouseButtonsSwitchedResponse WindowServerConnection::are_mouse_buttons_switched()
+{
+    return read_input_entry("Mouse"sv, "ButtonsSwitched"sv, "false"sv) == "true"sv;
+}
+
+void WindowServerConnection::set_natural_scroll(bool inverted)
+{
+    write_input_entry("Mouse"sv, "NaturalScroll"sv, inverted ? "true"sv : "false"sv);
+}
+
+Messages::WindowServer::IsNaturalScrollResponse WindowServerConnection::is_natural_scroll()
+{
+    return read_input_entry("Mouse"sv, "NaturalScroll"sv, "false"sv) == "true"sv;
+}
+
+Messages::WindowServer::GetMouseAccelerationMinResponse WindowServerConnection::get_mouse_acceleration_min()
+{
+    return static_cast<float>(input_range_entry("AccelMin"sv).to_number<double>().value_or(0.5));
+}
+
+Messages::WindowServer::GetMouseAccelerationMaxResponse WindowServerConnection::get_mouse_acceleration_max()
+{
+    return static_cast<float>(input_range_entry("AccelMax"sv).to_number<double>().value_or(3.5));
+}
+
+Messages::WindowServer::GetScrollStepSizeMinResponse WindowServerConnection::get_scroll_step_size_min()
+{
+    return input_range_entry("ScrollStepMin"sv).to_number<u32>().value_or(1);
+}
+
+Messages::WindowServer::GetDoubleClickSpeedMinResponse WindowServerConnection::get_double_click_speed_min()
+{
+    return input_range_entry("DoubleClickMin"sv).to_number<int>().value_or(100);
+}
+
+Messages::WindowServer::GetDoubleClickSpeedMaxResponse WindowServerConnection::get_double_click_speed_max()
+{
+    return input_range_entry("DoubleClickMax"sv).to_number<int>().value_or(900);
+}
+
+Messages::WindowServer::GetCursorThemeResponse WindowServerConnection::get_cursor_theme()
+{
+    return read_cursor_entry("Cursor"sv, "Theme"sv, "Default"sv);
+}
+
+void WindowServerConnection::apply_cursor_theme(ByteString const& name)
+{
+    write_cursor_entry("Cursor"sv, "Theme"sv, name);
+}
+
+Messages::WindowServer::GetCursorHighlightRadiusResponse WindowServerConnection::get_cursor_highlight_radius()
+{
+    return read_cursor_entry("Highlight"sv, "Radius"sv, "0"sv).to_number<int>().value_or(0);
+}
+
+void WindowServerConnection::set_cursor_highlight_radius(int radius)
+{
+    write_cursor_entry("Highlight"sv, "Radius"sv, ByteString::number(radius));
+}
+
+Messages::WindowServer::GetCursorHighlightColorResponse WindowServerConnection::get_cursor_highlight_color()
+{
+    if (auto color = Gfx::Color::from_string(read_cursor_entry("Highlight"sv, "Color"sv, "#000000"sv)); color.has_value())
+        return color.value();
+    return Gfx::Color::Black;
+}
+
+void WindowServerConnection::set_cursor_highlight_color(Gfx::Color color)
+{
+    write_cursor_entry("Highlight"sv, "Color"sv, color.to_byte_string());
+}
+
+Messages::WindowServer::GetKeyboardLayoutResponse WindowServerConnection::get_keyboard_layout()
+{
+    return { read_input_entry("Keyboard"sv, "Layouts"sv, "us"sv),
+        read_input_entry("Keyboard"sv, "Variant"sv, ""sv),
+        read_input_entry("Keyboard"sv, "Model"sv, "pc105"sv),
+        read_input_entry("Keyboard"sv, "Options"sv, ""sv) };
+}
+
+void WindowServerConnection::set_keyboard_layout(ByteString const& layouts, ByteString const& variant, ByteString const& model, ByteString const& options)
+{
+    write_input_entry("Keyboard"sv, "Layouts"sv, layouts);
+    write_input_entry("Keyboard"sv, "Variant"sv, variant);
+    write_input_entry("Keyboard"sv, "Model"sv, model);
+    write_input_entry("Keyboard"sv, "Options"sv, options);
+}
+
+Messages::WindowServer::GetKeyboardLayoutNamesResponse WindowServerConnection::get_keyboard_layout_names()
+{
+    Vector<ByteString> names;
+    // Prefer the canonical xkb list: the [! layout] section of evdev.lst.
+    if (auto file = Core::File::open("/usr/share/X11/xkb/rules/evdev.lst"sv, Core::File::OpenMode::Read); !file.is_error()) {
+        if (auto contents = file.value()->read_until_eof(); !contents.is_error()) {
+            bool in_layout = false;
+            StringView text { contents.value().bytes() };
+            for (auto line : text.split_view('\n')) {
+                if (line.starts_with("! "sv)) {
+                    in_layout = line.starts_with("! layout"sv);
+                    continue;
+                }
+                if (!in_layout)
+                    continue;
+                auto trimmed = line.trim_whitespace(TrimMode::Left);
+                if (trimmed.is_empty())
+                    continue;
+                names.append(trimmed.split_view(' ').first());
+            }
+        }
+    }
+    if (names.is_empty()) {
+        (void)Core::Directory::for_each_entry("/usr/share/X11/xkb/symbols"sv, Core::DirIterator::Flags::SkipDots, [&](auto const& entry, auto&) -> ErrorOr<IterationDecision> {
+            if (!entry.name.starts_with("_"sv))
+                names.append(entry.name);
+            return IterationDecision::Continue;
+        });
+    }
+    names.append("us"sv);
+    quick_sort(names);
+    Vector<ByteString> unique;
+    for (auto& name : names) {
+        if (unique.is_empty() || unique.last() != name)
+            unique.append(move(name));
+    }
+    return unique;
 }
 
 Messages::WindowServer::SetSystemFontsResponse WindowServerConnection::set_system_fonts(ByteString const&, ByteString const&, ByteString const&)

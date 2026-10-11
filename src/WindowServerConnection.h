@@ -146,6 +146,39 @@ private:
     Messages::WindowServer::ApplyWorkspaceSettingsResponse apply_workspace_settings(u32 rows, u32 columns, bool save) override;
     Messages::WindowServer::GetSystemThemeOverrideResponse get_system_theme_override() override;
 
+    // Mouse/pointer settings (Mouse Settings, R4.6). Backed by input.ini in the
+    // shared state directory, which the compositor watches and applies to the
+    // (libinput) devices.
+    void set_mouse_acceleration(float factor) override;
+    Messages::WindowServer::GetMouseAccelerationResponse get_mouse_acceleration() override;
+    void set_scroll_step_size(u32 step_size) override;
+    Messages::WindowServer::GetScrollStepSizeResponse get_scroll_step_size() override;
+    void set_double_click_speed(int speed) override;
+    Messages::WindowServer::GetDoubleClickSpeedResponse get_double_click_speed() override;
+    void set_mouse_buttons_switched(bool switched) override;
+    Messages::WindowServer::AreMouseButtonsSwitchedResponse are_mouse_buttons_switched() override;
+    void set_natural_scroll(bool inverted) override;
+    Messages::WindowServer::IsNaturalScrollResponse is_natural_scroll() override;
+    Messages::WindowServer::GetMouseAccelerationMinResponse get_mouse_acceleration_min() override;
+    Messages::WindowServer::GetMouseAccelerationMaxResponse get_mouse_acceleration_max() override;
+    Messages::WindowServer::GetScrollStepSizeMinResponse get_scroll_step_size_min() override;
+    Messages::WindowServer::GetDoubleClickSpeedMinResponse get_double_click_speed_min() override;
+    Messages::WindowServer::GetDoubleClickSpeedMaxResponse get_double_click_speed_max() override;
+
+    // Cursor theme/highlight (Mouse Settings, R4.6 groundwork; the compositor
+    // applies these in R4.7). Backed by cursor.ini in the state directory.
+    Messages::WindowServer::GetCursorThemeResponse get_cursor_theme() override;
+    void apply_cursor_theme(ByteString const& name) override;
+    Messages::WindowServer::GetCursorHighlightRadiusResponse get_cursor_highlight_radius() override;
+    void set_cursor_highlight_radius(int radius) override;
+    Messages::WindowServer::GetCursorHighlightColorResponse get_cursor_highlight_color() override;
+    void set_cursor_highlight_color(Gfx::Color color) override;
+
+    // Keyboard layouts (Keyboard Settings, R4.6). Backed by input.ini [Keyboard].
+    Messages::WindowServer::GetKeyboardLayoutResponse get_keyboard_layout() override;
+    void set_keyboard_layout(ByteString const& layouts, ByteString const& variant, ByteString const& model, ByteString const& options) override;
+    Messages::WindowServer::GetKeyboardLayoutNamesResponse get_keyboard_layout_names() override;
+
     // Broadcasts theme changes between processes (each app has its own
     // WindowServer shim) via a shared file the compositor and clients watch.
     void watch_theme();
