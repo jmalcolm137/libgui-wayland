@@ -193,28 +193,23 @@ void WindowServerConnection::send_fast_greet()
     unsigned const workspace_rows = workspace_dimension("Rows"sv, 1);
     unsigned const workspace_columns = workspace_dimension("Columns"sv, 1);
 
-    // Client-side HiDPI: rasterise at the compositor's output scale so text is
-    // crisp on any compositor, with no SDE-specific protocol. Set
-    // SDE_CLIENT_SCALE=0 to force 1x (debugging).
+    // Client-side HiDPI: rasterise at the compositor's output scale so windows are
+    // drawn at native resolution on any compositor, with no SDE-specific protocol.
+    // Fonts stay as they are (the fixed bitmap family); glyphs are scaled along
+    // with everything else, keeping the UI in proportion. Set SDE_CLIENT_SCALE=0 to
+    // force 1x (debugging).
     int client_scale = wayland.output_scale();
     if (auto const* env = getenv("SDE_CLIENT_SCALE"); env && *env && *env == '0')
         client_scale = 1;
     GUI::Window::set_backing_store_scale(client_scale);
 
-    // At >1x prefer scalable fonts so glyphs rasterise at the backing-store scale
-    // instead of upscaling the fixed bitmap family.
-    bool const hi_dpi = client_scale > 1;
-    ByteString const default_font = hi_dpi ? ByteString { "Liberation Sans 10 400 0" } : ByteString { "Katica 10 400 0" };
-    ByteString const fixed_width_font = hi_dpi ? ByteString { "Liberation Mono 10 400 0" } : ByteString { "Csilla 10 400 0" };
-    ByteString const title_font = hi_dpi ? ByteString { "Liberation Sans 10 700 0" } : ByteString { "Katica 10 700 0" };
-
     async_fast_greet(
         move(screen_rects),
         0, workspace_rows, workspace_columns,
         Gfx::current_system_theme_buffer(),
-        default_font,
-        fixed_width_font,
-        title_font,
+        "Katica 10 400 0"sv,
+        "Csilla 10 400 0"sv,
+        "Katica 10 700 0"sv,
         move(effects),
         m_client_id);
 }
