@@ -172,6 +172,13 @@ target_include_directories(libwm-font-parity-test PRIVATE "${CMAKE_CURRENT_SOURC
 target_link_options(libwm-font-parity-test PRIVATE "-Wl,--no-as-needed")
 target_link_libraries(libwm-font-parity-test PRIVATE LibMain LibGfx LibCore)
 
+# Guards the Linux ProcessStatisticsReader's per-CPU CPU-time accounting: the
+# total must advance at ~wall-clock rate, so a busy core reads ~100% (not
+# ~100/ncpu). See patches/0025.
+add_executable(libwm-procstat-test test/ProcStatTest.cpp)
+target_include_directories(libwm-procstat-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(libwm-procstat-test PRIVATE LibMain LibCore)
+
 # HiDPI fine-detail repro: a widget drawing full-width rects and thin/thick lines,
 # dumped at 1x and 2x to find ops that don't scale (see docs/03 D7).
 add_executable(libwm-hidpi-detail-test test/HiDpiDetailTest.cpp)

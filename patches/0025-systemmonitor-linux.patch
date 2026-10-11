@@ -338,7 +338,7 @@ index 02eb0ab6..04593bd1 100644
              df_fields.empend("Mount flags"_string, Gfx::TextAlignment::CenterLeft, [](JsonObject const& object) {
                  int mount_flags = object.get_i32("mount_flags"sv).value_or(0);
 diff --git a/Userland/Libraries/LibCore/ProcessStatisticsReader.cpp b/Userland/Libraries/LibCore/ProcessStatisticsReader.cpp
-index 8a4503f1..48ed3963 100644
+index 8a4503f1..d0392f85 100644
 --- a/Userland/Libraries/LibCore/ProcessStatisticsReader.cpp
 +++ b/Userland/Libraries/LibCore/ProcessStatisticsReader.cpp
 @@ -12,6 +12,15 @@
@@ -357,7 +357,7 @@ index 8a4503f1..48ed3963 100644
  namespace Core {
  
  HashMap<uid_t, ByteString> ProcessStatisticsReader::s_usernames;
-@@ -89,10 +98,291 @@ ErrorOr<AllProcessesStatistics> ProcessStatisticsReader::get_all(SeekableStream&
+@@ -89,10 +98,299 @@ ErrorOr<AllProcessesStatistics> ProcessStatisticsReader::get_all(SeekableStream&
      return all_processes_statistics;
  }
  
@@ -550,6 +550,9 @@ index 8a4503f1..48ed3963 100644
 +    long page_size = sysconf(_SC_PAGESIZE);
 +    if (page_size <= 0)
 +        page_size = 4096;
++    long cpu_count = sysconf(_SC_NPROCESSORS_ONLN);
++    if (cpu_count < 1)
++        cpu_count = 1;
 +    u64 const ns_per_tick = 1'000'000'000ull / static_cast<u64>(ticks_per_second);
 +
 +    unsigned long long boot_time = 0;
@@ -575,8 +578,13 @@ index 8a4503f1..48ed3963 100644
 +            }
 +        }
 +    }
-+    result.total_time_scheduled = total_ticks * ns_per_tick;
-+    result.total_time_scheduled_kernel = kernel_ticks * ns_per_tick;
++    // ProcessModel derives a thread's CPU% as
++    //   (thread_time_delta / total_time_scheduled_delta) * 100
++    // and sums it per CPU, so total_time_scheduled must be the *per-CPU* share of
++    // the interval, not the sum over every CPU (that would divide every thread by
++    // ncpu). /proc/stat's "cpu" line sums all CPUs, so divide it back out.
++    result.total_time_scheduled = total_ticks * ns_per_tick / static_cast<u64>(cpu_count);
++    result.total_time_scheduled_kernel = kernel_ticks * ns_per_tick / static_cast<u64>(cpu_count);
 +
 +    auto* dir = opendir("/proc");
 +    if (!dir)
