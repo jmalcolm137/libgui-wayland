@@ -172,6 +172,13 @@ target_include_directories(libwm-font-parity-test PRIVATE "${CMAKE_CURRENT_SOURC
 target_link_options(libwm-font-parity-test PRIVATE "-Wl,--no-as-needed")
 target_link_libraries(libwm-font-parity-test PRIVATE LibMain LibGfx LibCore)
 
+# Confirms the session /bin shadow (SDE R4.2): SDE_SESSION_BIN_DIR overrides
+# /bin/X, so apps spawning /bin/shutdown reach the session's sde-power helper.
+add_executable(libwm-binpath-test test/BinPathTest.cpp)
+target_include_directories(libwm-binpath-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_options(libwm-binpath-test PRIVATE "-Wl,--no-as-needed")
+target_link_libraries(libwm-binpath-test PRIVATE LibMain LibCore)
+
 # --- The out-of-process WebContent service ------------------------------------
 # Built from the upstream sources. It is a single-client system service; LibWM
 # spawns it on demand and hands it a socket via SOCKET_TAKEOVER (the same

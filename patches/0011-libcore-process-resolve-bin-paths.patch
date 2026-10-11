@@ -10,10 +10,11 @@ index 02a3ce57..5c44a7f2 100644
  #include <AK/ScopeGuard.h>
  #include <AK/String.h>
  #include <AK/Vector.h>
-@@ -18,6 +19,7 @@
+@@ -18,6 +19,8 @@
  #include <LibCore/SocketAddress.h>
  #include <LibCore/StandardPaths.h>
  #include <LibCore/System.h>
++#include <stdlib.h>
 +#include <unistd.h>
  #include <errno.h>
  #include <signal.h>
@@ -60,6 +61,17 @@ index 02a3ce57..5c44a7f2 100644
 +        return path.to_byte_string();
 +
 +    auto as_byte_string = path.to_byte_string();
++    auto basename = LexicalPath(path).basename();
++
++    // A session may shadow /bin with its own helpers: SDE provides sde-power
++    // wrappers for /bin/shutdown, /bin/reboot and /bin/logout in
++    // SDE_SESSION_BIN_DIR (see scripts/sde-session.sh).
++    if (auto const* session_bin = getenv("SDE_SESSION_BIN_DIR"); session_bin && *session_bin) {
++        auto candidate = ByteString::formatted("{}/{}", session_bin, basename);
++        if (::access(candidate.characters(), X_OK) == 0)
++            return candidate;
++    }
++
 +    if (::access(as_byte_string.characters(), X_OK) == 0)
 +        return as_byte_string;
 +
@@ -71,7 +83,7 @@ index 02a3ce57..5c44a7f2 100644
 +
 +    LexicalPath const self_path { StringView { buffer, static_cast<size_t>(length) } };
 +    auto directory = self_path.dirname();
-+    return ByteString::formatted("{}/{}", directory, LexicalPath(path).basename());
++    return ByteString::formatted("{}/{}", directory, basename);
 +}
 +
  ErrorOr<pid_t> Process::spawn(StringView path, ReadonlySpan<ByteString> arguments, ByteString working_directory, KeepAsChild keep_as_child)
@@ -85,8 +97,9 @@ index 21f09928..f66157f8 100644
  
      static ErrorOr<Process> spawn(ProcessSpawnOptions const& options);
  
-+    // Maps a SerenityOS "/bin/X" path to the host binary next to this executable
-+    // when "/bin/X" does not exist. Returns the path unchanged otherwise.
++    // Maps a SerenityOS "/bin/X" path to a host binary: first SDE_SESSION_BIN_DIR
++    // (a session-provided /bin shadow), then /bin/X itself, then the binary next
++    // to this executable. Returns the path unchanged otherwise.
 +    static ByteString resolve_executable_path(StringView path);
 +
      // FIXME: Make the following 2 functions return Process instance or delete them.

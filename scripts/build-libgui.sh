@@ -45,14 +45,15 @@ if [[ ! -d "$SERENITY_SRC/.git" ]]; then
     exit 1
 fi
 
-# Apply the build-system patches idempotently.
+# Apply the build-system patches idempotently. --recount tolerates approximate
+# hunk line counts, which keeps hand-maintained patches easy to edit.
 for patch in "$PROJECT_ROOT"/patches/*.patch; do
     name="$(basename "$patch")"
-    if git -C "$SERENITY_SRC" apply --reverse --check "$patch" >/dev/null 2>&1; then
+    if git -C "$SERENITY_SRC" apply --recount --reverse --check "$patch" >/dev/null 2>&1; then
         echo "==> $name already applied"
-    elif git -C "$SERENITY_SRC" apply --check "$patch" >/dev/null 2>&1; then
+    elif git -C "$SERENITY_SRC" apply --recount --check "$patch" >/dev/null 2>&1; then
         echo "==> Applying $name"
-        git -C "$SERENITY_SRC" apply "$patch"
+        git -C "$SERENITY_SRC" apply --recount "$patch"
     else
         # Several patches edit the same files (e.g. Meta/Lagom/CMakeLists.txt), so
         # once those are applied a clean reverse-check is impossible even though
