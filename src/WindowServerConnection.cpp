@@ -202,6 +202,7 @@ void WindowServerConnection::send_fast_greet()
     if (auto const* env = getenv("SDE_CLIENT_SCALE"); env && *env && *env == '0')
         client_scale = 1;
     GUI::Window::set_backing_store_scale(client_scale);
+    WaylandClient::the().set_client_scale(client_scale);
 
     async_fast_greet(
         move(screen_rects),

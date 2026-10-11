@@ -97,6 +97,11 @@ public:
     // Logical screen size and output scale as reported by the compositor.
     Gfx::IntSize screen_size() const { return m_screen_size; }
     int output_scale() const { return m_scale; }
+    // The backing-store scale the shim told the client to render at (usually the
+    // output scale; 1 when client scaling is disabled). Distinct from output_scale
+    // so present() maps buffers correctly regardless of a resize margin.
+    int client_scale() const { return m_client_scale; }
+    void set_client_scale(int scale) { m_client_scale = scale < 1 ? 1 : scale; }
 
     // The pointer's position in output coordinates, reconstructed from the
     // surface under the pointer and that surface's known origin. The compositor
@@ -343,6 +348,7 @@ private:
     Gfx::IntSize m_physical_size;
     Gfx::IntSize m_screen_size;
     int m_scale { 1 };
+    int m_client_scale { 1 };
     bool m_have_logical_size { false };
 
     HashMap<i32, NonnullOwnPtr<WindowSurface>> m_windows;

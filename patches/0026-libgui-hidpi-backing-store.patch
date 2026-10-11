@@ -2,7 +2,7 @@
 # Serenity LibGUI + LibGfx scale support, driven by the shim from wl_output scale.
 
 diff --git a/Userland/Libraries/LibGUI/Window.cpp b/Userland/Libraries/LibGUI/Window.cpp
-index cf9453f3..179074a2 100644
+index cf9453f3..e46e6b12 100644
 --- a/Userland/Libraries/LibGUI/Window.cpp
 +++ b/Userland/Libraries/LibGUI/Window.cpp
 @@ -39,6 +39,13 @@ namespace GUI {
@@ -19,33 +19,6 @@ index cf9453f3..179074a2 100644
  class WindowBackingStore {
  public:
      explicit WindowBackingStore(NonnullRefPtr<Gfx::Bitmap> bitmap)
-@@ -342,9 +349,9 @@ void Window::set_rect(Gfx::IntRect const& a_rect)
-         return;
-     }
-     auto window_rect = ConnectionToWindowServer::the().set_window_rect(m_window_id, a_rect);
--    if (m_back_store && m_back_store->size() != window_rect.size())
-+    if (m_back_store && m_back_store->visible_size() != window_rect.size())
-         m_back_store = nullptr;
--    if (m_front_store && m_front_store->size() != window_rect.size())
-+    if (m_front_store && m_front_store->visible_size() != window_rect.size())
-         m_front_store = nullptr;
-     if (m_main_widget)
-         m_main_widget->resize(window_rect.size());
-@@ -500,12 +507,12 @@ void Window::handle_multi_paint_event(MultiPaintEvent& event)
-     // Throw away our backing store if its size is different, and we've stopped resizing or double buffering is disabled.
-     // This ensures that we shrink the backing store after a resize, and that we do not get flickering artifacts when
-     // directly painting into a shared active backing store.
--    if (m_back_store && (!m_resizing || !m_double_buffering_enabled) && m_back_store->size() != event.window_size())
-+    if (m_back_store && (!m_resizing || !m_double_buffering_enabled) && m_back_store->visible_size() != event.window_size())
-         m_back_store = nullptr;
- 
-     // Discard our backing store if it's unable to contain the new window size. Smaller is fine though, that prevents
-     // lots of backing store allocations during a resize.
--    if (m_back_store && !m_back_store->size().contains(event.window_size()))
-+    if (m_back_store && !m_back_store->visible_size().contains(event.window_size()))
-         m_back_store = nullptr;
- 
-     bool created_new_backing_store = false;
 @@ -1035,7 +1042,7 @@ void Window::set_current_backing_store(WindowBackingStore& backing_store, bool f
          MUST(IPC::File::clone_fd(bitmap.anonymous_buffer().fd())),
          backing_store.serial(),
@@ -55,17 +28,6 @@ index cf9453f3..179074a2 100644
          backing_store.visible_size(),
          flush_immediately);
  }
-@@ -1046,8 +1053,8 @@ void Window::flip(Vector<Gfx::IntRect, 32> const& dirty_rects)
- 
-     set_current_backing_store(*m_front_store);
- 
--    if (!m_back_store || m_back_store->size() != m_front_store->size()) {
--        m_back_store = create_backing_store(m_front_store->size()).release_value_but_fixme_should_propagate_errors();
-+    if (!m_back_store || m_back_store->visible_size() != m_front_store->visible_size()) {
-+        m_back_store = create_backing_store(m_front_store->visible_size()).release_value_but_fixme_should_propagate_errors();
-         memcpy(m_back_store->bitmap().scanline(0), m_front_store->bitmap().scanline(0), m_front_store->bitmap().size_in_bytes());
-         m_back_store->set_volatile();
-         return;
 @@ -1066,13 +1073,16 @@ ErrorOr<NonnullOwnPtr<WindowBackingStore>> Window::create_backing_store(Gfx::Int
      auto format = m_has_alpha_channel ? Gfx::BitmapFormat::BGRA8888 : Gfx::BitmapFormat::BGRx8888;
  

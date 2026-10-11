@@ -2060,12 +2060,15 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
     // If the window has a top inset (menubar), compose it above the client's
     // content into a single buffer. Otherwise attach the client's buffer as-is.
     if (window_surface.inset > 0 && window_surface.draw_inset) {
-        // Compose at the backing-store scale: the menubar and the client's content
-        // are both scaled, and the composed buffer is presented with buffer_scale.
-        int const scale = (visible_size.width() > 0) ? size.width() / visible_size.width() : 1;
+        // Compose at the client's backing-store scale: the menubar and the window's
+        // visible region are both scaled, and the composed buffer is presented with
+        // buffer_scale.
+        int const scale = client_scale();
         int const logical_height = visible_size.height() + window_surface.inset;
-        size_t const composed_pitch = Gfx::Bitmap::minimum_pitch(size.width(), Gfx::BitmapFormat::BGRA8888);
-        size_t const composed_height = static_cast<size_t>(logical_height) * scale;
+        int const display_width = visible_size.width() * scale;
+        int const display_height = logical_height * scale;
+        size_t const composed_pitch = Gfx::Bitmap::minimum_pitch(display_width, Gfx::BitmapFormat::BGRA8888);
+        size_t const composed_height = static_cast<size_t>(display_height);
         auto buffer = Core::AnonymousBuffer::create_with_size(composed_pitch * composed_height);
         if (buffer.is_error())
             return;
@@ -2080,8 +2083,9 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
         auto* source = static_cast<u8 const*>(mmap(nullptr, client_bytes, PROT_READ, MAP_SHARED, client_fd, 0));
         if (source == MAP_FAILED)
             return;
-        for (int y = 0; y < size.height(); ++y)
-            memcpy(destination.scanline(window_surface.inset * scale + y), source + static_cast<size_t>(y) * pitch, static_cast<size_t>(size.width()) * 4);
+        int const content_height = visible_size.height() * scale;
+        for (int y = 0; y < content_height; ++y)
+            memcpy(destination.scanline(window_surface.inset * scale + y), source + static_cast<size_t>(y) * pitch, static_cast<size_t>(display_width) * 4);
         munmap(const_cast<u8*>(source), client_bytes);
 
         window_surface.draw_inset(destination, { 0, 0, visible_size.width(), window_surface.inset });
@@ -2105,14 +2109,15 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
     }
 
     auto format = has_alpha ? WL_SHM_FORMAT_ARGB8888 : WL_SHM_FORMAT_XRGB8888;
-    // The client may hand us a backing store scaled above the window's logical
-    // size (crisp HiDPI). Attach the full physical buffer and tell the compositor
-    // the scale, so it presents 1:1 on any compositor.
-    int scale = (visible_size.width() > 0) ? size.width() / visible_size.width() : 1;
-    if (scale < 1)
-        scale = 1;
+    // Present the window's *visible* region at the client's backing-store scale.
+    // The backing store may be larger than the window during a resize, so the
+    // scale must come from the client's actual scale, not size/visible (which
+    // would yield a bogus ratio like 4x mid-resize).
+    int const scale = client_scale();
+    int const display_width = visible_size.width() * scale;
+    int const display_height = visible_size.height() * scale;
     wl_surface_set_buffer_scale(window_surface.surface, scale);
-    auto* buffer = wl_shm_pool_create_buffer(pool, 0, size.width(), size.height(), pitch, format);
+    auto* buffer = wl_shm_pool_create_buffer(pool, 0, display_width, display_height, pitch, format);
     if (!buffer) {
         wl_shm_pool_destroy(pool);
         close(fd);
