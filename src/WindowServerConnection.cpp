@@ -130,6 +130,18 @@ void write_windowserver_entry(StringView group, StringView key, StringView value
     (void)config.value()->sync();
 }
 
+ByteString read_windowserver_entry(StringView group, StringView key, StringView fallback)
+{
+    auto path = windowserver_ini_path();
+    if (path.is_empty())
+        return ByteString { fallback };
+    auto config = Core::ConfigFile::open(path);
+    if (config.is_error())
+        return ByteString { fallback };
+    auto value = config.value()->read_entry(group, key);
+    return value.is_empty() ? ByteString { fallback } : value;
+}
+
 // The wallpaper state is stored as raw pixels, not a PNG: encoding a full-screen
 // image to PNG takes several hundred milliseconds and would stall the UI thread
 // of whichever application applies it. Must match WallpaperHeader in the
@@ -966,6 +978,10 @@ Messages::WindowServer::SetSystemThemeResponse WindowServerConnection::set_syste
     async_update_system_theme(buffer.value());
     if (auto file = Core::File::open(theme_broker_path(), Core::File::OpenMode::Write); !file.is_error())
         (void)file.value()->write_until_depleted(host_theme);
+    // Persist the choice so it survives a restart (the compositor applies [Theme]
+    // at startup).
+    write_windowserver_entry("Theme"sv, "Name"sv, theme_name);
+    write_windowserver_entry("Theme"sv, "Path"sv, host_theme);
     return true;
 }
 
@@ -973,6 +989,10 @@ void WindowServerConnection::watch_theme()
 {
     if (m_theme_watcher)
         return;
+    // Apply any already-chosen theme immediately (a client started after a theme
+    // change, or a fresh session with a persisted [Theme], must pick it up), then
+    // follow further changes.
+    apply_theme_from_broker();
     m_theme_watcher = Core::FileWatcher::create().release_value_but_fixme_should_propagate_errors();
     m_theme_watcher->on_change = [this](Core::FileWatcherEvent const& event) {
         if (event.event_path != theme_broker_path())
@@ -991,17 +1011,19 @@ void WindowServerConnection::watch_theme()
 
 void WindowServerConnection::apply_theme_from_broker()
 {
-    auto file = Core::File::open(theme_broker_path(), Core::File::OpenMode::Read);
-    if (file.is_error())
-        return;
-    auto contents = file.value()->read_until_eof();
-    if (contents.is_error())
-        return;
-    auto host_theme = StringView { contents.value() }.trim_whitespace().to_byte_string();
+    ByteString host_theme;
+    if (auto file = Core::File::open(theme_broker_path(), Core::File::OpenMode::Read); !file.is_error()) {
+        if (auto contents = file.value()->read_until_eof(); !contents.is_error())
+            host_theme = StringView { contents.value() }.trim_whitespace().to_byte_string();
+    }
+    // Fall back to the persisted theme ([Theme]) when there is no live broker value.
+    if (host_theme.is_empty())
+        host_theme = read_windowserver_entry("Theme"sv, "Path"sv, ""sv);
     if (host_theme.is_empty())
         return;
     if (auto buffer = Gfx::load_system_theme(host_theme, {}); !buffer.is_error()) {
-        m_theme_name = LexicalPath(host_theme).title();
+        auto name = read_windowserver_entry("Theme"sv, "Name"sv, ""sv);
+        m_theme_name = name.is_empty() ? ByteString { LexicalPath(host_theme).title() } : name;
         async_update_system_theme(buffer.value());
     }
 }
