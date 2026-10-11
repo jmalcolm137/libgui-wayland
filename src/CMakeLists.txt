@@ -172,6 +172,13 @@ target_include_directories(libwm-font-parity-test PRIVATE "${CMAKE_CURRENT_SOURC
 target_link_options(libwm-font-parity-test PRIVATE "-Wl,--no-as-needed")
 target_link_libraries(libwm-font-parity-test PRIVATE LibMain LibGfx LibCore)
 
+# HiDPI fine-detail repro: a widget drawing full-width rects and thin/thick lines,
+# dumped at 1x and 2x to find ops that don't scale (see docs/03 D7).
+add_executable(libwm-hidpi-detail-test test/HiDpiDetailTest.cpp)
+target_include_directories(libwm-hidpi-detail-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_options(libwm-hidpi-detail-test PRIVATE "-Wl,--no-as-needed")
+target_link_libraries(libwm-hidpi-detail-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC windowserver)
+
 # Confirms the session /bin shadow (SDE R4.2): SDE_SESSION_BIN_DIR overrides
 # /bin/X, so apps spawning /bin/shutdown reach the session's sde-power helper.
 add_executable(libwm-binpath-test test/BinPathTest.cpp)

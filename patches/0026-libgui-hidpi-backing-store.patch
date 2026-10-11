@@ -104,7 +104,7 @@ index 41d47574..7c6af002 100644
      void set_modified(bool);
  
 diff --git a/Userland/Libraries/LibGfx/Painter.cpp b/Userland/Libraries/LibGfx/Painter.cpp
-index 73a9a838..ce20263a 100644
+index 73a9a838..851a6e83 100644
 --- a/Userland/Libraries/LibGfx/Painter.cpp
 +++ b/Userland/Libraries/LibGfx/Painter.cpp
 @@ -69,19 +69,31 @@ Painter::Painter(Gfx::Bitmap& bitmap)
@@ -145,7 +145,20 @@ index 73a9a838..ce20263a 100644
      }
  }
  
-@@ -165,15 +177,29 @@ void Painter::fill_rect(IntRect const& rect, PaintStyle const& paint_style)
+@@ -107,7 +119,11 @@ void Painter::fill_physical_rect(IntRect const& physical_rect, Color color)
+ {
+     // Callers must do clipping. Be defensive anyway: an unclamped rect (e.g. a
+     // thick short line near the edge) would otherwise write past the bitmap.
+-    auto rect = physical_rect.intersected(target().rect());
++    // physical_rect is in physical (scaled) coordinates, so clip against the
++    // physical size, not target().rect() (which is the logical size). At >1x the
++    // two differ, and intersecting with the logical rect truncates the fill/line
++    // (e.g. a full-width draw_line would only draw its left half at 2x).
++    auto rect = physical_rect.intersected(Gfx::IntRect { {}, target().physical_size() });
+     if (rect.is_empty())
+         return;
+     ARGB32* dst = target().scanline(rect.top()) + rect.left();
+@@ -165,15 +181,29 @@ void Painter::fill_rect(IntRect const& rect, PaintStyle const& paint_style)
  
  void Painter::fill_rect_with_dither_pattern(IntRect const& a_rect, Color color_a, Color color_b)
  {
@@ -178,7 +191,7 @@ index 73a9a838..ce20263a 100644
      for (int i = 0; i < rect.height(); ++i) {
          for (int j = 0; j < rect.width(); ++j) {
              bool checkboard_use_a = ((rect.left() + i) & 1) ^ ((rect.top() + j) & 1);
-@@ -181,64 +207,35 @@ void Painter::fill_rect_with_dither_pattern(IntRect const& a_rect, Color color_a
+@@ -181,64 +211,35 @@ void Painter::fill_rect_with_dither_pattern(IntRect const& a_rect, Color color_a
                  continue;
              if (!checkboard_use_a && !color_b.alpha())
                  continue;
@@ -258,7 +271,7 @@ index 73a9a838..ce20263a 100644
      }
  }
  
-@@ -498,8 +495,6 @@ static void on_each_ellipse_point(IntRect const& rect, Function<void(IntPoint)>&
+@@ -498,8 +499,6 @@ static void on_each_ellipse_point(IntRect const& rect, Function<void(IntPoint)>&
  
  void Painter::fill_ellipse(IntRect const& a_rect, Color color)
  {
@@ -267,7 +280,7 @@ index 73a9a838..ce20263a 100644
      auto rect = a_rect.translated(translation()).intersected(clip_rect());
      if (rect.is_empty())
          return;
-@@ -518,8 +513,6 @@ void Painter::fill_ellipse(IntRect const& a_rect, Color color)
+@@ -518,8 +517,6 @@ void Painter::fill_ellipse(IntRect const& a_rect, Color color)
  
  void Painter::draw_ellipse_intersecting(IntRect const& rect, Color color, int thickness)
  {
@@ -276,7 +289,7 @@ index 73a9a838..ce20263a 100644
      if (thickness <= 0)
          return;
  
-@@ -551,14 +544,21 @@ static void for_each_pixel_around_rect_clockwise(RectType const& rect, Callback
+@@ -551,14 +548,21 @@ static void for_each_pixel_around_rect_clockwise(RectType const& rect, Callback
  
  void Painter::draw_focus_rect(IntRect const& rect, Color color)
  {
@@ -301,7 +314,7 @@ index 73a9a838..ce20263a 100644
          state = !state;
      });
  }
-@@ -636,8 +636,6 @@ void Painter::draw_rect_with_thickness(IntRect const& rect, Color color, int thi
+@@ -636,8 +640,6 @@ void Painter::draw_rect_with_thickness(IntRect const& rect, Color color, int thi
  
  void Painter::draw_bitmap(IntPoint p, CharacterBitmap const& bitmap, Color color)
  {
@@ -310,7 +323,7 @@ index 73a9a838..ce20263a 100644
      auto rect = IntRect(p, bitmap.size()).translated(translation());
      auto clipped_rect = rect.intersected(clip_rect());
      if (clipped_rect.is_empty())
-@@ -646,19 +644,34 @@ void Painter::draw_bitmap(IntPoint p, CharacterBitmap const& bitmap, Color color
+@@ -646,19 +648,34 @@ void Painter::draw_bitmap(IntPoint p, CharacterBitmap const& bitmap, Color color
      int const last_row = clipped_rect.bottom() - rect.top();
      int const first_column = clipped_rect.left() - rect.left();
      int const last_column = clipped_rect.right() - rect.left();
@@ -349,7 +362,7 @@ index 73a9a838..ce20263a 100644
      }
  }
  
-@@ -1764,8 +1777,6 @@ void Painter::draw_text(FloatRect const& rect, Utf32View const& raw_text, Font c
+@@ -1764,8 +1781,6 @@ void Painter::draw_text(FloatRect const& rect, Utf32View const& raw_text, Font c
  
  void Painter::draw_text(Function<void(FloatRect const&, Utf8CodePointIterator&)> draw_one_glyph, FloatRect const& rect, Utf8View const& text, Font const& font, TextAlignment alignment, TextElision elision, TextWrapping wrapping)
  {
@@ -358,7 +371,7 @@ index 73a9a838..ce20263a 100644
      do_draw_text(rect, text, font, alignment, elision, wrapping, [&](FloatRect const& r, Utf8CodePointIterator& it) {
          draw_one_glyph(r, it);
      });
-@@ -1773,8 +1784,6 @@ void Painter::draw_text(Function<void(FloatRect const&, Utf8CodePointIterator&)>
+@@ -1773,8 +1788,6 @@ void Painter::draw_text(Function<void(FloatRect const&, Utf8CodePointIterator&)>
  
  void Painter::draw_text(Function<void(FloatRect const&, Utf8CodePointIterator&)> draw_one_glyph, FloatRect const& rect, StringView raw_text, Font const& font, TextAlignment alignment, TextElision elision, TextWrapping wrapping)
  {
@@ -367,7 +380,7 @@ index 73a9a838..ce20263a 100644
      Utf8View text { raw_text };
      do_draw_text(rect, text, font, alignment, elision, wrapping, [&](FloatRect const& r, Utf8CodePointIterator& it) {
          draw_one_glyph(r, it);
-@@ -1783,8 +1792,6 @@ void Painter::draw_text(Function<void(FloatRect const&, Utf8CodePointIterator&)>
+@@ -1783,8 +1796,6 @@ void Painter::draw_text(Function<void(FloatRect const&, Utf8CodePointIterator&)>
  
  void Painter::draw_text(Function<void(FloatRect const&, Utf8CodePointIterator&)> draw_one_glyph, FloatRect const& rect, Utf32View const& raw_text, Font const& font, TextAlignment alignment, TextElision elision, TextWrapping wrapping)
  {
@@ -376,7 +389,7 @@ index 73a9a838..ce20263a 100644
      // FIXME: UTF-32 should eventually be completely removed, but for the time
      // being some places might depend on it, so we do some internal conversion.
      StringBuilder builder;
-@@ -1863,11 +1870,26 @@ Optional<Color> Painter::get_pixel(IntPoint p)
+@@ -1863,11 +1874,26 @@ Optional<Color> Painter::get_pixel(IntPoint p)
  
  ErrorOr<NonnullRefPtr<Bitmap>> Painter::get_region_bitmap(IntRect const& region, BitmapFormat format, Optional<IntRect&> actual_region)
  {
@@ -407,7 +420,7 @@ index 73a9a838..ce20263a 100644
  }
  
  ALWAYS_INLINE void Painter::set_physical_pixel_with_draw_op(u32& pixel, Color color)
-@@ -2182,8 +2204,6 @@ void Painter::for_each_line_segment_on_bezier_curve(FloatPoint control_point, Fl
+@@ -2182,8 +2208,6 @@ void Painter::for_each_line_segment_on_bezier_curve(FloatPoint control_point, Fl
  
  void Painter::draw_quadratic_bezier_curve(IntPoint control_point, IntPoint p1, IntPoint p2, Color color, int thickness, LineStyle style)
  {
@@ -416,7 +429,7 @@ index 73a9a838..ce20263a 100644
      if (thickness <= 0)
          return;
  
-@@ -2345,8 +2365,6 @@ void Painter::for_each_line_segment_on_elliptical_arc(FloatPoint p1, FloatPoint
+@@ -2345,8 +2369,6 @@ void Painter::for_each_line_segment_on_elliptical_arc(FloatPoint p1, FloatPoint
  
  void Painter::draw_elliptical_arc(IntPoint p1, IntPoint p2, IntPoint center, FloatSize radii, float x_axis_rotation, float theta_1, float theta_delta, Color color, int thickness, LineStyle style)
  {
