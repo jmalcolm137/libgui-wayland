@@ -18,6 +18,7 @@
 #include <LaunchServer/LaunchClientEndpoint.h>
 #include <LaunchServer/LaunchServerEndpoint.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "LaunchServerDefaultStub.h"
@@ -60,6 +61,28 @@ private:
     virtual Messages::LaunchServer::OpenUrlResponse open_url(URL::URL const& url, ByteString const& handler_name) override
     {
         load_handlers_if_needed();
+
+        // A file URL that points at an executable runs it directly, mirroring the
+        // upstream LaunchServer's open_file_url(). This is how the desktop's
+        // "Display Settings" entry (Desktop::Launcher::open("/bin/DisplaySettings"))
+        // starts the same app the Settings app spawns. "/bin/X" is mapped to the
+        // session app directory via port_binary_path(), because on the host the
+        // Serenity "/bin" does not exist.
+        if (handler_name.is_empty() && url.scheme() == "file"sv) {
+            auto file_path = URL::percent_decode(url.serialize_path());
+            if (file_path.starts_with("/bin/"sv))
+                file_path = port_binary_path(file_path);
+            struct stat st;
+            if (!file_path.is_empty() && ::stat(file_path.characters(), &st) == 0
+                && S_ISREG(st.st_mode) && (st.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH))) {
+                if (auto result = Core::Process::spawn(file_path, ReadonlySpan<ByteString> {}); result.is_error()) {
+                    dbgln("LibWM: LaunchServer: failed to launch executable '{}': {}", file_path, result.error());
+                    return false;
+                }
+                dbgln("LibWM: LaunchServer: launched executable '{}'", file_path);
+                return true;
+            }
+        }
 
         auto executable = handler_name;
         if (executable.is_empty())

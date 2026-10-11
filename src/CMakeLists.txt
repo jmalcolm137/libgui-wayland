@@ -179,6 +179,13 @@ target_include_directories(libwm-binpath-test PRIVATE "${CMAKE_CURRENT_SOURCE_DI
 target_link_options(libwm-binpath-test PRIVATE "-Wl,--no-as-needed")
 target_link_libraries(libwm-binpath-test PRIVATE LibMain LibCore)
 
+# Opens an executable file URL through Desktop::Launcher (the desktop's
+# "Display Settings" path): the LaunchServer must run the executable.
+add_executable(libwm-launch-exec-test test/LaunchExecTest.cpp)
+target_include_directories(libwm-launch-exec-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_options(libwm-launch-exec-test PRIVATE "-Wl,--no-as-needed")
+target_link_libraries(libwm-launch-exec-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibDesktop LibURL windowserver)
+
 # --- The out-of-process WebContent service ------------------------------------
 # Built from the upstream sources. It is a single-client system service; LibWM
 # spawns it on demand and hands it a socket via SOCKET_TAKEOVER (the same
