@@ -1337,18 +1337,22 @@ void WaylandClient::bind_bitmap(wl_surface* surface, Core::AnonymousBuffer const
     if (fd < 0)
         return;
     int stride = bitmap.pitch();
-    auto* pool = wl_shm_create_pool(m_shm, fd, static_cast<int>(stride) * bitmap.height());
+    auto* pool = wl_shm_create_pool(m_shm, fd, static_cast<int>(stride) * bitmap.physical_height());
     if (!pool) {
         close(fd);
         return;
     }
     auto format = bitmap.format() == Gfx::BitmapFormat::BGRA8888 ? WL_SHM_FORMAT_ARGB8888 : WL_SHM_FORMAT_XRGB8888;
-    auto* wl_buf = wl_shm_pool_create_buffer(pool, 0, bitmap.width(), bitmap.height(), stride, format);
+    auto* wl_buf = wl_shm_pool_create_buffer(pool, 0, bitmap.physical_width(), bitmap.physical_height(), stride, format);
     if (!wl_buf) {
         wl_shm_pool_destroy(pool);
         close(fd);
         return;
     }
+    // A HiDPI-scaled bitmap carries its scale; present the physical buffer and let
+    // the compositor map it back to logical size via buffer_scale.
+    if (bitmap.scale() > 1)
+        wl_surface_set_buffer_scale(surface, bitmap.scale());
     wl_surface_attach(surface, wl_buf, 0, 0);
     wl_surface_damage(surface, 0, 0, bitmap.width(), bitmap.height());
     // Flush so the pool's fd is transferred before we close our copy.
@@ -2056,13 +2060,17 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
     // If the window has a top inset (menubar), compose it above the client's
     // content into a single buffer. Otherwise attach the client's buffer as-is.
     if (window_surface.inset > 0 && window_surface.draw_inset) {
-        int total_height = visible_size.height() + window_surface.inset;
-        size_t bytes = static_cast<size_t>(visible_size.width()) * 4 * static_cast<size_t>(total_height);
-        auto buffer = Core::AnonymousBuffer::create_with_size(bytes);
+        // Compose at the backing-store scale: the menubar and the client's content
+        // are both scaled, and the composed buffer is presented with buffer_scale.
+        int const scale = (visible_size.width() > 0) ? size.width() / visible_size.width() : 1;
+        int const logical_height = visible_size.height() + window_surface.inset;
+        size_t const composed_pitch = Gfx::Bitmap::minimum_pitch(size.width(), Gfx::BitmapFormat::BGRA8888);
+        size_t const composed_height = static_cast<size_t>(logical_height) * scale;
+        auto buffer = Core::AnonymousBuffer::create_with_size(composed_pitch * composed_height);
         if (buffer.is_error())
             return;
         window_surface.composed_buffer = buffer.release_value();
-        auto composed = Gfx::Bitmap::create_with_anonymous_buffer(Gfx::BitmapFormat::BGRA8888, window_surface.composed_buffer, { visible_size.width(), total_height }, 1);
+        auto composed = Gfx::Bitmap::create_with_anonymous_buffer(Gfx::BitmapFormat::BGRA8888, window_surface.composed_buffer, { visible_size.width(), logical_height }, scale);
         if (composed.is_error())
             return;
         window_surface.composed_bitmap = composed.release_value();
@@ -2072,8 +2080,8 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
         auto* source = static_cast<u8 const*>(mmap(nullptr, client_bytes, PROT_READ, MAP_SHARED, client_fd, 0));
         if (source == MAP_FAILED)
             return;
-        for (int y = 0; y < visible_size.height(); ++y)
-            memcpy(destination.scanline(window_surface.inset + y), source + static_cast<size_t>(y) * pitch, static_cast<size_t>(visible_size.width()) * 4);
+        for (int y = 0; y < size.height(); ++y)
+            memcpy(destination.scanline(window_surface.inset * scale + y), source + static_cast<size_t>(y) * pitch, static_cast<size_t>(size.width()) * 4);
         munmap(const_cast<u8*>(source), client_bytes);
 
         window_surface.draw_inset(destination, { 0, 0, visible_size.width(), window_surface.inset });
@@ -2082,7 +2090,7 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
         bind_bitmap(window_surface.surface, window_surface.composed_buffer, destination, window_surface.buffers);
         wl_surface_commit(window_surface.surface);
         wl_display_flush(m_display);
-        dbgln("LibWM/Wayland: presented window {} ({}x{} incl. {}px inset)", window_surface.window_id, visible_size.width(), total_height, window_surface.inset);
+        dbgln("LibWM/Wayland: presented window {} ({}x{} @{}x incl. {}px inset)", window_surface.window_id, visible_size.width(), visible_size.height(), scale, window_surface.inset);
         return;
     }
 
@@ -2097,9 +2105,14 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
     }
 
     auto format = has_alpha ? WL_SHM_FORMAT_ARGB8888 : WL_SHM_FORMAT_XRGB8888;
-    // Present only the visible region; the extra rows/columns of the widened
-    // backing store are simply not referenced.
-    auto* buffer = wl_shm_pool_create_buffer(pool, 0, visible_size.width(), visible_size.height(), pitch, format);
+    // The client may hand us a backing store scaled above the window's logical
+    // size (crisp HiDPI). Attach the full physical buffer and tell the compositor
+    // the scale, so it presents 1:1 on any compositor.
+    int scale = (visible_size.width() > 0) ? size.width() / visible_size.width() : 1;
+    if (scale < 1)
+        scale = 1;
+    wl_surface_set_buffer_scale(window_surface.surface, scale);
+    auto* buffer = wl_shm_pool_create_buffer(pool, 0, size.width(), size.height(), pitch, format);
     if (!buffer) {
         wl_shm_pool_destroy(pool);
         close(fd);

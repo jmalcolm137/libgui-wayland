@@ -1,0 +1,419 @@
+# libgui-wayland patch: HiDPI backing-store scale (client-side 2x rendering).
+# Serenity LibGUI + LibGfx scale support, driven by the shim from wl_output scale.
+
+diff --git a/Userland/Libraries/LibGUI/Window.cpp b/Userland/Libraries/LibGUI/Window.cpp
+index cf9453f3..179074a2 100644
+--- a/Userland/Libraries/LibGUI/Window.cpp
++++ b/Userland/Libraries/LibGUI/Window.cpp
+@@ -39,6 +39,13 @@ namespace GUI {
+ static i32 s_next_backing_store_serial;
+ static IDAllocator s_window_id_allocator;
+ 
++// HiDPI spike: backing-store scale, set by the shim from the output scale.
++static int s_backing_store_scale = 1;
++void Window::set_backing_store_scale(int scale)
++{
++    s_backing_store_scale = scale < 1 ? 1 : scale;
++}
++
+ class WindowBackingStore {
+ public:
+     explicit WindowBackingStore(NonnullRefPtr<Gfx::Bitmap> bitmap)
+@@ -342,9 +349,9 @@ void Window::set_rect(Gfx::IntRect const& a_rect)
+         return;
+     }
+     auto window_rect = ConnectionToWindowServer::the().set_window_rect(m_window_id, a_rect);
+-    if (m_back_store && m_back_store->size() != window_rect.size())
++    if (m_back_store && m_back_store->visible_size() != window_rect.size())
+         m_back_store = nullptr;
+-    if (m_front_store && m_front_store->size() != window_rect.size())
++    if (m_front_store && m_front_store->visible_size() != window_rect.size())
+         m_front_store = nullptr;
+     if (m_main_widget)
+         m_main_widget->resize(window_rect.size());
+@@ -500,12 +507,12 @@ void Window::handle_multi_paint_event(MultiPaintEvent& event)
+     // Throw away our backing store if its size is different, and we've stopped resizing or double buffering is disabled.
+     // This ensures that we shrink the backing store after a resize, and that we do not get flickering artifacts when
+     // directly painting into a shared active backing store.
+-    if (m_back_store && (!m_resizing || !m_double_buffering_enabled) && m_back_store->size() != event.window_size())
++    if (m_back_store && (!m_resizing || !m_double_buffering_enabled) && m_back_store->visible_size() != event.window_size())
+         m_back_store = nullptr;
+ 
+     // Discard our backing store if it's unable to contain the new window size. Smaller is fine though, that prevents
+     // lots of backing store allocations during a resize.
+-    if (m_back_store && !m_back_store->size().contains(event.window_size()))
++    if (m_back_store && !m_back_store->visible_size().contains(event.window_size()))
+         m_back_store = nullptr;
+ 
+     bool created_new_backing_store = false;
+@@ -1035,7 +1042,7 @@ void Window::set_current_backing_store(WindowBackingStore& backing_store, bool f
+         MUST(IPC::File::clone_fd(bitmap.anonymous_buffer().fd())),
+         backing_store.serial(),
+         bitmap.has_alpha_channel(),
+-        bitmap.size(),
++        bitmap.physical_size(),
+         backing_store.visible_size(),
+         flush_immediately);
+ }
+@@ -1046,8 +1053,8 @@ void Window::flip(Vector<Gfx::IntRect, 32> const& dirty_rects)
+ 
+     set_current_backing_store(*m_front_store);
+ 
+-    if (!m_back_store || m_back_store->size() != m_front_store->size()) {
+-        m_back_store = create_backing_store(m_front_store->size()).release_value_but_fixme_should_propagate_errors();
++    if (!m_back_store || m_back_store->visible_size() != m_front_store->visible_size()) {
++        m_back_store = create_backing_store(m_front_store->visible_size()).release_value_but_fixme_should_propagate_errors();
+         memcpy(m_back_store->bitmap().scanline(0), m_front_store->bitmap().scanline(0), m_front_store->bitmap().size_in_bytes());
+         m_back_store->set_volatile();
+         return;
+@@ -1066,13 +1073,16 @@ ErrorOr<NonnullOwnPtr<WindowBackingStore>> Window::create_backing_store(Gfx::Int
+     auto format = m_has_alpha_channel ? Gfx::BitmapFormat::BGRA8888 : Gfx::BitmapFormat::BGRx8888;
+ 
+     VERIFY(!size.is_empty());
+-    size_t pitch = Gfx::Bitmap::minimum_pitch(size.width(), format);
+-    size_t size_in_bytes = size.height() * pitch;
++    int const scale = s_backing_store_scale;
++    // Gfx::Bitmap stores the *logical* size and derives the physical size from the
++    // scale, so allocate the buffer for the physical pixels but pass the logical
++    // size + scale to the bitmap.
++    size_t pitch = Gfx::Bitmap::minimum_pitch(size.width() * scale, format);
++    size_t size_in_bytes = static_cast<size_t>(size.height() * scale) * pitch;
+ 
+     auto buffer = TRY(Core::AnonymousBuffer::create_with_size(round_up_to_power_of_two(size_in_bytes, PAGE_SIZE)));
+ 
+-    // FIXME: Plumb scale factor here eventually.
+-    auto bitmap = TRY(Gfx::Bitmap::create_with_anonymous_buffer(format, buffer, size, 1));
++    auto bitmap = TRY(Gfx::Bitmap::create_with_anonymous_buffer(format, buffer, size, scale));
+     return make<WindowBackingStore>(bitmap);
+ }
+ 
+diff --git a/Userland/Libraries/LibGUI/Window.h b/Userland/Libraries/LibGUI/Window.h
+index 41d47574..7c6af002 100644
+--- a/Userland/Libraries/LibGUI/Window.h
++++ b/Userland/Libraries/LibGUI/Window.h
+@@ -34,6 +34,11 @@ public:
+ 
+     static Window* from_window_id(int);
+ 
++    // HiDPI spike: when > 1, windows allocate their backing store at this scale
++    // (physical = logical * scale) and Gfx::Painter picks the scale up from the
++    // bitmap. Set by the LibWindowServer shim from the output scale.
++    static void set_backing_store_scale(int scale);
++
+     bool is_modified() const;
+     void set_modified(bool);
+ 
+diff --git a/Userland/Libraries/LibGfx/Painter.cpp b/Userland/Libraries/LibGfx/Painter.cpp
+index 73a9a838..b336f28c 100644
+--- a/Userland/Libraries/LibGfx/Painter.cpp
++++ b/Userland/Libraries/LibGfx/Painter.cpp
+@@ -69,19 +69,22 @@ Painter::Painter(Gfx::Bitmap& bitmap)
+ 
+ void Painter::fill_rect_with_draw_op(IntRect const& a_rect, Color color)
+ {
+-    VERIFY(scale() == 1); // FIXME: Add scaling support.
+-
+     auto rect = a_rect.translated(translation()).intersected(clip_rect());
+     if (rect.is_empty())
+         return;
+ 
+-    ARGB32* dst = target().scanline(rect.top()) + rect.left();
++    int const s = scale();
++    ARGB32* dst = target().scanline(rect.top() * s) + rect.left() * s;
+     size_t const dst_skip = target().pitch() / sizeof(ARGB32);
+ 
+     for (int i = rect.height() - 1; i >= 0; --i) {
+-        for (int j = 0; j < rect.width(); ++j)
+-            set_physical_pixel_with_draw_op(dst[j], color);
+-        dst += dst_skip;
++        for (int dy = 0; dy < s; ++dy) {
++            for (int j = 0; j < rect.width(); ++j) {
++                for (int dx = 0; dx < s; ++dx)
++                    set_physical_pixel_with_draw_op(dst[dy * dst_skip + j * s + dx], color);
++            }
++        }
++        dst += dst_skip * s;
+     }
+ }
+ 
+@@ -165,13 +168,12 @@ void Painter::fill_rect(IntRect const& rect, PaintStyle const& paint_style)
+ 
+ void Painter::fill_rect_with_dither_pattern(IntRect const& a_rect, Color color_a, Color color_b)
+ {
+-    VERIFY(scale() == 1); // FIXME: Add scaling support.
+-
+     auto rect = a_rect.translated(translation()).intersected(clip_rect());
+     if (rect.is_empty())
+         return;
+ 
+-    ARGB32* dst = target().scanline(rect.top()) + rect.left();
++    int const s = scale();
++    ARGB32* dst = target().scanline(rect.top() * s) + rect.left() * s;
+     size_t const dst_skip = target().pitch() / sizeof(ARGB32);
+ 
+     for (int i = 0; i < rect.height(); ++i) {
+@@ -181,64 +183,35 @@ void Painter::fill_rect_with_dither_pattern(IntRect const& a_rect, Color color_a
+                 continue;
+             if (!checkboard_use_a && !color_b.alpha())
+                 continue;
+-            dst[j] = checkboard_use_a ? color_a.value() : color_b.value();
++            ARGB32 const value = checkboard_use_a ? color_a.value() : color_b.value();
++            for (int dy = 0; dy < s; ++dy)
++                fast_u32_fill(dst + dy * dst_skip + j * s, value, s);
+         }
+-        dst += dst_skip;
++        dst += dst_skip * s;
+     }
+ }
+ 
+ void Painter::fill_rect_with_checkerboard(IntRect const& a_rect, IntSize cell_size, Color color_dark, Color color_light)
+ {
+-    VERIFY(scale() == 1); // FIXME: Add scaling support.
+-
+     auto translated_rect = a_rect.translated(translation());
+     auto rect = translated_rect.intersected(clip_rect());
+     if (rect.is_empty())
+         return;
+ 
+-    ARGB32* dst = target().scanline(rect.top()) + rect.left();
++    int const s = scale();
++    ARGB32* base = target().scanline(rect.top() * s) + rect.left() * s;
+     size_t const dst_skip = target().pitch() / sizeof(ARGB32);
+ 
+-    int first_cell_column = (rect.x() - translated_rect.x()) / cell_size.width();
+-    int prologue_length = min(rect.width(), cell_size.width() - ((rect.x() - translated_rect.x()) % cell_size.width()));
+-    int number_of_aligned_strips = (rect.width() - prologue_length) / cell_size.width();
+-
+-    for (int i = 0; i < rect.height(); ++i) {
+-        int y = rect.y() - translated_rect.y() + i;
+-        int cell_row = y / cell_size.height();
+-        bool odd_row = cell_row & 1;
+-
+-        // Prologue: Paint the unaligned part up to the first intersection.
+-        int j = 0;
+-        int cell_column = first_cell_column;
+-
+-        {
+-            bool odd_cell = cell_column & 1;
+-            auto color = (odd_row ^ odd_cell) ? color_light.value() : color_dark.value();
+-            fast_u32_fill(&dst[j], color, prologue_length);
+-            j += prologue_length;
++    for (int y = 0; y < rect.height(); ++y) {
++        int const cell_row = (rect.top() + y - translated_rect.top()) / cell_size.height();
++        bool const odd_row = cell_row & 1;
++        for (int x = 0; x < rect.width(); ++x) {
++            int const cell_column = (rect.left() + x - translated_rect.left()) / cell_size.width();
++            bool const odd_cell = cell_column & 1;
++            ARGB32 const value = (odd_row ^ odd_cell) ? color_light.value() : color_dark.value();
++            for (int dy = 0; dy < s; ++dy)
++                fast_u32_fill(base + (y * s + dy) * dst_skip + x * s, value, s);
+         }
+-
+-        // Aligned run: Paint the maximum number of aligned cell strips.
+-        for (int strip = 0; strip < number_of_aligned_strips; ++strip) {
+-            ++cell_column;
+-            bool odd_cell = cell_column & 1;
+-            auto color = (odd_row ^ odd_cell) ? color_light.value() : color_dark.value();
+-            fast_u32_fill(&dst[j], color, cell_size.width());
+-            j += cell_size.width();
+-        }
+-
+-        // Epilogue: Paint the unaligned part until the end of the rect.
+-        if (j != rect.width()) {
+-            ++cell_column;
+-            bool odd_cell = cell_column & 1;
+-            auto color = (odd_row ^ odd_cell) ? color_light.value() : color_dark.value();
+-            int epilogue_length = rect.width() - j;
+-            fast_u32_fill(&dst[j], color, epilogue_length);
+-            j += epilogue_length;
+-        }
+-
+-        dst += dst_skip;
+     }
+ }
+ 
+@@ -498,8 +471,6 @@ static void on_each_ellipse_point(IntRect const& rect, Function<void(IntPoint)>&
+ 
+ void Painter::fill_ellipse(IntRect const& a_rect, Color color)
+ {
+-    VERIFY(scale() == 1); // FIXME: Add scaling support.
+-
+     auto rect = a_rect.translated(translation()).intersected(clip_rect());
+     if (rect.is_empty())
+         return;
+@@ -518,8 +489,6 @@ void Painter::fill_ellipse(IntRect const& a_rect, Color color)
+ 
+ void Painter::draw_ellipse_intersecting(IntRect const& rect, Color color, int thickness)
+ {
+-    VERIFY(scale() == 1); // FIXME: Add scaling support.
+-
+     if (thickness <= 0)
+         return;
+ 
+@@ -551,14 +520,12 @@ static void for_each_pixel_around_rect_clockwise(RectType const& rect, Callback
+ 
+ void Painter::draw_focus_rect(IntRect const& rect, Color color)
+ {
+-    VERIFY(scale() == 1); // FIXME: Add scaling support.
+-
+     if (rect.is_empty())
+         return;
+     bool state = false;
+     for_each_pixel_around_rect_clockwise(rect, [&](auto x, auto y) {
+         if (state)
+-            set_pixel(x, y, color);
++            fill_rect(IntRect { x, y, 1, 1 }, color);
+         state = !state;
+     });
+ }
+@@ -636,8 +603,6 @@ void Painter::draw_rect_with_thickness(IntRect const& rect, Color color, int thi
+ 
+ void Painter::draw_bitmap(IntPoint p, CharacterBitmap const& bitmap, Color color)
+ {
+-    VERIFY(scale() == 1); // FIXME: Add scaling support.
+-
+     auto rect = IntRect(p, bitmap.size()).translated(translation());
+     auto clipped_rect = rect.intersected(clip_rect());
+     if (clipped_rect.is_empty())
+@@ -646,7 +611,8 @@ void Painter::draw_bitmap(IntPoint p, CharacterBitmap const& bitmap, Color color
+     int const last_row = clipped_rect.bottom() - rect.top();
+     int const first_column = clipped_rect.left() - rect.left();
+     int const last_column = clipped_rect.right() - rect.left();
+-    ARGB32* dst = target().scanline(clipped_rect.y()) + clipped_rect.x();
++    int const s = scale();
++    ARGB32* dst = target().scanline(clipped_rect.y() * s) + clipped_rect.x() * s;
+     size_t const dst_skip = target().pitch() / sizeof(ARGB32);
+     char const* bitmap_row = &bitmap.bits()[first_row * bitmap.width() + first_column];
+     size_t const bitmap_skip = bitmap.width();
+@@ -654,11 +620,13 @@ void Painter::draw_bitmap(IntPoint p, CharacterBitmap const& bitmap, Color color
+     for (int row = first_row; row < last_row; ++row) {
+         for (int j = 0; j < (last_column - first_column); ++j) {
+             char fc = bitmap_row[j];
+-            if (fc == '#')
+-                dst[j] = color.value();
++            if (fc != '#')
++                continue;
++            for (int dy = 0; dy < s; ++dy)
++                fast_u32_fill(dst + dy * dst_skip + j * s, color.value(), s);
+         }
+         bitmap_row += bitmap_skip;
+-        dst += dst_skip;
++        dst += dst_skip * s;
+     }
+ }
+ 
+@@ -1745,6 +1713,23 @@ void Painter::draw_text(FloatRect const& rect, Utf32View const& text, TextAlignm
+ void Painter::draw_text(FloatRect const& rect, StringView raw_text, Font const& font, TextAlignment alignment, Color color, TextElision elision, TextWrapping wrapping)
+ {
+     Utf8View text { raw_text };
++    int const s = scale();
++    if (s > 1) {
++        // HiDPI: scale the whole text layout (font + rect) and draw it 1:1 in
++        // physical space, so glyphs rasterise at the backing-store scale (crisp)
++        // and the advances scale too (no overlap).
++        PainterStateSaver saver(*this);
++        auto scaled_font = font.with_size(font.pixel_size() * s);
++        auto physical_rect = FloatRect { (rect.x() + translation().x()) * s, (rect.y() + translation().y()) * s, rect.width() * s, rect.height() * s };
++        state().scale = 1;
++        state().translation = {};
++        state().clip_rect = Gfx::IntRect { clip_rect().x() * s, clip_rect().y() * s, clip_rect().width() * s, clip_rect().height() * s }
++                                .intersected(Gfx::IntRect { {}, target().physical_size() });
++        do_draw_text(physical_rect, text, *scaled_font, alignment, elision, wrapping, [&](FloatRect const& r, Utf8CodePointIterator& it) {
++            draw_glyph_or_emoji(r.location(), it, *scaled_font, color);
++        });
++        return;
++    }
+     do_draw_text(rect, text, font, alignment, elision, wrapping, [&](FloatRect const& r, Utf8CodePointIterator& it) {
+         draw_glyph_or_emoji(r.location(), it, font, color);
+     });
+@@ -1757,6 +1742,20 @@ void Painter::draw_text(FloatRect const& rect, Utf32View const& raw_text, Font c
+     StringBuilder builder;
+     builder.append(raw_text);
+     auto text = Utf8View { builder.string_view() };
++    int const s = scale();
++    if (s > 1) {
++        PainterStateSaver saver(*this);
++        auto scaled_font = font.with_size(font.pixel_size() * s);
++        auto physical_rect = FloatRect { (rect.x() + translation().x()) * s, (rect.y() + translation().y()) * s, rect.width() * s, rect.height() * s };
++        state().scale = 1;
++        state().translation = {};
++        state().clip_rect = Gfx::IntRect { clip_rect().x() * s, clip_rect().y() * s, clip_rect().width() * s, clip_rect().height() * s }
++                                .intersected(Gfx::IntRect { {}, target().physical_size() });
++        do_draw_text(physical_rect, text, *scaled_font, alignment, elision, wrapping, [&](FloatRect const& r, Utf8CodePointIterator& it) {
++            draw_glyph_or_emoji(r.location(), it, *scaled_font, color);
++        });
++        return;
++    }
+     do_draw_text(rect, text, font, alignment, elision, wrapping, [&](FloatRect const& r, Utf8CodePointIterator& it) {
+         draw_glyph_or_emoji(r.location(), it, font, color);
+     });
+@@ -1764,8 +1763,6 @@ void Painter::draw_text(FloatRect const& rect, Utf32View const& raw_text, Font c
+ 
+ void Painter::draw_text(Function<void(FloatRect const&, Utf8CodePointIterator&)> draw_one_glyph, FloatRect const& rect, Utf8View const& text, Font const& font, TextAlignment alignment, TextElision elision, TextWrapping wrapping)
+ {
+-    VERIFY(scale() == 1); // FIXME: Add scaling support.
+-
+     do_draw_text(rect, text, font, alignment, elision, wrapping, [&](FloatRect const& r, Utf8CodePointIterator& it) {
+         draw_one_glyph(r, it);
+     });
+@@ -1773,8 +1770,6 @@ void Painter::draw_text(Function<void(FloatRect const&, Utf8CodePointIterator&)>
+ 
+ void Painter::draw_text(Function<void(FloatRect const&, Utf8CodePointIterator&)> draw_one_glyph, FloatRect const& rect, StringView raw_text, Font const& font, TextAlignment alignment, TextElision elision, TextWrapping wrapping)
+ {
+-    VERIFY(scale() == 1); // FIXME: Add scaling support.
+-
+     Utf8View text { raw_text };
+     do_draw_text(rect, text, font, alignment, elision, wrapping, [&](FloatRect const& r, Utf8CodePointIterator& it) {
+         draw_one_glyph(r, it);
+@@ -1783,8 +1778,6 @@ void Painter::draw_text(Function<void(FloatRect const&, Utf8CodePointIterator&)>
+ 
+ void Painter::draw_text(Function<void(FloatRect const&, Utf8CodePointIterator&)> draw_one_glyph, FloatRect const& rect, Utf32View const& raw_text, Font const& font, TextAlignment alignment, TextElision elision, TextWrapping wrapping)
+ {
+-    VERIFY(scale() == 1); // FIXME: Add scaling support.
+-
+     // FIXME: UTF-32 should eventually be completely removed, but for the time
+     // being some places might depend on it, so we do some internal conversion.
+     StringBuilder builder;
+@@ -1863,11 +1856,20 @@ Optional<Color> Painter::get_pixel(IntPoint p)
+ 
+ ErrorOr<NonnullRefPtr<Bitmap>> Painter::get_region_bitmap(IntRect const& region, BitmapFormat format, Optional<IntRect&> actual_region)
+ {
+-    VERIFY(scale() == 1);
+-    auto bitmap_region = region.translated(state().translation).intersected(target().rect());
++    int const s = scale();
++    auto translated = region.translated(state().translation);
++    auto physical_region = Gfx::IntRect { translated.x() * s, translated.y() * s, translated.width() * s, translated.height() * s }
++                               .intersected(Gfx::IntRect { {}, target().physical_size() });
++    auto logical_actual = Gfx::IntRect { physical_region.x() / s, physical_region.y() / s, physical_region.width() / s, physical_region.height() / s };
+     if (actual_region.has_value())
+-        actual_region.value() = bitmap_region.translated(-state().translation);
+-    return target().cropped(bitmap_region, format);
++        actual_region.value() = logical_actual.translated(-state().translation);
++    // Return the region at the painter's scale so a later blit() restores it 1:1.
++    auto result = TRY(Bitmap::create(format, logical_actual.size(), s));
++    for (int y = 0; y < physical_region.height(); ++y) {
++        auto const* src = target().scanline(physical_region.top() + y) + physical_region.left();
++        memcpy(result->scanline(y), src, static_cast<size_t>(physical_region.width()) * sizeof(ARGB32));
++    }
++    return result;
+ }
+ 
+ ALWAYS_INLINE void Painter::set_physical_pixel_with_draw_op(u32& pixel, Color color)
+@@ -2182,8 +2184,6 @@ void Painter::for_each_line_segment_on_bezier_curve(FloatPoint control_point, Fl
+ 
+ void Painter::draw_quadratic_bezier_curve(IntPoint control_point, IntPoint p1, IntPoint p2, Color color, int thickness, LineStyle style)
+ {
+-    VERIFY(scale() == 1); // FIXME: Add scaling support.
+-
+     if (thickness <= 0)
+         return;
+ 
+@@ -2345,8 +2345,6 @@ void Painter::for_each_line_segment_on_elliptical_arc(FloatPoint p1, FloatPoint
+ 
+ void Painter::draw_elliptical_arc(IntPoint p1, IntPoint p2, IntPoint center, FloatSize radii, float x_axis_rotation, float theta_1, float theta_delta, Color color, int thickness, LineStyle style)
+ {
+-    VERIFY(scale() == 1); // FIXME: Add scaling support.
+-
+     if (thickness <= 0)
+         return;
+ 
