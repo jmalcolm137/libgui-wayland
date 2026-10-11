@@ -1339,9 +1339,15 @@ Messages::WindowServer::SetSystemFontsResponse WindowServerConnection::set_syste
     return true;
 }
 
-Messages::WindowServer::ApplyWorkspaceSettingsResponse WindowServerConnection::apply_workspace_settings(u32, u32, bool)
+Messages::WindowServer::ApplyWorkspaceSettingsResponse WindowServerConnection::apply_workspace_settings(u32 rows, u32 columns, bool save)
 {
-    // Workspaces are not implemented; accept and ignore.
+    // Write the grid to the session config; the compositor live-reloads it and the
+    // workspace picker follows (R4.8). `save` is implied: the file is the store.
+    (void)save;
+    if (rows < 1 || columns < 1)
+        return false;
+    write_windowserver_entry("Workspaces"sv, "Rows"sv, ByteString::number(rows));
+    write_windowserver_entry("Workspaces"sv, "Columns"sv, ByteString::number(columns));
     return true;
 }
 
