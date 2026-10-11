@@ -29,6 +29,7 @@
 #include <stdlib.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 namespace LibWM {
@@ -350,13 +351,33 @@ static Optional<NonnullOwnPtr<Core::LocalSocket>> make_portal(ByteString const& 
     dbgln("LibWM: portal connect request '{}'", path);
 
     // Prefer a real session service listening on the portal path (e.g. SDE's
-    // LaunchServer): if a socket exists there, decline so LocalSocket::connect()
-    // reaches it. Otherwise serve the portal in-process below. This is what lets
-    // a session service take over without changing the client API.
+    // LaunchServer): if a socket exists there and is actually accepting
+    // connections, decline so LocalSocket::connect() reaches it. Otherwise serve
+    // the portal in-process below. This is what lets a session service take over
+    // without changing the client API.
     struct stat st = {};
     if (::stat(path.characters(), &st) == 0 && S_ISSOCK(st.st_mode)) {
-        dbgln("LibWM: deferring to the session service on '{}'", path);
-        return {};
+        // A socket can be stale (left over from a previous session), in which case
+        // `connect()` would fail and callers that assume success (e.g.
+        // Desktop::Launcher) would abort. Probe it: defer only if the service is
+        // actually listening; otherwise unlink the stale socket and fall back
+        // in-process.
+        bool alive = false;
+        if (int probe = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0); probe >= 0) {
+            struct sockaddr_un addr = {};
+            addr.sun_family = AF_UNIX;
+            if (path.length() < sizeof(addr.sun_path)) {
+                __builtin_memcpy(addr.sun_path, path.characters(), path.length());
+                alive = ::connect(probe, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0;
+            }
+            ::close(probe);
+        }
+        if (alive) {
+            dbgln("LibWM: deferring to the session service on '{}'", path);
+            return {};
+        }
+        dbgln("LibWM: portal socket '{}' is stale; serving in-process", path);
+        ::unlink(path.characters());
     }
 
     // These portals are spawned per connection rather than served in-process:
