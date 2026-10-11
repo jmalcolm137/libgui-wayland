@@ -43,7 +43,20 @@ ErrorOr<int> serenity_main(Main::Arguments)
     outln("FONT-PARITY: Katica 14 resolved={} (expected false: no such bitmap face)", katica_14);
     outln("FONT-PARITY: SerenitySans 14 resolved={} (expected true: scalable)", sans_14);
 
-    bool const confirmed = katica_10 && !katica_14 && sans_14;
-    outln("FONT-PARITY: zoom-no-op confirmed={}", confirmed);
+    // R4.7: the font broker lets the user pick a scalable family as the system
+    // font. With that, size-based zoom resolves at arbitrary sizes (the R3
+    // no-op is intentionally flipped when a scalable family is chosen).
+    Gfx::FontDatabase::set_default_font_query("SerenitySans 12 400 0"sv);
+    bool zoom_works = true;
+    for (float size : { 8.0f, 10.0f, 12.0f, 14.0f, 18.0f, 24.0f, 32.0f }) {
+        if (!get("SerenitySans"sv, size)) {
+            zoom_works = false;
+            break;
+        }
+    }
+    outln("FONT-PARITY: scalable zoom resolves at arbitrary sizes={} (expected true)", zoom_works);
+
+    bool const confirmed = katica_10 && !katica_14 && sans_14 && zoom_works;
+    outln("FONT-PARITY: confirmed={}", confirmed);
     return confirmed ? 0 : 1;
 }

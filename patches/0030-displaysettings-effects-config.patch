@@ -1,0 +1,32 @@
+diff --git a/Userland/Applications/DisplaySettings/EffectsSettingsWidget.cpp b/Userland/Applications/DisplaySettings/EffectsSettingsWidget.cpp
+index b3bafe62..c05f4276 100644
+--- a/Userland/Applications/DisplaySettings/EffectsSettingsWidget.cpp
++++ b/Userland/Applications/DisplaySettings/EffectsSettingsWidget.cpp
+@@ -11,6 +11,7 @@
+ #include <LibGUI/ComboBox.h>
+ #include <LibGUI/ConnectionToWindowServer.h>
+ #include <LibGUI/ItemListModel.h>
++#include <stdlib.h>
+ 
+ namespace GUI {
+ 
+@@ -112,7 +113,18 @@ ErrorOr<void> EffectsSettingsWidget::setup_interface()
+ 
+ ErrorOr<void> EffectsSettingsWidget::load_settings()
+ {
+-    auto ws_config = TRY(Core::ConfigFile::open("/etc/WindowServer.ini"));
++    // SDE: read the session WindowServer.ini (in the state directory) rather than
++    // the SerenityOS /etc path. Create it if missing so the tab still initialises.
++    ByteString config_path;
++    if (auto const* dir = getenv("SDE_STATE_DIR"); dir && *dir)
++        config_path = ByteString::formatted("{}/WindowServer.ini", dir);
++    else if (auto const* config = getenv("XDG_CONFIG_HOME"); config && *config)
++        config_path = ByteString::formatted("{}/sde/WindowServer.ini", config);
++    else if (auto const* home = getenv("HOME"); home && *home)
++        config_path = ByteString::formatted("{}/.config/sde/WindowServer.ini", home);
++    if (config_path.is_empty())
++        config_path = "/etc/WindowServer.ini"sv;
++    auto ws_config = TRY(Core::ConfigFile::open(config_path, Core::ConfigFile::AllowWriting::Yes));
+     Vector<bool> effects = {
+         ws_config->read_bool_entry("Effects", "AnimateMenus", true),
+         ws_config->read_bool_entry("Effects", "FlashMenus", true),

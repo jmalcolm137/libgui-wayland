@@ -13,6 +13,7 @@
 #include <LibCore/Directory.h>
 #include <LibCore/File.h>
 #include <LibGfx/ImageFormats/PNGWriter.h>
+#include <LibGfx/Font/FontDatabase.h>
 #include <LibGfx/Painter.h>
 #include <LibGfx/SystemTheme.h>
 #include <LibGUI/Window.h>
@@ -95,6 +96,34 @@ void write_cursor_entry(StringView group, StringView key, StringView value)
 {
     (void)Core::Directory::create(sde_state_dir(), Core::Directory::CreateDirectories::Yes);
     auto config = Core::ConfigFile::open(sde_state_file("cursor.ini"sv), Core::ConfigFile::AllowWriting::Yes);
+    if (config.is_error())
+        return;
+    config.value()->write_entry(group, key, value);
+    (void)config.value()->sync();
+}
+
+// The SDE WindowServer.ini (the compositor's config schema): effects, input
+// ranges, workspace grid, ... The port reads it for values clients need and
+// writes the [Effects] section back when the user changes effects.
+ByteString windowserver_ini_path()
+{
+    if (auto const* dir = getenv("SDE_STATE_DIR"); dir && *dir)
+        return ByteString::formatted("{}/WindowServer.ini", dir);
+    if (auto const* config = getenv("XDG_CONFIG_HOME"); config && *config)
+        return ByteString::formatted("{}/sde/WindowServer.ini", config);
+    if (auto const* home = getenv("HOME"); home && *home)
+        return ByteString::formatted("{}/.config/sde/WindowServer.ini", home);
+    return {};
+}
+
+void write_windowserver_entry(StringView group, StringView key, StringView value)
+{
+    auto path = windowserver_ini_path();
+    if (path.is_empty())
+        return;
+    if (auto directory = LexicalPath(path).dirname(); !directory.is_empty())
+        (void)Core::Directory::create(ByteString { directory }, Core::Directory::CreateDirectories::Yes);
+    auto config = Core::ConfigFile::open(path, Core::ConfigFile::AllowWriting::Yes);
     if (config.is_error())
         return;
     config.value()->write_entry(group, key, value);
@@ -238,6 +267,15 @@ static ByteString input_range_entry(StringView key)
     return {};
 }
 
+namespace {
+struct FontQueries {
+    ByteString default_query;
+    ByteString fixed_width_query;
+    ByteString window_title_query;
+};
+FontQueries read_fonts_broker();
+}
+
 void WindowServerConnection::send_fast_greet()
 {
     install_input_callbacks();
@@ -277,13 +315,20 @@ void WindowServerConnection::send_fast_greet()
     GUI::Window::set_backing_store_scale(client_scale);
     WaylandClient::the().set_client_scale(client_scale);
 
+    // R4.7: the session font. Prefer the font broker (else the Katica/Csilla
+    // bitmap defaults), so a client's first FontDatabase update already uses it.
+    auto font_queries = read_fonts_broker();
+    ByteString default_query = font_queries.default_query.is_empty() ? ByteString { "Katica 10 400 0" } : font_queries.default_query;
+    ByteString fixed_query = font_queries.fixed_width_query.is_empty() ? ByteString { "Csilla 10 400 0" } : font_queries.fixed_width_query;
+    ByteString title_query = font_queries.window_title_query.is_empty() ? ByteString { "Katica 10 700 0" } : font_queries.window_title_query;
+
     async_fast_greet(
         move(screen_rects),
         0, workspace_rows, workspace_columns,
         Gfx::current_system_theme_buffer(),
-        "Katica 10 400 0"sv,
-        "Csilla 10 400 0"sv,
-        "Katica 10 700 0"sv,
+        default_query,
+        fixed_query,
+        title_query,
         move(effects),
         m_client_id);
 }
@@ -849,6 +894,38 @@ ByteString theme_broker_path()
     return ByteString { "/tmp/sde-theme" };
 }
 
+ByteString fonts_broker_path()
+{
+    if (auto const* runtime = getenv("XDG_RUNTIME_DIR"); runtime && *runtime)
+        return ByteString::formatted("{}/sde-fonts", runtime);
+    return ByteString { "/tmp/sde-fonts" };
+}
+
+FontQueries read_fonts_broker()
+{
+    FontQueries queries;
+    auto file = Core::File::open(fonts_broker_path(), Core::File::OpenMode::Read);
+    if (file.is_error())
+        return queries;
+    auto contents = file.value()->read_until_eof();
+    if (contents.is_error())
+        return queries;
+    auto lines = StringView { contents.value().bytes() }.split_view('\n');
+    if (lines.size() > 0)
+        queries.default_query = lines[0].trim_whitespace().to_byte_string();
+    if (lines.size() > 1)
+        queries.fixed_width_query = lines[1].trim_whitespace().to_byte_string();
+    if (lines.size() > 2)
+        queries.window_title_query = lines[2].trim_whitespace().to_byte_string();
+    return queries;
+}
+
+void write_fonts_broker(ByteString const& default_query, ByteString const& fixed_width_query, ByteString const& window_title_query)
+{
+    if (auto file = Core::File::open(fonts_broker_path(), Core::File::OpenMode::Write); !file.is_error())
+        (void)file.value()->write_until_depleted(ByteString::formatted("{}\n{}\n{}\n", default_query, fixed_width_query, window_title_query));
+}
+
 ByteString resource_root_path()
 {
     if (auto const* res = getenv("SERENITY_RES_ROOT"); res && *res)
@@ -927,6 +1004,44 @@ void WindowServerConnection::apply_theme_from_broker()
         m_theme_name = LexicalPath(host_theme).title();
         async_update_system_theme(buffer.value());
     }
+}
+
+void WindowServerConnection::watch_fonts()
+{
+    if (m_fonts_watcher)
+        return;
+    // Apply any already-chosen font immediately (a client started after a font
+    // change must still pick it up), then follow further changes.
+    apply_fonts_from_broker();
+    m_fonts_watcher = Core::FileWatcher::create().release_value_but_fixme_should_propagate_errors();
+    m_fonts_watcher->on_change = [this](Core::FileWatcherEvent const& event) {
+        if (event.event_path != fonts_broker_path())
+            return;
+        apply_fonts_from_broker();
+    };
+    if (auto directory = LexicalPath(fonts_broker_path()).dirname(); !directory.is_empty())
+        (void)m_fonts_watcher->add_watch(directory, Core::FileWatcherEvent::Type::ChildCreated);
+    auto path = fonts_broker_path();
+    if (Core::File::open(path, Core::File::OpenMode::Read).is_error())
+        (void)Core::File::open(path, Core::File::OpenMode::Write);
+    (void)m_fonts_watcher->add_watch(path, Core::FileWatcherEvent::Type::ContentModified | Core::FileWatcherEvent::Type::MetadataModified);
+}
+
+void WindowServerConnection::apply_fonts_from_broker()
+{
+    auto queries = read_fonts_broker();
+    if (queries.default_query.is_empty())
+        return;
+    dbgln("LibWM: applying font broker (default '{}')", queries.default_query);
+    // The connection runs in-process with the client, so set the queries directly
+    // too: widgets created afterwards (e.g. Display Settings' Fonts tab) then see
+    // the chosen font, not just those relayouted by the async notification.
+    Gfx::FontDatabase::set_default_font_query(queries.default_query);
+    if (!queries.fixed_width_query.is_empty())
+        Gfx::FontDatabase::set_fixed_width_font_query(queries.fixed_width_query);
+    if (!queries.window_title_query.is_empty())
+        Gfx::FontDatabase::set_window_title_font_query(queries.window_title_query);
+    async_update_system_fonts(queries.default_query, queries.fixed_width_query, queries.window_title_query);
 }
 
 Messages::WindowServer::IsSystemThemeOverriddenResponse WindowServerConnection::is_system_theme_overridden()
@@ -1193,10 +1308,34 @@ Messages::WindowServer::GetKeyboardLayoutNamesResponse WindowServerConnection::g
     return unique;
 }
 
-Messages::WindowServer::SetSystemFontsResponse WindowServerConnection::set_system_fonts(ByteString const&, ByteString const&, ByteString const&)
+void WindowServerConnection::set_system_effects(Vector<bool> const& effects, u8 geometry, u8 tile_window)
 {
-    // Fonts are fixed to the bundled bitmap family; accept and ignore. A valid
-    // response is required so synchronous callers do not block.
+    // Apply to this client (LibGUI's SystemEffects) and record the choices so the
+    // compositor (geometry HUD) and other clients pick them up (R4.7).
+    async_update_system_effects(effects);
+    write_windowserver_entry("Effects"sv, "ShowGeometry"sv, WindowServer::ShowGeometryTools::enum_to_string(static_cast<WindowServer::ShowGeometry>(geometry)));
+    write_windowserver_entry("Effects"sv, "TileWindow"sv, WindowServer::TileWindowTools::enum_to_string(static_cast<WindowServer::TileWindow>(tile_window)));
+    static constexpr Array effect_names = {
+        "AnimateMenus"sv, "FlashMenus"sv, "AnimateWindows"sv, "SmoothScrolling"sv,
+        "TabAccents"sv, "SplitterKnurls"sv, "Tooltips"sv, "MenuShadow"sv,
+        "WindowShadow"sv, "TooltipShadow"sv,
+    };
+    for (size_t i = 0; i < effects.size() && i < effect_names.size(); ++i)
+        write_windowserver_entry("Effects"sv, effect_names[i], effects[i] ? "true"sv : "false"sv);
+}
+
+Messages::WindowServer::SetSystemFontsResponse WindowServerConnection::set_system_fonts(ByteString const& default_font_query, ByteString const& fixed_width_font_query, ByteString const& window_title_font_query)
+{
+    // Apply in-process (so subsequent lookups resolve the new font), restyle this
+    // client and tell it to re-layout, then record the choice in the session font
+    // broker so the compositor and other clients pick it up (R4.7).
+    Gfx::FontDatabase::set_default_font_query(default_font_query);
+    if (!fixed_width_font_query.is_empty())
+        Gfx::FontDatabase::set_fixed_width_font_query(fixed_width_font_query);
+    if (!window_title_font_query.is_empty())
+        Gfx::FontDatabase::set_window_title_font_query(window_title_font_query);
+    async_update_system_fonts(default_font_query, fixed_width_font_query, window_title_font_query);
+    write_fonts_broker(default_font_query, fixed_width_font_query, window_title_font_query);
     return true;
 }
 

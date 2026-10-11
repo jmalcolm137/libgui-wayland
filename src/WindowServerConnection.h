@@ -52,6 +52,7 @@ private:
         , WindowClientEndpoint::Proxy<WindowServerEndpoint>(*this, {})
     {
         watch_theme();
+        watch_fonts();
     }
 
     struct Window {
@@ -179,12 +180,23 @@ private:
     void set_keyboard_layout(ByteString const& layouts, ByteString const& variant, ByteString const& model, ByteString const& options) override;
     Messages::WindowServer::GetKeyboardLayoutNamesResponse get_keyboard_layout_names() override;
 
+    // Effects (Display Settings ▸ Effects, R4.7): apply to this client and record
+    // the choices in WindowServer.ini [Effects] for the compositor and others.
+    void set_system_effects(Vector<bool> const& effects, u8 geometry, u8 tile_window) override;
+
     // Broadcasts theme changes between processes (each app has its own
     // WindowServer shim) via a shared file the compositor and clients watch.
     void watch_theme();
     void apply_theme_from_broker();
     ByteString m_theme_name { "Default" };
     RefPtr<Core::FileWatcher> m_theme_watcher;
+
+    // System fonts: a session broker ($XDG_RUNTIME_DIR/sde-fonts), like the
+    // theme broker, so a font change applies to every client and the compositor
+    // (R4.7). Also what makes size-based zoom work with a scalable family.
+    void watch_fonts();
+    void apply_fonts_from_broker();
+    RefPtr<Core::FileWatcher> m_fonts_watcher;
 
     // Wallpaper/background: the shim persists the chosen image, mode and colour
     // to a shared state directory the compositor watches (no cross-process bus).
