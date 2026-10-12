@@ -742,8 +742,9 @@ void WindowServerConnection::set_window_alpha_hit_threshold(i32, float)
 {
 }
 
-void WindowServerConnection::set_window_icon_bitmap(i32, Gfx::ShareableBitmap const&)
+void WindowServerConnection::set_window_icon_bitmap(i32 window_id, Gfx::ShareableBitmap const& icon)
 {
+    WaylandClient::the().set_window_icon_bitmap(window_id, icon);
 }
 
 void WindowServerConnection::set_window_progress(i32, Optional<i32> const&)

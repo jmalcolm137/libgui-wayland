@@ -30,8 +30,9 @@
 
     The compositor owns some of the window chrome that LibWindowServer draws
     into the client's buffer; this protocol carries the compositor's decisions
-    for that chrome. Right now it only covers the window menu bar, which the
-    window menu can show or hide. This file is shared verbatim between the SDE
+    for that chrome (menu bar visibility, position) and, the other way, the
+    client's window icon (set_icon), which the compositor shows in the titlebar
+    and the Alt+Tab switcher. This file is shared verbatim between the SDE
     repository (server side) and libgui-wayland (client side); keep them in
     sync.
   -->
@@ -63,6 +64,23 @@
     <description summary="per-toplevel chrome control">
       Compositor-driven chrome for a single toplevel.
     </description>
+
+    <request name="set_icon">
+      <description summary="set the window's icon">
+        The client supplies the window's icon (its application icon), as
+        memory-mappable pixels, so the compositor can show it in the window
+        chrome and the Alt+Tab switcher (SerenityOS: Window::icon()). width 0
+        clears the icon. format is a wl_shm format value (0 = ARGB8888,
+        little-endian, i.e. B,G,R,A bytes). stride is the row size in bytes. The
+        compositor copies the pixels, so the client may close fd afterwards and
+        may reuse or free the memory.
+      </description>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+      <arg name="stride" type="int"/>
+      <arg name="format" type="uint"/>
+      <arg name="fd" type="fd"/>
+    </request>
 
     <request name="destroy" type="destructor">
       <description summary="destroy the chrome handle"/>

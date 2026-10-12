@@ -17,6 +17,7 @@
 #include <AK/Vector.h>
 #include <LibCore/AnonymousBuffer.h>
 #include <LibGfx/Point.h>
+#include <LibGfx/ShareableBitmap.h>
 #include <LibGfx/Size.h>
 
 struct wl_buffer;
@@ -137,6 +138,10 @@ public:
     void set_fullscreen(i32 window_id, bool fullscreen);
     void set_maximized(i32 window_id, bool maximized);
     void set_minimized(i32 window_id);
+
+    // The window's icon, pushed to the compositor over serenity-window when it
+    // offers the manager (SerenityOS: Window::icon()). An invalid icon clears it.
+    void set_window_icon_bitmap(i32 window_id, Gfx::ShareableBitmap const&);
 
     // Attach the client's shared bitmap (given as an fd) and commit. `size` is
     // the backing store size; `visible_size` is the part to present (they differ

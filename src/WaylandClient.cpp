@@ -1998,6 +1998,45 @@ void WaylandClient::set_minimized(i32 window_id)
     }
 }
 
+void WaylandClient::set_window_icon_bitmap(i32 window_id, Gfx::ShareableBitmap const& icon)
+{
+    auto* window_surface = find(window_id);
+    if (!window_surface || !window_surface->chrome)
+        return;
+
+    if (!icon.is_valid() || !icon.bitmap()) {
+        serenity_toplevel_set_icon(window_surface->chrome, 0, 0, 0, 0, -1);
+        wl_display_flush(m_display);
+        return;
+    }
+
+    auto const& bitmap = *icon.bitmap();
+    int const width = bitmap.width();
+    int const height = bitmap.height();
+    int const stride = bitmap.pitch();
+    if (width <= 0 || height <= 0 || stride <= 0)
+        return;
+
+    size_t const size = static_cast<size_t>(stride) * static_cast<size_t>(height);
+    int fd = memfd_create("sde-window-icon", MFD_CLOEXEC);
+    if (fd < 0)
+        return;
+    if (ftruncate(fd, static_cast<off_t>(size)) != 0) {
+        close(fd);
+        return;
+    }
+    void* mapping = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (mapping != MAP_FAILED) {
+        for (int y = 0; y < height; ++y)
+            memcpy(static_cast<u8*>(mapping) + static_cast<size_t>(y) * stride, bitmap.scanline(y), static_cast<size_t>(stride));
+        munmap(mapping, size);
+    }
+    // wl_shm ARGB8888 is little-endian B,G,R,A, matching Gfx::BitmapFormat::BGRA8888.
+    serenity_toplevel_set_icon(window_surface->chrome, width, height, stride, 0, fd);
+    close(fd);
+    wl_display_flush(m_display);
+}
+
 void WaylandClient::purge_released_buffers(WindowSurface& window_surface)
 {
     Vector<NonnullOwnPtr<BufferRecord>> kept;
