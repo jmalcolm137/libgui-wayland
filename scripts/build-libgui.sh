@@ -37,6 +37,10 @@ if [[ ${#TARGETS[@]} -eq 0 ]]; then
         KeyboardSettings Mail MailSettings Maps MapsSettings MouseSettings NetworkSettings
         Presenter Run Screenshot Settings SoundPlayer SpaceAnalyzer Spreadsheet
         SystemMonitor TerminalSettings TextEditor ThemeEditor UsersSettings VideoPlayer Weather
+        # The games and DevTools (the Taskbar's Games and Development menus).
+        2048 BrickGame Chess ColorLines FlappyBug Flood GameOfLife Hearts MasterWord
+        Minesweeper Snake Solitaire Spider ChessEngine
+        GMLPlayground HackStudio SQLStudio
     )
 fi
 

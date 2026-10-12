@@ -1,0 +1,106 @@
+diff --git a/Userland/DevTools/HackStudio/Debugger/BacktraceModel.h b/Userland/DevTools/HackStudio/Debugger/BacktraceModel.h
+index e3770b47..7f155dd7 100644
+--- a/Userland/DevTools/HackStudio/Debugger/BacktraceModel.h
++++ b/Userland/DevTools/HackStudio/Debugger/BacktraceModel.h
+@@ -10,7 +10,7 @@
+ #include <LibDebug/ProcessInspector.h>
+ #include <LibGUI/ListView.h>
+ #include <LibGUI/Model.h>
+-#include <sys/arch/regs.h>
++#include <LibDebug/PtraceRegisters.h>
+ 
+ namespace Debug {
+ 
+diff --git a/Userland/DevTools/HackStudio/Debugger/DebugInfoWidget.h b/Userland/DevTools/HackStudio/Debugger/DebugInfoWidget.h
+index e08b23df..e619e3bf 100644
+--- a/Userland/DevTools/HackStudio/Debugger/DebugInfoWidget.h
++++ b/Userland/DevTools/HackStudio/Debugger/DebugInfoWidget.h
+@@ -17,7 +17,7 @@
+ #include <LibGUI/ToolbarContainer.h>
+ #include <LibGUI/TreeView.h>
+ #include <LibGUI/Widget.h>
+-#include <sys/arch/regs.h>
++#include <LibDebug/PtraceRegisters.h>
+ 
+ namespace HackStudio {
+ 
+diff --git a/Userland/DevTools/HackStudio/Debugger/DisassemblyModel.h b/Userland/DevTools/HackStudio/Debugger/DisassemblyModel.h
+index fce285a5..bac041de 100644
+--- a/Userland/DevTools/HackStudio/Debugger/DisassemblyModel.h
++++ b/Userland/DevTools/HackStudio/Debugger/DisassemblyModel.h
+@@ -10,7 +10,7 @@
+ #include <AK/Vector.h>
+ #include <LibDisassembly/x86/Instruction.h>
+ #include <LibGUI/Model.h>
+-#include <sys/arch/regs.h>
++#include <LibDebug/PtraceRegisters.h>
+ 
+ namespace Debug {
+ 
+diff --git a/Userland/DevTools/HackStudio/Debugger/DisassemblyWidget.h b/Userland/DevTools/HackStudio/Debugger/DisassemblyWidget.h
+index 61277660..a7b0a11d 100644
+--- a/Userland/DevTools/HackStudio/Debugger/DisassemblyWidget.h
++++ b/Userland/DevTools/HackStudio/Debugger/DisassemblyWidget.h
+@@ -12,7 +12,7 @@
+ #include <LibGUI/Model.h>
+ #include <LibGUI/TableView.h>
+ #include <LibGUI/Widget.h>
+-#include <sys/arch/regs.h>
++#include <LibDebug/PtraceRegisters.h>
+ 
+ namespace HackStudio {
+ 
+diff --git a/Userland/DevTools/HackStudio/Debugger/RegistersModel.cpp b/Userland/DevTools/HackStudio/Debugger/RegistersModel.cpp
+index 781102f2..d8b4e37b 100644
+--- a/Userland/DevTools/HackStudio/Debugger/RegistersModel.cpp
++++ b/Userland/DevTools/HackStudio/Debugger/RegistersModel.cpp
+@@ -30,7 +30,11 @@ RegistersModel::RegistersModel(PtraceRegisters const& regs)
+     m_registers.append({ "r13", regs.r13 });
+     m_registers.append({ "r14", regs.r14 });
+     m_registers.append({ "r15", regs.r15 });
++#if defined(AK_OS_SERENITY)
+     m_registers.append({ "rflags", regs.rflags });
++#else
++    m_registers.append({ "rflags", regs.eflags });
++#endif
+ 
+     m_registers.append({ "cs", regs.cs });
+     m_registers.append({ "ss", regs.ss });
+@@ -101,7 +105,11 @@ RegistersModel::RegistersModel(PtraceRegisters const& current_regs, PtraceRegist
+     m_registers.append({ "r13", current_regs.r13, current_regs.r13 != previous_regs.r13 });
+     m_registers.append({ "r14", current_regs.r14, current_regs.r14 != previous_regs.r14 });
+     m_registers.append({ "r15", current_regs.r15, current_regs.r15 != previous_regs.r15 });
++#if defined(AK_OS_SERENITY)
+     m_registers.append({ "rflags", current_regs.rflags, current_regs.rflags != previous_regs.rflags });
++#else
++    m_registers.append({ "rflags", current_regs.eflags, current_regs.eflags != previous_regs.eflags });
++#endif
+     m_registers.append({ "cs", current_regs.cs, current_regs.cs != previous_regs.cs });
+     m_registers.append({ "ss", current_regs.ss, current_regs.ss != previous_regs.ss });
+     m_registers.append({ "ds", current_regs.ds, current_regs.ds != previous_regs.ds });
+diff --git a/Userland/DevTools/HackStudio/Debugger/RegistersModel.h b/Userland/DevTools/HackStudio/Debugger/RegistersModel.h
+index b9d347c8..3cde91df 100644
+--- a/Userland/DevTools/HackStudio/Debugger/RegistersModel.h
++++ b/Userland/DevTools/HackStudio/Debugger/RegistersModel.h
+@@ -9,7 +9,7 @@
+ 
+ #include <AK/Vector.h>
+ #include <LibGUI/Model.h>
+-#include <sys/arch/regs.h>
++#include <LibDebug/PtraceRegisters.h>
+ 
+ namespace HackStudio {
+ 
+diff --git a/Userland/DevTools/HackStudio/Debugger/VariablesModel.h b/Userland/DevTools/HackStudio/Debugger/VariablesModel.h
+index ba31ad59..c037fc10 100644
+--- a/Userland/DevTools/HackStudio/Debugger/VariablesModel.h
++++ b/Userland/DevTools/HackStudio/Debugger/VariablesModel.h
+@@ -10,7 +10,7 @@
+ #include <AK/NonnullOwnPtr.h>
+ #include <LibGUI/Model.h>
+ #include <LibGUI/TreeView.h>
+-#include <sys/arch/regs.h>
++#include <LibDebug/PtraceRegisters.h>
+ 
+ namespace HackStudio {
+ 

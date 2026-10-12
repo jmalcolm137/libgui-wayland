@@ -1,6 +1,14 @@
---- a/Meta/Lagom/CMakeLists.txt	2026-10-12 14:55:32.245156131 -0700
-+++ b/Meta/Lagom/CMakeLists.txt	2026-10-12 14:55:28.549090528 -0700
-@@ -700,6 +700,36 @@
+--- a/Meta/Lagom/CMakeLists.txt
++++ b/Meta/Lagom/CMakeLists.txt
+@@ -516,6 +516,7 @@
+         Cards
+         Chess
+         CMake
++        CodeComprehension
+         Coredump
+         Debug
+         EDID        Keyboard
+@@ -700,6 +701,49 @@
                  target_compile_definitions(${app} PRIVATE THREAD_PRIORITY_MAX=99 MS_WXALLOWED=0 MS_AXALLOWED=0 MS_NOREGULAR=0)
              endif()
          endforeach()
@@ -34,6 +42,19 @@
 +        target_include_directories(2048 PRIVATE "${SERENITY_PROJECT_ROOT}/../compat")
 +        # Chess plays against this engine (spawned as a child process).
 +        add_serenity_subdirectory(Userland/Services/ChessEngine)
++        # libgui-wayland: the SerenityOS developer tools (the Taskbar's
++        # Development menu).
++        set(libgui_wayland_devtools
++            GMLPlayground
++            HackStudio
++            SQLStudio
++        )
++        foreach(tool ${libgui_wayland_devtools})
++            add_serenity_subdirectory(Userland/DevTools/${tool})
++            target_link_options(${tool} PRIVATE "-Wl,--no-as-needed")
++            target_link_libraries(${tool} PRIVATE wm serenity-audio)
++            target_include_directories(${tool} PRIVATE "${SERENITY_PROJECT_ROOT}/../compat")
++        endforeach()
          # libgui-wayland: GL demo. Renders through the client-side LibGL/LibSoftGPU
          # stack like 3DFileViewer; no GPU or compositor cooperation required.
          add_serenity_subdirectory(Userland/Demos/Tubes)

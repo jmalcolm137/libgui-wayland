@@ -1,0 +1,396 @@
+diff --git a/Userland/Libraries/LibCoredump/Inspector.cpp b/Userland/Libraries/LibCoredump/Inspector.cpp
+index e369ba2b..34ae67e6 100644
+--- a/Userland/Libraries/LibCoredump/Inspector.cpp
++++ b/Userland/Libraries/LibCoredump/Inspector.cpp
+@@ -61,10 +61,19 @@ Optional<FlatPtr> Inspector::peek(FlatPtr address) const
+ PtraceRegisters Inspector::get_registers() const
+ {
+     PtraceRegisters registers {};
++#if !defined(AK_OS_SERENITY)
++    // ThreadInfo is packed, so its regs member can be unaligned; copy it
++    // byte-wise (the host compiler rejects an unaligned load).
++#    pragma GCC diagnostic push
++#    pragma GCC diagnostic ignored "-Waddress-of-packed-member"
++#endif
+     m_reader->for_each_thread_info([&](ELF::Core::ThreadInfo const& thread_info) {
+-        registers = thread_info.regs;
++        __builtin_memcpy(&registers, &thread_info.regs, sizeof(PtraceRegisters));
+         return IterationDecision::Break;
+     });
++#if !defined(AK_OS_SERENITY)
++#    pragma GCC diagnostic pop
++#endif
+     return registers;
+ }
+ 
+diff --git a/Userland/Libraries/LibDebug/DebugInfo.h b/Userland/Libraries/LibDebug/DebugInfo.h
+index 1fc11492..d1046a9a 100644
+--- a/Userland/Libraries/LibDebug/DebugInfo.h
++++ b/Userland/Libraries/LibDebug/DebugInfo.h
+@@ -14,7 +14,7 @@
+ #include <LibDebug/Dwarf/DwarfInfo.h>
+ #include <LibDebug/Dwarf/LineProgram.h>
+ #include <LibELF/Image.h>
+-#include <sys/arch/regs.h>
++#include "PtraceRegisters.h"
+ 
+ namespace Debug {
+ 
+diff --git a/Userland/Libraries/LibDebug/DebugSession.cpp b/Userland/Libraries/LibDebug/DebugSession.cpp
+index 0a35b7d7..737bbd4b 100644
+--- a/Userland/Libraries/LibDebug/DebugSession.cpp
++++ b/Userland/Libraries/LibDebug/DebugSession.cpp
+@@ -10,6 +10,7 @@
+ #include <AK/LexicalPath.h>
+ #include <AK/Optional.h>
+ #include <AK/Platform.h>
++#include <AK/StringUtils.h>
+ #include <LibFileSystem/FileSystem.h>
+ #include <LibRegex/Regex.h>
+ #include <stdlib.h>
+@@ -86,10 +87,16 @@ OwnPtr<DebugSession> DebugSession::exec_and_attach(ByteString const& command,
+         for (size_t i = 0; i < parts.size(); i++) {
+             args[i] = parts[i].characters();
+         }
++#if defined(AK_OS_SERENITY)
+         char const** envp = bit_cast<char const**>(calloc(2, sizeof(char const*)));
+         // This causes loader to stop on a breakpoint before jumping to the entry point of the program.
+         envp[0] = "_LOADER_BREAKPOINT=1";
+         int rc = execvpe(args[0], const_cast<char**>(args), const_cast<char**>(envp));
++#else
++        // Linux raises SIGTRAP to the tracer right after a successful execve, at
++        // the new image's entry point; there is no SerenityOS loader breakpoint.
++        int rc = execvp(args[0], const_cast<char**>(args));
++#endif
+         if (rc < 0) {
+             perror("execvp");
+             exit(1);
+@@ -101,6 +108,7 @@ OwnPtr<DebugSession> DebugSession::exec_and_attach(ByteString const& command,
+         return {};
+     }
+ 
++#if defined(AK_OS_SERENITY)
+     if (ptrace(PT_ATTACH, pid, 0, 0) < 0) {
+         perror("PT_ATTACH");
+         return {};
+@@ -115,15 +123,24 @@ OwnPtr<DebugSession> DebugSession::exec_and_attach(ByteString const& command,
+         perror("wait_pid");
+         return {};
+     }
++#else
++    // The PTRACE_TRACEME stop above was the execve stop: the target image and
++    // its shared libraries are loaded. Ask the kernel to kill the debuggee if we
++    // die, so we never leak a stopped process.
++    if (ptrace(PTRACE_SETOPTIONS, pid, 0, PTRACE_O_EXITKILL) < 0)
++        perror("PTRACE_SETOPTIONS");
++#endif
+ 
+     auto debug_session = adopt_own(*new DebugSession(pid, source_root, move(on_initialization_progress)));
+ 
++#if defined(AK_OS_SERENITY)
+     // Continue until breakpoint before entry point of main program
+     int wstatus = debug_session->continue_debuggee_and_wait();
+     if (WSTOPSIG(wstatus) != SIGTRAP) {
+         dbgln("expected SIGTRAP");
+         return {};
+     }
++#endif
+ 
+     // At this point, libraries should have been loaded
+     auto update_or_error = debug_session->update_loaded_libs();
+@@ -171,6 +188,7 @@ bool DebugSession::poke(FlatPtr address, FlatPtr data)
+ Optional<FlatPtr> DebugSession::peek(FlatPtr address) const
+ {
+     Optional<FlatPtr> result;
++    errno = 0;
+     auto rc = ptrace(PT_PEEK, m_debuggee_pid, bit_cast<void*>(address), nullptr);
+     if (errno == 0)
+         result = static_cast<FlatPtr>(rc);
+@@ -179,16 +197,33 @@ Optional<FlatPtr> DebugSession::peek(FlatPtr address) const
+ 
+ bool DebugSession::poke_debug(u32 register_index, FlatPtr data) const
+ {
++#if defined(AK_OS_SERENITY)
+     if (ptrace(PT_POKEDEBUG, m_debuggee_pid, bit_cast<void*>(static_cast<FlatPtr>(register_index)), bit_cast<void*>(data)) < 0) {
+         perror("PT_POKEDEBUG");
+         return false;
+     }
++#else
++    // Linux addresses the debug registers through PTRACE_POKEUSER with their
++    // offset in `struct user`.
++    auto* offset = reinterpret_cast<void*>(offsetof(struct user, u_debugreg[0]) + register_index * sizeof(unsigned long));
++    if (ptrace(PTRACE_POKEUSER, m_debuggee_pid, offset, bit_cast<void*>(data)) < 0) {
++        perror("PTRACE_POKEUSER");
++        return false;
++    }
++#endif
+     return true;
+ }
+ 
+ Optional<FlatPtr> DebugSession::peek_debug(u32 register_index) const
+ {
++#if defined(AK_OS_SERENITY)
++    errno = 0;
+     auto rc = ptrace(PT_PEEKDEBUG, m_debuggee_pid, bit_cast<void*>(static_cast<FlatPtr>(register_index)), nullptr);
++#else
++    auto* offset = reinterpret_cast<void*>(offsetof(struct user, u_debugreg[0]) + register_index * sizeof(unsigned long));
++    errno = 0;
++    auto rc = ptrace(PTRACE_PEEKUSER, m_debuggee_pid, offset, nullptr);
++#endif
+     if (errno == 0)
+         return static_cast<FlatPtr>(rc);
+ 
+@@ -343,7 +378,7 @@ void DebugSession::set_registers(PtraceRegisters const& regs)
+ 
+ void DebugSession::continue_debuggee(ContinueType type)
+ {
+-    int command = (type == ContinueType::FreeRun) ? PT_CONTINUE : PT_SYSCALL;
++    auto command = (type == ContinueType::FreeRun) ? PT_CONTINUE : PT_SYSCALL;
+     if (ptrace(command, m_debuggee_pid, 0, 0) < 0) {
+         perror("continue");
+         VERIFY_NOT_REACHED();
+@@ -380,7 +415,11 @@ FlatPtr DebugSession::single_step()
+     // After the debuggee has stopped, we clear the TRAP flag.
+     // TODO: Maybe do this in another place?
+     constexpr u32 TRAP_FLAG = 0x100;
++#    if defined(AK_OS_SERENITY)
+     regs.rflags &= ~(TRAP_FLAG);
++#    else
++    regs.eflags &= ~(TRAP_FLAG);
++#    endif
+     set_registers(regs);
+ #elif ARCH(AARCH64)
+ #elif ARCH(RISCV64)
+@@ -444,6 +483,74 @@ Optional<DebugSession::InsertBreakpointAtSourcePositionResult> DebugSession::ins
+ 
+ ErrorOr<void> DebugSession::update_loaded_libs()
+ {
++#if !defined(AK_OS_SERENITY)
++    // Linux: one file mapping per line in /proc/<pid>/maps,
++    //   start-end perms offset dev inode path
++    auto maps_path = TRY(String::formatted("/proc/{}/maps", m_debuggee_pid));
++    auto maps_file = TRY(Core::File::open(maps_path, Core::File::OpenMode::Read));
++    auto maps_contents = TRY(maps_file->read_until_eof());
++    StringView maps_text(maps_contents.data(), maps_contents.size());
++
++    ScopeGuard progress_guard([this]() {
++        if (m_on_initialization_progress)
++            m_on_initialization_progress(0);
++    });
++
++    size_t total_lines = 0;
++    for (auto line : maps_text.split_view('\n')) {
++        if (!line.is_empty())
++            ++total_lines;
++    }
++
++    size_t line_index = 0;
++    for (auto line : maps_text.split_view('\n')) {
++        if (line.is_empty())
++            continue;
++        ++line_index;
++        if (m_on_initialization_progress)
++            m_on_initialization_progress(line_index / static_cast<float>(total_lines));
++
++        // Fields: range perms offset dev inode path
++        Vector<StringView> fields;
++        size_t cursor = 0;
++        while (cursor < line.length()) {
++            while (cursor < line.length() && (line[cursor] == ' ' || line[cursor] == '\t'))
++                ++cursor;
++            size_t start = cursor;
++            while (cursor < line.length() && line[cursor] != ' ' && line[cursor] != '\t')
++                ++cursor;
++            if (cursor > start)
++                fields.append(line.substring_view(start, cursor - start));
++        }
++        if (fields.size() < 6)
++            continue;
++
++        auto object_path = fields[5].to_byte_string();
++        if (!object_path.starts_with('/'))
++            continue;
++
++        ByteString lib_name = object_path;
++        if (FileSystem::looks_like_shared_library(lib_name))
++            lib_name = LexicalPath::basename(object_path);
++
++        if (m_loaded_libraries.contains(lib_name))
++            continue;
++
++        auto dash = fields[0].find('-').value();
++        auto base_address = AK::StringUtils::convert_to_uint_from_hex<FlatPtr>(fields[0].substring_view(0, dash)).value_or(0);
++
++        auto file_or_error = Core::MappedFile::map(object_path);
++        if (file_or_error.is_error())
++            continue;
++
++        auto image = make<ELF::Image>(file_or_error.value()->bytes());
++        auto debug_info = make<DebugInfo>(*image, m_source_root, base_address);
++        auto lib = make<LoadedLibrary>(lib_name, file_or_error.release_value(), move(image), move(debug_info), base_address);
++        m_loaded_libraries.set(lib_name, move(lib));
++    }
++
++    return {};
++#else
+     auto file_name = TRY(String::formatted("/proc/{}/vm", m_debuggee_pid));
+     auto file = TRY(Core::File::open(file_name, Core::File::OpenMode::Read));
+ 
+@@ -509,6 +616,7 @@ ErrorOr<void> DebugSession::update_loaded_libs()
+     });
+ 
+     return {};
++#endif
+ }
+ 
+ void DebugSession::stop_debuggee()
+diff --git a/Userland/Libraries/LibDebug/DebugSession.h b/Userland/Libraries/LibDebug/DebugSession.h
+index 2106ecf5..b7a6e628 100644
+--- a/Userland/Libraries/LibDebug/DebugSession.h
++++ b/Userland/Libraries/LibDebug/DebugSession.h
+@@ -16,7 +16,7 @@
+ #include <LibDebug/DebugInfo.h>
+ #include <LibDebug/ProcessInspector.h>
+ #include <signal.h>
+-#include <sys/arch/regs.h>
++#include "PtraceRegisters.h"
+ #include <sys/ptrace.h>
+ #include <sys/wait.h>
+ 
+diff --git a/Userland/Libraries/LibDebug/Dwarf/CompilationUnit.cpp b/Userland/Libraries/LibDebug/Dwarf/CompilationUnit.cpp
+index 1539c2ed..9abc803f 100644
+--- a/Userland/Libraries/LibDebug/Dwarf/CompilationUnit.cpp
++++ b/Userland/Libraries/LibDebug/Dwarf/CompilationUnit.cpp
+@@ -35,7 +35,7 @@ ErrorOr<void> CompilationUnit::populate_line_program(ReadonlyBytes debug_line_da
+ 
+     auto res = TRY(die.get_attribute(Attribute::StmtList));
+     if (!res.has_value())
+-        return EINVAL;
++        return Error::from_errno(EINVAL);
+     VERIFY(res->form() == AttributeDataForm::SecOffset);
+ 
+     FixedMemoryStream debug_line_stream { debug_line_data };
+diff --git a/Userland/Libraries/LibDebug/ProcessInspector.h b/Userland/Libraries/LibDebug/ProcessInspector.h
+index 4b6a388a..b66475a6 100644
+--- a/Userland/Libraries/LibDebug/ProcessInspector.h
++++ b/Userland/Libraries/LibDebug/ProcessInspector.h
+@@ -9,7 +9,7 @@
+ 
+ #include "LoadedLibrary.h"
+ #include <AK/Types.h>
+-#include <sys/arch/regs.h>
++#include "PtraceRegisters.h"
+ 
+ namespace Debug {
+ 
+diff --git a/Userland/Libraries/LibDebug/PtraceRegisters.h b/Userland/Libraries/LibDebug/PtraceRegisters.h
+new file mode 100644
+index 00000000..f4795024
+--- /dev/null
++++ b/Userland/Libraries/LibDebug/PtraceRegisters.h
+@@ -0,0 +1,52 @@
++/*
++ * Copyright (c) 2026, libgui-wayland contributors
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#pragma once
++
++// The register set ptrace exchanges. SerenityOS defines its own
++// <sys/arch/regs.h>; on the host we use the native struct user_regs_struct and
++// the native ptrace command set, so LibDebug is Linux-native rather than built
++// against a stand-in for the SerenityOS kernel ABI.
++
++#if defined(AK_OS_SERENITY)
++#    include <sys/arch/regs.h>
++#else
++#    include <AK/Types.h>
++#    include <LibELF/Registers.h>
++#    include <signal.h>
++#    include <stddef.h>
++#    include <sys/ptrace.h>
++#    include <sys/user.h>
++#    include <sys/wait.h>
++
++// SerenityOS ptrace requests map onto the Linux ones. The debug-register
++// requests (PT_PEEKDEBUG/PT_POKEDEBUG) are not aliased here: Linux addresses
++// debug registers through PTRACE_{PEEK,POKE}USER with a struct user offset, so
++// DebugSession branches on those.
++#    define PT_TRACE_ME PTRACE_TRACEME
++#    define PT_ATTACH PTRACE_ATTACH
++#    define PT_DETACH PTRACE_DETACH
++#    define PT_CONTINUE PTRACE_CONT
++#    define PT_SYSCALL PTRACE_SYSCALL
++#    define PT_GETREGS PTRACE_GETREGS
++#    define PT_SETREGS PTRACE_SETREGS
++#    define PT_PEEK PTRACE_PEEKDATA
++#    define PT_POKE PTRACE_POKEDATA
++#    define PT_SINGLESTEP PTRACE_SINGLESTEP
++
++// SerenityOS debug-register indices (Linux: the same x86 DR numbers).
++#    define DEBUG_STATUS_REGISTER 6
++#    define DEBUG_CONTROL_REGISTER 7
++
++// SerenityOS waitpid flags (glibc may already define these).
++#    ifndef WSTOPPED
++#        define WSTOPPED WUNTRACED
++#    endif
++#    ifndef WEXITED
++#        define WEXITED 0
++#    endif
++
++#endif
+diff --git a/Userland/Libraries/LibELF/Core.h b/Userland/Libraries/LibELF/Core.h
+index ac0ac596..ae73c73f 100644
+--- a/Userland/Libraries/LibELF/Core.h
++++ b/Userland/Libraries/LibELF/Core.h
+@@ -7,7 +7,14 @@
+ #pragma once
+ 
+ #include <AK/Types.h>
+-#include <sys/arch/regs.h>
++#include <LibELF/Registers.h>
++
++#if !defined(AK_OS_SERENITY)
++// SerenityOS's "invalid syscall" signal (number 0, i.e. no signal).
++#    ifndef SIGINVAL
++#        define SIGINVAL 0
++#    endif
++#endif
+ 
+ #ifndef KERNEL
+ #    include <AK/ByteString.h>
+diff --git a/Userland/Libraries/LibELF/Registers.h b/Userland/Libraries/LibELF/Registers.h
+new file mode 100644
+index 00000000..ca1f1657
+--- /dev/null
++++ b/Userland/Libraries/LibELF/Registers.h
+@@ -0,0 +1,27 @@
++/*
++ * Copyright (c) 2026, libgui-wayland contributors
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#pragma once
++
++// The register set stored in an ELF core note (and exchanged over ptrace).
++// SerenityOS gets it from <sys/arch/regs.h>; on the host it is the native
++// struct user_regs_struct. This header is the single definition shared by LibELF
++// (core notes) and LibDebug (ptrace).
++
++#if defined(AK_OS_SERENITY)
++#    include <sys/arch/regs.h>
++#else
++#    include <AK/Types.h>
++#    include <sys/user.h>
++
++struct [[gnu::packed]] PtraceRegisters : public user_regs_struct {
++    FlatPtr ip() const { return rip; }
++    void set_ip(FlatPtr ip) { rip = ip; }
++    FlatPtr bp() const { return rbp; }
++    void set_bp(FlatPtr bp) { rbp = bp; }
++};
++
++#endif
