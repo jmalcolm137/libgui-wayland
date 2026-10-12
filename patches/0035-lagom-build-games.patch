@@ -47,6 +47,7 @@
 +        set(libgui_wayland_devtools
 +            GMLPlayground
 +            HackStudio
++            Profiler
 +            SQLStudio
 +        )
 +        foreach(tool ${libgui_wayland_devtools})

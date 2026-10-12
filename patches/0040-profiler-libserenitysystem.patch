@@ -1,0 +1,87 @@
+diff --git a/Userland/DevTools/Profiler/CMakeLists.txt b/Userland/DevTools/Profiler/CMakeLists.txt
+index 099a8493..5d0054be 100644
+--- a/Userland/DevTools/Profiler/CMakeLists.txt
++++ b/Userland/DevTools/Profiler/CMakeLists.txt
+@@ -25,3 +25,13 @@ set(SOURCES
+ 
+ serenity_app(Profiler ICON app-profiler)
+ target_link_libraries(Profiler PRIVATE LibCore LibDebug LibELF LibFileSystem LibGfx LibGUI LibDesktop LibDisassembly LibSymbolication LibMain LibURL)
++
++# Serenity Desktop Environment: on the host, profiling is a native
++# perf_event_open sampler owned by the SDE (LibSerenitySystem). The SDE build
++# passes -DSDE_ROOT; a plain libgui-wayland build leaves it undefined and the
++# Profiler reports that profiling is unavailable (rather than failing to link).
++if (DEFINED SDE_ROOT AND NOT "${SDE_ROOT}" STREQUAL "")
++    add_subdirectory("${SDE_ROOT}/src/LibSerenitySystem" "${CMAKE_CURRENT_BINARY_DIR}/LibSerenitySystem")
++    target_link_libraries(Profiler PRIVATE SerenitySystem)
++    target_compile_definitions(Profiler PRIVATE SDE_HAVE_SERENITY_SYSTEM=1)
++endif()
+diff --git a/Userland/DevTools/Profiler/main.cpp b/Userland/DevTools/Profiler/main.cpp
+index dd25138a..980b0f5b 100644
+--- a/Userland/DevTools/Profiler/main.cpp
++++ b/Userland/DevTools/Profiler/main.cpp
+@@ -38,6 +38,9 @@
+ #include <LibGUI/TreeView.h>
+ #include <LibGUI/Window.h>
+ #include <LibMain/Main.h>
++#if !defined(AK_OS_SERENITY) && defined(SDE_HAVE_SERENITY_SYSTEM)
++#    include <LibSerenitySystem/Profiling.h>
++#endif
+ #include <serenity.h>
+ #include <string.h>
+ 
+@@ -66,7 +69,13 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
+     if (perfcore_file_arg.is_empty()) {
+         if (!generate_profile(pid))
+             return 0;
++#if defined(AK_OS_SERENITY)
+         perfcore_file = ByteString::formatted("/proc/{}/perf_events", pid);
++#elif defined(SDE_HAVE_SERENITY_SYSTEM)
++        perfcore_file = SerenitySystem::Profiling::perfcore_path(pid);
++#else
++        return 0; // generate_profile already reported that profiling is unavailable.
++#endif
+     } else {
+         perfcore_file = perfcore_file_arg;
+     }
+@@ -364,6 +373,7 @@ bool generate_profile(pid_t& pid)
+         process_name = "(unknown)";
+     }
+ 
++#if defined(AK_OS_SERENITY)
+     static constexpr u64 event_mask = PERF_EVENT_SAMPLE | PERF_EVENT_MMAP | PERF_EVENT_MUNMAP | PERF_EVENT_PROCESS_CREATE
+         | PERF_EVENT_PROCESS_EXEC | PERF_EVENT_PROCESS_EXIT | PERF_EVENT_THREAD_CREATE | PERF_EVENT_THREAD_EXIT;
+ 
+@@ -372,13 +382,32 @@ bool generate_profile(pid_t& pid)
+         GUI::MessageBox::show(nullptr, ByteString::formatted("Unable to profile process {}({}): {}", process_name, pid, strerror(saved_errno)), "Profiler"sv, GUI::MessageBox::Type::Error);
+         return false;
+     }
++#elif defined(SDE_HAVE_SERENITY_SYSTEM)
++    // Linux: sample with perf_event_open and emit the perfcore JSON that
++    // Profile parses (SDE's LibSerenitySystem).
++    if (auto result = SerenitySystem::Profiling::enable(pid, 0); result.is_error()) {
++        GUI::MessageBox::show(nullptr, ByteString::formatted("Unable to profile process {}({}): {}", process_name, pid, result.error()), "Profiler"sv, GUI::MessageBox::Type::Error);
++        return false;
++    }
++#else
++    // A libgui-wayland build without the Serenity Desktop Environment: there is
++    // no host kernel profiling interface, so there is nothing to sample with.
++    GUI::MessageBox::show(nullptr, "Profiling is unavailable in this build (no SDE sampler)."_string, "Profiler"sv, GUI::MessageBox::Type::Error);
++    return false;
++#endif
+ 
+     if (!prompt_to_stop_profiling(pid, process_name))
+         return false;
+ 
++#if defined(AK_OS_SERENITY)
+     if (profiling_disable(pid) < 0) {
+         return false;
+     }
++#elif defined(SDE_HAVE_SERENITY_SYSTEM)
++    if (auto result = SerenitySystem::Profiling::disable(pid); result.is_error()) {
++        return false;
++    }
++#endif
+ 
+     return true;
+ }
