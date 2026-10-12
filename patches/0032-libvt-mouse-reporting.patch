@@ -1,0 +1,261 @@
+diff --git a/Userland/Libraries/LibVT/Terminal.cpp b/Userland/Libraries/LibVT/Terminal.cpp
+index 3dc48176..7627db86 100644
+--- a/Userland/Libraries/LibVT/Terminal.cpp
++++ b/Userland/Libraries/LibVT/Terminal.cpp
+@@ -206,6 +206,32 @@ void Terminal::alter_private_mode(bool should_set, Parameters params)
+             dbgln_if(TERMINAL_DEBUG, "Setting bracketed mode enabled={}", should_set);
+             m_needs_bracketed_paste = should_set;
+             break;
++        case 9:
++        case 1000:
++        case 1002:
++        case 1003: {
++            u8 bit = mode == 9 ? 0x1u : mode == 1000 ? 0x2u
++                : mode == 1002               ? 0x4u
++                                             : 0x8u;
++            dbgln_if(TERMINAL_DEBUG, "Setting mouse tracking mode {} (should_set={})", mode, should_set);
++            if (should_set)
++                m_mouse_tracking_flags |= bit;
++            else
++                m_mouse_tracking_flags &= ~bit;
++            break;
++        }
++        case 1004:
++            dbgln_if(TERMINAL_DEBUG, "Setting focus reporting enabled={}", should_set);
++            m_mouse_focus_events = should_set;
++            break;
++        case 1005:
++            dbgln_if(TERMINAL_DEBUG, "Setting UTF-8 mouse coordinates enabled={}", should_set);
++            m_mouse_utf8 = should_set;
++            break;
++        case 1006:
++            dbgln_if(TERMINAL_DEBUG, "Setting SGR mouse coordinates enabled={}", should_set);
++            m_mouse_sgr = should_set;
++            break;
+         default:
+             dbgln("Terminal::alter_private_mode: Unimplemented private mode {} (should_set={})", mode, should_set);
+             break;
+diff --git a/Userland/Libraries/LibVT/Terminal.h b/Userland/Libraries/LibVT/Terminal.h
+index ed170c5a..9ffd0b5f 100644
+--- a/Userland/Libraries/LibVT/Terminal.h
++++ b/Userland/Libraries/LibVT/Terminal.h
+@@ -197,6 +197,15 @@ public:
+         return m_needs_bracketed_paste;
+     }
+ 
++    // Mouse reporting (DEC private modes 9/1000/1002/1003) and its encodings
++    // (1005 UTF-8, 1006 SGR) and focus reporting (1004).
++    bool mouse_tracking() const { return m_mouse_tracking_flags != 0; }
++    bool mouse_reports_any_motion() const { return (m_mouse_tracking_flags & 0x8u) != 0; }
++    bool mouse_reports_drag() const { return (m_mouse_tracking_flags & 0xcu) != 0; }
++    bool mouse_sgr() const { return m_mouse_sgr; }
++    bool mouse_utf8() const { return m_mouse_utf8; }
++    bool mouse_focus_events() const { return m_mouse_focus_events; }
++
+     bool is_within_scroll_region(u16 line) const
+     {
+         return line >= m_scroll_region_top && line <= m_scroll_region_bottom;
+@@ -445,6 +454,12 @@ protected:
+ 
+     bool m_needs_bracketed_paste { false };
+ 
++    // Mouse reporting: bit 0 = X10 (9), bit 1 = 1000, bit 2 = 1002, bit 3 = 1003.
++    u8 m_mouse_tracking_flags { 0 };
++    bool m_mouse_sgr { false };
++    bool m_mouse_utf8 { false };
++    bool m_mouse_focus_events { false };
++
+     Attribute m_current_attribute;
+     Attribute m_saved_attribute;
+ 
+diff --git a/Userland/Libraries/LibVT/TerminalWidget.cpp b/Userland/Libraries/LibVT/TerminalWidget.cpp
+index 725a7667..c675738d 100644
+--- a/Userland/Libraries/LibVT/TerminalWidget.cpp
++++ b/Userland/Libraries/LibVT/TerminalWidget.cpp
+@@ -201,12 +201,16 @@ void TerminalWidget::set_logical_focus(bool focus)
+ void TerminalWidget::focusin_event(GUI::FocusEvent& event)
+ {
+     set_logical_focus(true);
++    if (m_terminal.mouse_focus_events())
++        emit(reinterpret_cast<u8 const*>("\e[I"), 3);
+     return GUI::Frame::focusin_event(event);
+ }
+ 
+ void TerminalWidget::focusout_event(GUI::FocusEvent& event)
+ {
+     set_logical_focus(false);
++    if (m_terminal.mouse_focus_events())
++        emit(reinterpret_cast<u8 const*>("\e[O"), 3);
+     return GUI::Frame::focusout_event(event);
+ }
+ 
+@@ -632,6 +636,50 @@ VT::Position TerminalWidget::buffer_position_at(Gfx::IntPoint position) const
+     return { row, column };
+ }
+ 
++// The cell under a widget-relative point, in *screen* coordinates (0-based,
++// without the scrollback offset) — what mouse reporting reports.
++VT::Position TerminalWidget::screen_position_at(Gfx::IntPoint position) const
++{
++    auto adjusted_position = position.translated(-(frame_thickness() + m_inset), -(frame_thickness() + m_inset));
++    int row = adjusted_position.y() / m_line_height;
++    int column = adjusted_position.x() / m_column_width;
++    row = AK::clamp(row, 0, static_cast<int>(m_terminal.rows()) - 1);
++    column = AK::clamp(column, 0, static_cast<int>(m_terminal.columns()) - 1);
++    return { row, column };
++}
++
++// Encode a mouse event and send it to the application (SGR 1006 or legacy).
++void TerminalWidget::send_mouse_event(GUI::MouseEvent& event, int button, bool release)
++{
++    auto position = screen_position_at(event.position());
++    unsigned x = static_cast<unsigned>(position.column()) + 1;
++    unsigned y = static_cast<unsigned>(position.row()) + 1;
++
++    unsigned modifiers = 0;
++    if (event.shift())
++        modifiers |= 4;
++    if (event.alt())
++        modifiers |= 8;
++    if (event.ctrl())
++        modifiers |= 16;
++
++    if (m_terminal.mouse_sgr()) {
++        StringBuilder builder;
++        builder.appendff("\e[<{};{};{}{}", button | modifiers, x, y, release ? 'm' : 'M');
++        auto sequence = builder.to_byte_string();
++        emit(reinterpret_cast<u8 const*>(sequence.characters()), sequence.length());
++        return;
++    }
++
++    // Legacy encoding: 32 + button; release is button 3; coordinates are clamped
++    // to the 223 byte range (UTF-8 extended coordinates are not implemented).
++    unsigned encoded_button = (release ? 3u : static_cast<unsigned>(button)) | modifiers;
++    x = min(x, 223u);
++    y = min(y, 223u);
++    u8 bytes[6] = { '\e', '[', 'M', static_cast<u8>(32 + encoded_button), static_cast<u8>(32 + x), static_cast<u8>(32 + y) };
++    emit(bytes, sizeof(bytes));
++}
++
+ u32 TerminalWidget::code_point_at(VT::Position const& position) const
+ {
+     VERIFY(position.is_valid());
+@@ -773,6 +821,8 @@ VT::Range TerminalWidget::find_previous(StringView needle, VT::Position const& s
+ 
+ void TerminalWidget::doubleclick_event(GUI::MouseEvent& event)
+ {
++    if (m_terminal.mouse_tracking())
++        return;
+     if (event.button() == GUI::MouseButton::Primary) {
+         auto attribute = m_terminal.attribute_at(buffer_position_at(event.position()));
+         if (attribute.href_id.has_value()) {
+@@ -826,6 +876,24 @@ void TerminalWidget::copy()
+ 
+ void TerminalWidget::mouseup_event(GUI::MouseEvent& event)
+ {
++    if (m_terminal.mouse_tracking()) {
++        int button;
++        switch (event.button()) {
++        case GUI::MouseButton::Primary:
++            button = 0;
++            break;
++        case GUI::MouseButton::Middle:
++            button = 1;
++            break;
++        case GUI::MouseButton::Secondary:
++            button = 2;
++            break;
++        default:
++            return;
++        }
++        send_mouse_event(event, button, true);
++        return;
++    }
+     if (event.button() == GUI::MouseButton::Primary) {
+         if (m_active_href_id.has_value()) {
+             m_active_href = {};
+@@ -842,6 +910,25 @@ void TerminalWidget::mouseup_event(GUI::MouseEvent& event)
+ 
+ void TerminalWidget::mousedown_event(GUI::MouseEvent& event)
+ {
++    if (m_terminal.mouse_tracking()) {
++        int button;
++        switch (event.button()) {
++        case GUI::MouseButton::Primary:
++            button = 0;
++            break;
++        case GUI::MouseButton::Middle:
++            button = 1;
++            break;
++        case GUI::MouseButton::Secondary:
++            button = 2;
++            break;
++        default:
++            return;
++        }
++        send_mouse_event(event, button, false);
++        return;
++    }
++
+     using namespace AK::TimeLiterals;
+ 
+     if (event.button() == GUI::MouseButton::Primary) {
+@@ -878,6 +965,23 @@ void TerminalWidget::mousedown_event(GUI::MouseEvent& event)
+ 
+ void TerminalWidget::mousemove_event(GUI::MouseEvent& event)
+ {
++    if (m_terminal.mouse_tracking() && m_terminal.mouse_reports_drag()) {
++        bool have_button = event.buttons() != 0;
++        if (!have_button && !m_terminal.mouse_reports_any_motion())
++            return;
++        int button = 3;
++        if (have_button) {
++            if (event.buttons() & static_cast<unsigned>(GUI::MouseButton::Primary))
++                button = 0;
++            else if (event.buttons() & static_cast<unsigned>(GUI::MouseButton::Middle))
++                button = 1;
++            else if (event.buttons() & static_cast<unsigned>(GUI::MouseButton::Secondary))
++                button = 2;
++        }
++        send_mouse_event(event, button + 32, false);
++        return;
++    }
++
+     auto position = buffer_position_at(event.position());
+ 
+     auto attribute = m_terminal.attribute_at(position);
+@@ -986,6 +1090,21 @@ void TerminalWidget::leave_event(Core::Event&)
+ 
+ void TerminalWidget::mousewheel_event(GUI::MouseEvent& event)
+ {
++    if (m_terminal.mouse_tracking()) {
++        // Report the wheel as button 64 (up) / 65 (down) (+64 for horizontal).
++        int button = 0;
++        if (event.wheel_delta_y() < 0)
++            button = 64;
++        else if (event.wheel_delta_y() > 0)
++            button = 65;
++        else if (event.wheel_delta_x() < 0)
++            button = 66;
++        else if (event.wheel_delta_x() > 0)
++            button = 67;
++        if (button != 0)
++            send_mouse_event(event, button, false);
++        return;
++    }
+     if (!is_scrollable())
+         return;
+     set_auto_scroll_direction(AutoScrollDirection::None);
+diff --git a/Userland/Libraries/LibVT/TerminalWidget.h b/Userland/Libraries/LibVT/TerminalWidget.h
+index 50bd9009..66ef1d8e 100644
+--- a/Userland/Libraries/LibVT/TerminalWidget.h
++++ b/Userland/Libraries/LibVT/TerminalWidget.h
+@@ -69,6 +69,8 @@ public:
+     VT::Range normalized_selection() const { return m_selection.normalized(); }
+     void set_selection(const VT::Range& selection);
+     VT::Position buffer_position_at(Gfx::IntPoint) const;
++    VT::Position screen_position_at(Gfx::IntPoint) const;
++    void send_mouse_event(GUI::MouseEvent&, int button, bool release);
+ 
+     VT::Range find_next(StringView, const VT::Position& start = {}, bool case_sensitivity = false, bool should_wrap = false);
+     VT::Range find_previous(StringView, const VT::Position& start = {}, bool case_sensitivity = false, bool should_wrap = false);
