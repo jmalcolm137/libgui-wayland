@@ -160,6 +160,77 @@ index 8fee9f51..62b5bedd 100644
          m_udp_socket_table_view->set_model(MUST(GUI::SortingProxyModel::create(*m_udp_socket_model)));
  
          m_update_timer = add<Core::Timer>(
+diff --git a/Userland/Applications/SystemMonitor/ProcessFileDescriptorMapWidget.cpp b/Userland/Applications/SystemMonitor/ProcessFileDescriptorMapWidget.cpp
+index 162d9b13..1dbbcd32 100644
+--- a/Userland/Applications/SystemMonitor/ProcessFileDescriptorMapWidget.cpp
++++ b/Userland/Applications/SystemMonitor/ProcessFileDescriptorMapWidget.cpp
+@@ -11,6 +11,10 @@
+ #include <LibGUI/SortingProxyModel.h>
+ #include <LibGUI/TableView.h>
+ 
++#if !defined(AK_OS_SERENITY)
++#    include "SystemMonitorLinux.h"
++#endif
++
+ REGISTER_WIDGET(SystemMonitor, ProcessFileDescriptorMapWidget)
+ 
+ namespace SystemMonitor {
+@@ -53,7 +57,13 @@ void ProcessFileDescriptorMapWidget::set_pid(pid_t pid)
+     if (m_pid == pid)
+         return;
+     m_pid = pid;
++#if defined(AK_OS_SERENITY)
+     m_model->set_json_path(ByteString::formatted("/proc/{}/fds", m_pid));
++#else
++    // Linux: the process's file descriptors come from /proc/<pid>/fd and
++    // /proc/<pid>/fdinfo, not the SerenityOS kernel's /proc/<pid>/fds JSON.
++    m_model->set_source([pid = m_pid] { return Linux::process_file_descriptors(pid); });
++#endif
+ }
+ 
+ }
+diff --git a/Userland/Applications/SystemMonitor/ProcessMemoryMapWidget.cpp b/Userland/Applications/SystemMonitor/ProcessMemoryMapWidget.cpp
+index 1e4bd47a..2889053f 100644
+--- a/Userland/Applications/SystemMonitor/ProcessMemoryMapWidget.cpp
++++ b/Userland/Applications/SystemMonitor/ProcessMemoryMapWidget.cpp
+@@ -14,6 +14,10 @@
+ #include <LibGUI/TableView.h>
+ #include <LibGfx/Palette.h>
+ 
++#if !defined(AK_OS_SERENITY)
++#    include "SystemMonitorLinux.h"
++#endif
++
+ REGISTER_WIDGET(SystemMonitor, ProcessMemoryMapWidget)
+ 
+ namespace SystemMonitor {
+@@ -107,7 +111,12 @@ ErrorOr<NonnullRefPtr<ProcessMemoryMapWidget>> ProcessMemoryMapWidget::try_creat
+     widget->m_json_model = GUI::JsonArrayModel::create({}, move(pid_vm_fields));
+     widget->m_table_view->set_model(TRY(GUI::SortingProxyModel::create(*widget->m_json_model)));
+ 
++#if defined(AK_OS_SERENITY)
+     widget->m_table_view->set_column_painting_delegate(7, TRY(try_make<PagemapPaintingDelegate>()));
++#else
++    // Linux does not expose a readable pagemap for other processes (it needs
++    // CAP_SYS_ADMIN), so there is no "Page map" rendering.
++#endif
+ 
+     widget->m_table_view->set_key_column_and_sort_order(0, GUI::SortOrder::Ascending);
+     widget->m_timer = widget->add<Core::Timer>(1000, [widget] { widget->refresh(); });
+@@ -121,7 +130,13 @@ void ProcessMemoryMapWidget::set_pid(pid_t pid)
+     if (m_pid == pid)
+         return;
+     m_pid = pid;
++#if defined(AK_OS_SERENITY)
+     m_json_model->set_json_path(ByteString::formatted("/proc/{}/vm", pid));
++#else
++    // Linux: the memory map comes from /proc/<pid>/smaps (resident/dirty) with
++    // /proc/<pid>/maps as a fallback, not the SerenityOS kernel's /proc/<pid>/vm.
++    m_json_model->set_source([pid = m_pid] { return Linux::process_memory_map(pid); });
++#endif
+ }
+ 
+ void ProcessMemoryMapWidget::refresh()
 diff --git a/Userland/Applications/SystemMonitor/ProcessModel.cpp b/Userland/Applications/SystemMonitor/ProcessModel.cpp
 index 8369c9b9..20352468 100644
 --- a/Userland/Applications/SystemMonitor/ProcessModel.cpp
@@ -209,10 +280,10 @@ index 8369c9b9..20352468 100644
  
 diff --git a/Userland/Applications/SystemMonitor/SystemMonitorLinux.cpp b/Userland/Applications/SystemMonitor/SystemMonitorLinux.cpp
 new file mode 100644
-index 00000000..bd5b604e
+index 00000000..e544b759
 --- /dev/null
 +++ b/Userland/Applications/SystemMonitor/SystemMonitorLinux.cpp
-@@ -0,0 +1,364 @@
+@@ -0,0 +1,558 @@
 +/*
 + * Copyright (c) 2026, libgui-wayland contributors
 + *
@@ -223,17 +294,23 @@ index 00000000..bd5b604e
 +
 +#include <AK/JsonObject.h>
 +#include <AK/Optional.h>
++#include <AK/QuickSort.h>
++#include <AK/StringBuilder.h>
 +#include <AK/StringUtils.h>
 +#include <AK/StringView.h>
 +#include <AK/Vector.h>
 +#include <LibCore/File.h>
 +#include <arpa/inet.h>
++#include <dirent.h>
++#include <fcntl.h>
 +#include <ifaddrs.h>
 +#include <limits.h>
 +#include <netinet/in.h>
 +#include <sys/mount.h>
 +#include <sys/socket.h>
++#include <sys/stat.h>
 +#include <sys/statvfs.h>
++#include <string.h>
 +#include <unistd.h>
 +
 +namespace SystemMonitor::Linux {
@@ -576,13 +653,201 @@ index 00000000..bd5b604e
 +    return array;
 +}
 +
++ErrorOr<JsonArray> process_file_descriptors(pid_t pid)
++{
++    JsonArray array;
++
++    auto directory = opendir(ByteString::formatted("/proc/{}/fd", pid).characters());
++    if (!directory)
++        return array;
++
++    Vector<i32> descriptors;
++    while (auto* entry = readdir(directory)) {
++        if (entry->d_name[0] == '.')
++            continue;
++        if (auto number = StringView(entry->d_name, strlen(entry->d_name)).to_number<i32>(); number.has_value())
++            descriptors.append(number.value());
++    }
++    closedir(directory);
++
++    quick_sort(descriptors);
++
++    for (auto fd : descriptors) {
++        auto const link_path = ByteString::formatted("/proc/{}/fd/{}", pid, fd);
++
++        ByteString absolute_path;
++        char target[PATH_MAX] = { 0 };
++        if (auto length = readlink(link_path.characters(), target, sizeof(target) - 1); length > 0)
++            absolute_path = ByteString(target, static_cast<size_t>(length));
++
++        ByteString class_name;
++        bool seekable = false;
++        struct stat file_stat {
++        };
++        if (stat(link_path.characters(), &file_stat) == 0) {
++            if (S_ISREG(file_stat.st_mode))
++                class_name = "File", seekable = true;
++            else if (S_ISDIR(file_stat.st_mode))
++                class_name = "Directory";
++            else if (S_ISCHR(file_stat.st_mode))
++                class_name = "CharacterDevice";
++            else if (S_ISBLK(file_stat.st_mode))
++                class_name = "BlockDevice";
++            else if (S_ISFIFO(file_stat.st_mode))
++                class_name = "FIFO";
++            else if (S_ISSOCK(file_stat.st_mode))
++                class_name = "Socket";
++            else
++                class_name = "File";
++        } else if (absolute_path.starts_with("socket:"sv)) {
++            class_name = "Socket";
++        } else if (absolute_path.starts_with("pipe:"sv)) {
++            class_name = "FIFO";
++        } else if (absolute_path.starts_with("anon_inode:"sv)) {
++            class_name = "Anonymous";
++        }
++
++        i64 offset = 0;
++        bool blocking = true;
++        bool cloexec = false;
++        bool can_read = true;
++        bool can_write = true;
++        if (auto info = read_trimmed(ByteString::formatted("/proc/{}/fdinfo/{}", pid, fd)); info.has_value()) {
++            for (auto line : StringView(info.value()).split_view('\n')) {
++                auto fields = split_whitespace(line);
++                if (fields.size() < 2)
++                    continue;
++                if (fields[0] == "pos:"sv) {
++                    offset = fields[1].to_number<i64>().value_or(0);
++                } else if (fields[0] == "flags:"sv) {
++                    auto flags = AK::StringUtils::convert_to_uint_from_octal<u32>(fields[1]).value_or(0);
++                    auto access_mode = flags & O_ACCMODE;
++                    can_read = access_mode != O_WRONLY;
++                    can_write = access_mode != O_RDONLY;
++                    blocking = !(flags & O_NONBLOCK);
++                    cloexec = (flags & O_CLOEXEC) != 0;
++                }
++            }
++        }
++
++        JsonObject object;
++        object.set("fd", fd);
++        object.set("class", class_name);
++        object.set("offset", offset);
++        object.set("absolute_path", absolute_path);
++        object.set("seekable", seekable);
++        object.set("blocking", blocking);
++        object.set("cloexec", cloexec);
++        object.set("can_read", can_read);
++        object.set("can_write", can_write);
++        TRY(array.append(move(object)));
++    }
++
++    return array;
++}
++
++ErrorOr<JsonArray> process_memory_map(pid_t pid)
++{
++    JsonArray array;
++
++    auto smaps = read_trimmed(ByteString::formatted("/proc/{}/smaps", pid));
++    bool have_stats = smaps.has_value();
++    if (!smaps.has_value())
++        smaps = read_trimmed(ByteString::formatted("/proc/{}/maps", pid));
++    if (!smaps.has_value())
++        return array;
++
++    struct Region {
++        u64 address { 0 };
++        u64 size { 0 };
++        u64 resident { 0 };
++        u64 dirty { 0 };
++        u64 shared_dirty { 0 };
++        bool readable { false };
++        bool writable { false };
++        bool executable { false };
++        bool shared { false };
++        ByteString name;
++    };
++    Vector<Region> regions;
++
++    for (auto line : StringView(smaps.value()).split_view('\n')) {
++        if (line.is_empty())
++            continue;
++        auto fields = split_whitespace(line);
++        if (fields.is_empty())
++            continue;
++
++        // A mapping header starts with "start-end perms ..."; a stat line is
++        // "Key:  <value> kB".
++        bool is_header = fields.size() >= 5 && fields[0].contains('-') && fields[1].length() == 4
++            && (fields[1].ends_with('p') || fields[1].ends_with('s'));
++        if (is_header) {
++            auto const dash = fields[0].find('-').value();
++            auto start = AK::StringUtils::convert_to_uint_from_hex<u64>(fields[0].substring_view(0, dash)).value_or(0);
++            auto end = AK::StringUtils::convert_to_uint_from_hex<u64>(fields[0].substring_view(dash + 1)).value_or(0);
++            Region region;
++            region.address = start;
++            region.size = end > start ? end - start : 0;
++            auto const& permissions = fields[1];
++            region.readable = permissions[0] == 'r';
++            region.writable = permissions[1] == 'w';
++            region.executable = permissions[2] == 'x';
++            region.shared = permissions[3] == 's';
++            if (fields.size() > 5) {
++                StringBuilder name;
++                for (size_t i = 5; i < fields.size(); ++i) {
++                    if (i > 5)
++                        name.append(' ');
++                    name.append(fields[i]);
++                }
++                region.name = name.to_byte_string();
++            }
++            TRY(regions.try_append(move(region)));
++        } else if (have_stats && !regions.is_empty() && fields[0].ends_with(':')) {
++            auto& region = regions.last();
++            if (fields[0] == "Rss:"sv) {
++                region.resident = fields[1].to_number<u64>().value_or(0) * 1024;
++            } else if (fields[0] == "Shared_Dirty:"sv) {
++                region.shared_dirty = fields[1].to_number<u64>().value_or(0) * 1024;
++                region.dirty += region.shared_dirty;
++            } else if (fields[0] == "Private_Dirty:"sv) {
++                region.dirty += fields[1].to_number<u64>().value_or(0) * 1024;
++            }
++        }
++    }
++
++    for (auto& region : regions) {
++        auto name = region.name.is_empty() ? ByteString("[anon]") : region.name;
++        JsonObject object;
++        object.set("address", region.address);
++        object.set("size", region.size);
++        object.set("amount_resident", region.resident);
++        object.set("amount_dirty", region.dirty);
++        object.set("readable", region.readable);
++        object.set("writable", region.writable);
++        object.set("executable", region.executable);
++        object.set("shared", region.shared);
++        object.set("syscall", StringView(name) == "[vsyscall]"sv);
++        object.set("stack", StringView(name) == "[stack]"sv);
++        object.set("vmobject", ByteString(region.name.starts_with("/"sv) ? "File" : "Anonymous"));
++        object.set("volatile", false);
++        object.set("pagemap", ByteString {});
++        object.set("cow_pages", region.shared_dirty / 4096);
++        object.set("name", name);
++        TRY(array.append(move(object)));
++    }
++
++    return array;
++}
++
 +}
 diff --git a/Userland/Applications/SystemMonitor/SystemMonitorLinux.h b/Userland/Applications/SystemMonitor/SystemMonitorLinux.h
 new file mode 100644
-index 00000000..381356ad
+index 00000000..d8fe0e42
 --- /dev/null
 +++ b/Userland/Applications/SystemMonitor/SystemMonitorLinux.h
-@@ -0,0 +1,24 @@
+@@ -0,0 +1,29 @@
 +/*
 + * Copyright (c) 2026, libgui-wayland contributors
 + *
@@ -598,6 +863,7 @@ index 00000000..381356ad
 +
 +#include <AK/Error.h>
 +#include <AK/JsonArray.h>
++#include <sys/types.h>
 +
 +namespace SystemMonitor::Linux {
 +
@@ -605,6 +871,10 @@ index 00000000..381356ad
 +ErrorOr<JsonArray> tcp_sockets();
 +ErrorOr<JsonArray> udp_sockets();
 +ErrorOr<JsonArray> file_systems();
++
++// Per-process views (the process window's Open files and Memory map tabs).
++ErrorOr<JsonArray> process_file_descriptors(pid_t pid);
++ErrorOr<JsonArray> process_memory_map(pid_t pid);
 +
 +}
 diff --git a/Userland/Applications/SystemMonitor/ThreadStackWidget.cpp b/Userland/Applications/SystemMonitor/ThreadStackWidget.cpp
@@ -768,7 +1038,7 @@ index 9df72c86..02736ce8 100644
  
          [weak_this = make_weak_ptr()](auto result) -> ErrorOr<void> {
 diff --git a/Userland/Applications/SystemMonitor/main.cpp b/Userland/Applications/SystemMonitor/main.cpp
-index 02eb0ab6..03ca14c2 100644
+index 02eb0ab6..c6c2b6cc 100644
 --- a/Userland/Applications/SystemMonitor/main.cpp
 +++ b/Userland/Applications/SystemMonitor/main.cpp
 @@ -15,6 +15,9 @@
@@ -830,6 +1100,23 @@ index 02eb0ab6..03ca14c2 100644
  
              fs_table_view.set_column_painting_delegate(3, make<ProgressbarPaintingDelegate>());
  
+@@ -578,7 +602,16 @@ ErrorOr<NonnullRefPtr<GUI::Window>> build_process_window(pid_t pid)
+     main_widget->find_descendant_of_type_named<SystemMonitor::ProcessFileDescriptorMapWidget>("open_files")->set_pid(pid);
+     main_widget->find_descendant_of_type_named<SystemMonitor::ThreadStackWidget>("thread_stack")->set_ids(pid, pid);
+     main_widget->find_descendant_of_type_named<SystemMonitor::ProcessMemoryMapWidget>("memory_map")->set_pid(pid);
++#if defined(AK_OS_SERENITY)
+     main_widget->find_descendant_of_type_named<SystemMonitor::ProcessUnveiledPathsWidget>("unveiled_paths")->set_pid(pid);
++#else
++    // unveil is a SerenityOS-only security mechanism; Linux has no equivalent,
++    // so the "Unveiled paths" tab is removed.
++    if (auto* unveiled_paths = main_widget->find_descendant_of_type_named<SystemMonitor::ProcessUnveiledPathsWidget>("unveiled_paths")) {
++        if (auto* available_process = main_widget->find_descendant_of_type_named<GUI::TabWidget>("available_process"))
++            available_process->remove_tab(*unveiled_paths);
++    }
++#endif
+ 
+     auto& widget_stack = *main_widget->find_descendant_of_type_named<GUI::StackWidget>("widget_stack");
+     auto& unavailable_process_widget = *widget_stack.find_descendant_of_type_named<SystemMonitor::UnavailableProcessWidget>("unavailable_process");
 diff --git a/Userland/Libraries/LibCore/ProcessStatisticsReader.cpp b/Userland/Libraries/LibCore/ProcessStatisticsReader.cpp
 index 8a4503f1..d0392f85 100644
 --- a/Userland/Libraries/LibCore/ProcessStatisticsReader.cpp
