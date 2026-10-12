@@ -9,6 +9,7 @@ pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)
 add_library(serenity-audio SHARED
     LibSerenityAudio.cpp
     AudioServerConnection.cpp
+    AudioManagerConnection.cpp
     ClientAudioStream.cpp
     Mixer.cpp
     PipeWireBackend.cpp

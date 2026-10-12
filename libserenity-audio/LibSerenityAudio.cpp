@@ -5,6 +5,7 @@
  */
 
 #include "LibSerenityAudio.h"
+#include "AudioManagerConnection.h"
 #include "AudioServerConnection.h"
 #include <AK/NonnullOwnPtr.h>
 #include <AK/Optional.h>
@@ -30,6 +31,16 @@ static RefPtr<AudioServerConnection>& connection_slot()
 static int s_client_fd { -1 };
 static bool s_server_started { false };
 static bool s_initialized { false };
+
+// The manager (mixer) protocol: the Audio applet's channel.
+static RefPtr<AudioManagerConnection>& manager_connection_slot()
+{
+    static auto* slot = new RefPtr<AudioManagerConnection>;
+    return *slot;
+}
+
+static int s_manager_client_fd { -1 };
+static bool s_manager_started { false };
 
 static ByteString expanded_portal_path(StringView template_path)
 {
@@ -69,6 +80,36 @@ static void start_server_thread()
     thread.value()->detach();
 }
 
+// Same shape as the audio connection thread, for the manager (mixer) protocol.
+static void start_manager_thread()
+{
+    int fds[2];
+    if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds) != 0) {
+        dbgln("LibSerenityAudio: failed to create the manager portal socketpair");
+        return;
+    }
+    int server_fd = fds[0];
+    s_manager_client_fd = fds[1];
+
+    auto thread = Threading::Thread::try_create([server_fd]() -> intptr_t {
+        Core::EventLoop loop;
+        if (auto socket = Core::LocalSocket::adopt_fd(server_fd); !socket.is_error())
+            manager_connection_slot() = AudioManagerConnection::create(socket.release_value());
+        loop.exec();
+        return 0;
+    }, "LibSerenityAudioManager"sv);
+
+    if (thread.is_error()) {
+        dbgln("LibSerenityAudio: failed to start the manager thread: {}", thread.error());
+        ::close(server_fd);
+        ::close(s_manager_client_fd);
+        s_manager_client_fd = -1;
+        return;
+    }
+    thread.value()->start();
+    thread.value()->detach();
+}
+
 static Optional<NonnullOwnPtr<Core::LocalSocket>> make_portal(ByteString const& path)
 {
     // Only the audio portal is ours; decline anything else so the next connector
@@ -92,6 +133,28 @@ static Optional<NonnullOwnPtr<Core::LocalSocket>> make_portal(ByteString const& 
     return socket.release_value();
 }
 
+static Optional<NonnullOwnPtr<Core::LocalSocket>> make_manager_portal(ByteString const& path)
+{
+    // The manager (mixer) portal, used by the Audio applet.
+    if (path != expanded_portal_path("/tmp/session/%sid/portal/audiomanager"sv))
+        return {};
+
+    dbgln("LibSerenityAudio: manager portal connect request '{}'", path);
+    if (!s_manager_started) {
+        s_manager_started = true;
+        start_manager_thread();
+    }
+    if (s_manager_client_fd < 0)
+        return {};
+
+    int fd = s_manager_client_fd;
+    s_manager_client_fd = -1;
+    auto socket = Core::LocalSocket::adopt_fd(fd);
+    if (socket.is_error())
+        return {};
+    return socket.release_value();
+}
+
 void initialize()
 {
     if (s_initialized)
@@ -100,6 +163,9 @@ void initialize()
     pw_init(nullptr, nullptr);
     Core::PortalServer::add_connector([](ByteString const& path) {
         return make_portal(path);
+    });
+    Core::PortalServer::add_connector([](ByteString const& path) {
+        return make_manager_portal(path);
     });
 }
 

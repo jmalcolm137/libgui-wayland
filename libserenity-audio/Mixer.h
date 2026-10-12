@@ -25,9 +25,17 @@ public:
     u64 underrun_count();
     size_t max_buffered();
 
+    // The main mix (the manager volume/mute the Audio applet controls).
+    double main_volume();
+    void set_main_volume(double);
+    bool is_muted();
+    void set_muted(bool);
+
 private:
     Threading::Mutex m_mutex;
     Vector<NonnullRefPtr<ClientAudioStream>> m_streams;
+    double m_main_volume { 1.0 };
+    bool m_muted { false };
 };
 
 // The single mixer shared by all connections and the PipeWire backend.

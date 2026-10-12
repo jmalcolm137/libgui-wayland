@@ -34,6 +34,10 @@ Audio::Sample Mixer::next_sample(u32 device_sample_rate)
             sum += sample.value();
     }
     sum *= SAMPLE_HEADROOM;
+    if (!m_muted)
+        sum *= static_cast<float>(m_main_volume);
+    else
+        sum *= 0.0f;
     sum.clip();
     return sum;
 }
@@ -66,6 +70,30 @@ Mixer& the_mixer()
 {
     static auto* mixer = new Mixer;
     return *mixer;
+}
+
+double Mixer::main_volume()
+{
+    Threading::MutexLocker locker(m_mutex);
+    return m_main_volume;
+}
+
+void Mixer::set_main_volume(double volume)
+{
+    Threading::MutexLocker locker(m_mutex);
+    m_main_volume = volume < 0.0 ? 0.0 : volume;
+}
+
+bool Mixer::is_muted()
+{
+    Threading::MutexLocker locker(m_mutex);
+    return m_muted;
+}
+
+void Mixer::set_muted(bool muted)
+{
+    Threading::MutexLocker locker(m_mutex);
+    m_muted = muted;
 }
 
 }

@@ -1,0 +1,57 @@
+diff --git a/Userland/Libraries/LibKeyboard/CharacterMap.cpp b/Userland/Libraries/LibKeyboard/CharacterMap.cpp
+index 9b6cf632..cbbfaa59 100644
+--- a/Userland/Libraries/LibKeyboard/CharacterMap.cpp
++++ b/Userland/Libraries/LibKeyboard/CharacterMap.cpp
+@@ -6,9 +6,12 @@
+ 
+ #include "CharacterMap.h"
+ #include <AK/StringBuilder.h>
++#include <AK/StringView.h>
+ #include <LibKeyboard/CharacterMapFile.h>
+ #include <errno.h>
+ #include <serenity.h>
++#include <stdlib.h>
++#include <string.h>
+ 
+ namespace Keyboard {
+ 
+@@ -25,6 +28,7 @@ CharacterMap::CharacterMap(ByteString const& map_name, CharacterMapData const& m
+ {
+ }
+ 
++#if defined(AK_OS_SERENITY)
+ int CharacterMap::set_system_map()
+ {
+     return setkeymap(m_character_map_name.characters(), m_character_map_data.map, m_character_map_data.shift_map, m_character_map_data.alt_map, m_character_map_data.altgr_map, m_character_map_data.shift_altgr_map);
+@@ -40,6 +44,31 @@ ErrorOr<CharacterMap> CharacterMap::fetch_system_map()
+ 
+     return CharacterMap { keymap_name, map_data };
+ }
++#else
++// libgui-wayland host build: the system keymap is owned by the display server,
++// not the kernel. The session's selected xkb layout is published to clients in
++// the standard XKB_DEFAULT_LAYOUT environment variable (the first entry of the
++// comma-separated list is the active layout); compositors that do not export it
++// fall back to the us layout. Applying a keymap is a display-server operation
++// (through its own protocol, e.g. the WindowServer keyboard-layout interface),
++// so there is nothing to do here.
++int CharacterMap::set_system_map()
++{
++    return 0;
++}
++
++ErrorOr<CharacterMap> CharacterMap::fetch_system_map()
++{
++    ByteString name { "us"sv };
++    if (auto const* layout = getenv("XKB_DEFAULT_LAYOUT"); layout && *layout) {
++        auto first = StringView(layout, strlen(layout)).split_view(',').first().trim_whitespace();
++        if (!first.is_empty())
++            name = first;
++    }
++    CharacterMapData map_data {};
++    return CharacterMap { name, map_data };
++}
++#endif
+ 
+ ByteString const& CharacterMap::character_map_name() const
+ {
