@@ -190,6 +190,7 @@ public:
     void on_pointer_motion(Gfx::IntPoint);
     void on_pointer_button(u32 button, bool pressed);
     void on_pointer_axis(i32 x, i32 y);
+    void on_pointer_axis_delta(double x, double y);
     void on_keyboard_keymap(int fd, u32 size);
     void on_keyboard_modifiers(u32 depressed, u32 latched, u32 locked, u32 group, u32 serial);
     void on_keyboard_key(u32 key, bool pressed);
@@ -344,6 +345,10 @@ private:
     i32 m_focused_window { -1 };
     Gfx::IntPoint m_pointer_position;
     u32 m_pointer_buttons { 0 };
+    // Wayland axis deltas are often fractional (trackpads, high-resolution
+    // wheels); accumulate them so whole scroll steps reach the GUI.
+    double m_axis_accum_x { 0 };
+    double m_axis_accum_y { 0 };
 
     Gfx::IntSize m_physical_size;
     Gfx::IntSize m_screen_size;

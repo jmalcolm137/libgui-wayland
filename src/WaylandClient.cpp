@@ -535,11 +535,11 @@ static void pointer_button(void* data, wl_pointer*, uint32_t serial, uint32_t, u
 
 static void pointer_axis(void* data, wl_pointer*, uint32_t, uint32_t axis, wl_fixed_t value)
 {
-    int delta = wl_fixed_to_int(value);
+    double delta = wl_fixed_to_double(value);
     if (axis == WL_POINTER_AXIS_VERTICAL_SCROLL)
-        static_cast<WaylandClient*>(data)->on_pointer_axis(0, delta);
+        static_cast<WaylandClient*>(data)->on_pointer_axis_delta(0, delta);
     else
-        static_cast<WaylandClient*>(data)->on_pointer_axis(delta, 0);
+        static_cast<WaylandClient*>(data)->on_pointer_axis_delta(delta, 0);
 }
 
 static void pointer_frame(void*, wl_pointer*) { }
@@ -844,6 +844,8 @@ void WaylandClient::on_pointer_leave()
     if (m_pointer_window >= 0 && m_input.window_left)
         m_input.window_left(m_pointer_window);
     m_pointer_window = -1;
+    m_axis_accum_x = 0;
+    m_axis_accum_y = 0;
 }
 
 void WaylandClient::on_pointer_motion(Gfx::IntPoint position)
@@ -932,6 +934,24 @@ void WaylandClient::on_pointer_axis(i32 x, i32 y)
     int inset = window_surface ? window_surface->inset : 0;
     if (m_input.mouse_wheel)
         m_input.mouse_wheel(m_pointer_window, m_pointer_position.translated(0, -inset), m_pointer_buttons, current_modifiers(), x, y);
+}
+
+void WaylandClient::on_pointer_axis_delta(double x, double y)
+{
+    // Wayland delivers smooth axis values that are often fractional (trackpads
+    // and high-resolution wheels). SerenityOS widgets expect whole scroll steps,
+    // so accumulate and emit the integral part, carrying the remainder.
+    m_axis_accum_x += x;
+    m_axis_accum_y += y;
+    auto step_x = static_cast<i32>(m_axis_accum_x);
+    auto step_y = static_cast<i32>(m_axis_accum_y);
+    if (getenv("LIBWM_AXIS_DEBUG"))
+        dbgln("LibWM/Wayland: axis delta {}x{} -> step {}x{}", x, y, step_x, step_y);
+    if (step_x == 0 && step_y == 0)
+        return;
+    m_axis_accum_x -= step_x;
+    m_axis_accum_y -= step_y;
+    on_pointer_axis(step_x, step_y);
 }
 
 void WaylandClient::on_keyboard_keymap(int fd, u32 size)
