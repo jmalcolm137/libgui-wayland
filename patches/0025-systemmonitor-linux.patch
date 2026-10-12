@@ -1,10 +1,17 @@
 diff --git a/Userland/Applications/SystemMonitor/CMakeLists.txt b/Userland/Applications/SystemMonitor/CMakeLists.txt
-index 36d135bc..fdae0bd0 100644
+index 36d135bc..136951d0 100644
 --- a/Userland/Applications/SystemMonitor/CMakeLists.txt
 +++ b/Userland/Applications/SystemMonitor/CMakeLists.txt
-@@ -26,4 +26,16 @@ set(GENERATED_SOURCES
+@@ -25,5 +25,23 @@ set(GENERATED_SOURCES
+     ProcessWindowGML.h
  )
  
++# Linux: the network and storage tabs read the host (getifaddrs, /proc/net,
++# statvfs) instead of the SerenityOS kernel's /sys/kernel/* interfaces.
++if (NOT SERENITYOS)
++    list(APPEND SOURCES SystemMonitorLinux.cpp)
++endif()
++
  serenity_app(SystemMonitor ICON app-system-monitor)
 -target_link_libraries(SystemMonitor PRIVATE LibConfig LibCore LibGfx LibGUI LibMain LibSymbolication LibThreading)
 +if (SERENITYOS)
@@ -91,6 +98,68 @@ index e5543b55..d4af398e 100644
  
      u64 kmalloc_bytes_total = kmalloc_allocated + kmalloc_available;
      u64 physical_pages_total = physical_allocated + physical_available;
+diff --git a/Userland/Applications/SystemMonitor/NetworkStatisticsWidget.cpp b/Userland/Applications/SystemMonitor/NetworkStatisticsWidget.cpp
+index 8fee9f51..62b5bedd 100644
+--- a/Userland/Applications/SystemMonitor/NetworkStatisticsWidget.cpp
++++ b/Userland/Applications/SystemMonitor/NetworkStatisticsWidget.cpp
+@@ -15,6 +15,10 @@
+ #include <LibGUI/TableView.h>
+ #include <LibGfx/Painter.h>
+ 
++#if !defined(AK_OS_SERENITY)
++#    include "SystemMonitorLinux.h"
++#endif
++
+ REGISTER_WIDGET(SystemMonitor, NetworkStatisticsWidget)
+ 
+ namespace SystemMonitor {
+@@ -74,7 +78,13 @@ NetworkStatisticsWidget::NetworkStatisticsWidget()
+         net_adapters_fields.empend("bytes_in", "Bytes In"_string, Gfx::TextAlignment::CenterRight);
+         net_adapters_fields.empend("bytes_out", "Bytes Out"_string, Gfx::TextAlignment::CenterRight);
+         net_adapters_fields.empend("packets_dropped", "Packets Dropped"_string, Gfx::TextAlignment::CenterRight);
++#if defined(AK_OS_SERENITY)
+         m_adapter_model = GUI::JsonArrayModel::create("/sys/kernel/net/adapters", move(net_adapters_fields));
++#else
++        // Linux: the adapters come from getifaddrs() + /sys/class/net, not the
++        // SerenityOS kernel's /sys/kernel/net/adapters JSON file.
++        m_adapter_model = GUI::JsonArrayModel::create_from_source([] { return Linux::network_adapters(); }, move(net_adapters_fields));
++#endif
+         m_adapter_table_view->set_model(MUST(GUI::SortingProxyModel::create(*m_adapter_model)));
+         m_adapter_context_menu = GUI::Menu::construct();
+         m_adapter_context_menu->add_action(GUI::Action::create(
+@@ -90,7 +100,7 @@ NetworkStatisticsWidget::NetworkStatisticsWidget()
+                 return;
+             }
+             auto adapter_name = index.sibling_at_column(1).data().as_string();
+-            if (adapter_name == "loop") {
++            if (adapter_name == "loop" || adapter_name == "lo") {
+                 return;
+             }
+             m_adapter_context_menu->popup(event.screen_position());
+@@ -113,7 +123,11 @@ NetworkStatisticsWidget::NetworkStatisticsWidget()
+         net_tcp_fields.empend("packets_out", "Pkt Out"_string, Gfx::TextAlignment::CenterRight);
+         net_tcp_fields.empend("bytes_in", "Bytes In"_string, Gfx::TextAlignment::CenterRight);
+         net_tcp_fields.empend("bytes_out", "Bytes Out"_string, Gfx::TextAlignment::CenterRight);
++#if defined(AK_OS_SERENITY)
+         m_tcp_socket_model = GUI::JsonArrayModel::create("/sys/kernel/net/tcp", move(net_tcp_fields));
++#else
++        m_tcp_socket_model = GUI::JsonArrayModel::create_from_source([] { return Linux::tcp_sockets(); }, move(net_tcp_fields));
++#endif
+         m_tcp_socket_table_view->set_model(MUST(GUI::SortingProxyModel::create(*m_tcp_socket_model)));
+ 
+         auto& udp_sockets_group_box = add<GUI::GroupBox>("UDP Sockets"sv);
+@@ -126,7 +140,11 @@ NetworkStatisticsWidget::NetworkStatisticsWidget()
+         net_udp_fields.empend("peer_port", "Port"_string, Gfx::TextAlignment::CenterRight);
+         net_udp_fields.empend("local_address", "Local"_string, Gfx::TextAlignment::CenterLeft);
+         net_udp_fields.empend("local_port", "Port"_string, Gfx::TextAlignment::CenterRight);
++#if defined(AK_OS_SERENITY)
+         m_udp_socket_model = GUI::JsonArrayModel::create("/sys/kernel/net/udp", move(net_udp_fields));
++#else
++        m_udp_socket_model = GUI::JsonArrayModel::create_from_source([] { return Linux::udp_sockets(); }, move(net_udp_fields));
++#endif
+         m_udp_socket_table_view->set_model(MUST(GUI::SortingProxyModel::create(*m_udp_socket_model)));
+ 
+         m_update_timer = add<Core::Timer>(
 diff --git a/Userland/Applications/SystemMonitor/ProcessModel.cpp b/Userland/Applications/SystemMonitor/ProcessModel.cpp
 index 8369c9b9..20352468 100644
 --- a/Userland/Applications/SystemMonitor/ProcessModel.cpp
@@ -138,6 +207,406 @@ index 8369c9b9..20352468 100644
  
      auto previous_tid_count = m_threads.size();
  
+diff --git a/Userland/Applications/SystemMonitor/SystemMonitorLinux.cpp b/Userland/Applications/SystemMonitor/SystemMonitorLinux.cpp
+new file mode 100644
+index 00000000..bd5b604e
+--- /dev/null
++++ b/Userland/Applications/SystemMonitor/SystemMonitorLinux.cpp
+@@ -0,0 +1,364 @@
++/*
++ * Copyright (c) 2026, libgui-wayland contributors
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#include "SystemMonitorLinux.h"
++
++#include <AK/JsonObject.h>
++#include <AK/Optional.h>
++#include <AK/StringUtils.h>
++#include <AK/StringView.h>
++#include <AK/Vector.h>
++#include <LibCore/File.h>
++#include <arpa/inet.h>
++#include <ifaddrs.h>
++#include <limits.h>
++#include <netinet/in.h>
++#include <sys/mount.h>
++#include <sys/socket.h>
++#include <sys/statvfs.h>
++#include <unistd.h>
++
++namespace SystemMonitor::Linux {
++
++static Optional<ByteString> read_trimmed(ByteString const& path)
++{
++    auto file = Core::File::open(path, Core::File::OpenMode::Read);
++    if (file.is_error())
++        return {};
++    auto contents = file.value()->read_until_eof();
++    if (contents.is_error())
++        return {};
++    return StringView(contents.value().data(), contents.value().size()).trim_whitespace().to_byte_string();
++}
++
++static u64 sysfs_uint(ByteString const& base, StringView name)
++{
++    auto text = read_trimmed(ByteString::formatted("{}/{}", base, name));
++    if (!text.has_value())
++        return 0;
++    return StringView(text.value()).to_number<u64>().value_or(0);
++}
++
++static i32 sysfs_int(ByteString const& base, StringView name)
++{
++    auto text = read_trimmed(ByteString::formatted("{}/{}", base, name));
++    if (!text.has_value())
++        return 0;
++    return StringView(text.value()).to_number<i32>().value_or(0);
++}
++
++static Vector<StringView> split_whitespace(StringView text)
++{
++    Vector<StringView> fields;
++    size_t i = 0;
++    while (i < text.length()) {
++        while (i < text.length() && (text[i] == ' ' || text[i] == '\t'))
++            ++i;
++        size_t start = i;
++        while (i < text.length() && text[i] != ' ' && text[i] != '\t')
++            ++i;
++        if (i > start)
++            fields.append(text.substring_view(start, i - start));
++    }
++    return fields;
++}
++
++// The procfs socket tables encode the address as hex. Notably the value parses
++// to the bytes *as stored* in the sockaddr: "0100007F" (127.0.0.1) and the
++// 4-word IPv6 form "00000000000000000000000001000000" (::1) both decode by
++// taking the parsed integer's little-endian bytes in order.
++static ByteString decode_address(StringView hex)
++{
++    char buffer[INET6_ADDRSTRLEN] = { 0 };
++    if (hex.length() == 8) {
++        auto value = AK::StringUtils::convert_to_uint_from_hex<u32>(hex);
++        if (!value.has_value())
++            return {};
++        in_addr address {};
++        address.s_addr = value.value();
++        inet_ntop(AF_INET, &address, buffer, sizeof(buffer));
++        return ByteString(buffer);
++    }
++    if (hex.length() == 32) {
++        in6_addr address {};
++        for (size_t word = 0; word < 4; ++word) {
++            auto value = AK::StringUtils::convert_to_uint_from_hex<u32>(hex.substring_view(word * 8, 8));
++            if (!value.has_value())
++                return {};
++            memcpy(address.s6_addr + word * 4, &value.value(), 4);
++        }
++        inet_ntop(AF_INET6, &address, buffer, sizeof(buffer));
++        return ByteString(buffer);
++    }
++    return {};
++}
++
++static ByteString socket_state_name(u16 state)
++{
++    switch (state) {
++    case 0x01:
++        return "Established";
++    case 0x02:
++        return "SynSent";
++    case 0x03:
++        return "SynRecv";
++    case 0x04:
++        return "FinWait1";
++    case 0x05:
++        return "FinWait2";
++    case 0x06:
++        return "TimeWait";
++    case 0x07:
++        return "Close";
++    case 0x08:
++        return "CloseWait";
++    case 0x09:
++        return "LastAck";
++    case 0x0A:
++        return "Listen";
++    case 0x0B:
++        return "Closing";
++    default:
++        return ByteString::formatted("0x{:02X}", state);
++    }
++}
++
++ErrorOr<JsonArray> network_adapters()
++{
++    struct Adapter {
++        ByteString name;
++        ByteString ipv4_address;
++        ByteString ipv6_address;
++    };
++    Vector<Adapter> adapters;
++    auto ensure = [&](ByteString const& name) -> Adapter& {
++        for (auto& adapter : adapters) {
++            if (adapter.name == name)
++                return adapter;
++        }
++        adapters.append({ name, {}, {} });
++        return adapters.last();
++    };
++
++    struct ifaddrs* ifaddr = nullptr;
++    if (getifaddrs(&ifaddr) == 0) {
++        for (auto* ifa = ifaddr; ifa; ifa = ifa->ifa_next) {
++            if (!ifa->ifa_name || !ifa->ifa_addr)
++                continue;
++            auto& adapter = ensure(ifa->ifa_name);
++            char buffer[INET6_ADDRSTRLEN] = { 0 };
++            if (ifa->ifa_addr->sa_family == AF_INET) {
++                auto* address = reinterpret_cast<sockaddr_in*>(ifa->ifa_addr);
++                if (inet_ntop(AF_INET, &address->sin_addr, buffer, sizeof(buffer)))
++                    adapter.ipv4_address = buffer;
++            } else if (ifa->ifa_addr->sa_family == AF_INET6) {
++                auto* address = reinterpret_cast<sockaddr_in6*>(ifa->ifa_addr);
++                if (inet_ntop(AF_INET6, &address->sin6_addr, buffer, sizeof(buffer)))
++                    adapter.ipv6_address = buffer;
++            }
++        }
++        freeifaddrs(ifaddr);
++    }
++
++    JsonArray array;
++    for (auto& adapter : adapters) {
++        auto const base = ByteString::formatted("/sys/class/net/{}", adapter.name);
++        auto const operstate = read_trimmed(ByteString::formatted("{}/operstate", base)).value_or(ByteString {});
++        auto const link_up = operstate == "up"sv || operstate == "unknown"sv;
++        auto const duplex = read_trimmed(ByteString::formatted("{}/duplex", base)).value_or(ByteString {});
++        auto const mac_address = read_trimmed(ByteString::formatted("{}/address", base)).value_or(ByteString {});
++
++        // The device's "class": the driver name, when one is bound.
++        ByteString class_name;
++        char driver_path[PATH_MAX] = { 0 };
++        auto const driver_link = ByteString::formatted("{}/device/driver", base);
++        if (auto length = readlink(driver_link.characters(), driver_path, sizeof(driver_path) - 1); length > 0) {
++            driver_path[length] = '\0';
++            StringView driver_view(driver_path, static_cast<size_t>(length));
++            auto last_slash = driver_view.find_last('/');
++            class_name = last_slash.has_value() ? driver_view.substring_view(*last_slash + 1).to_byte_string() : driver_view.to_byte_string();
++        }
++
++        JsonObject object;
++        object.set("name", adapter.name);
++        object.set("class_name", class_name);
++        object.set("mac_address", mac_address);
++        object.set("link_up", link_up);
++        object.set("link_speed", sysfs_int(base, "speed"sv));
++        object.set("link_full_duplex", duplex == "full"sv);
++        object.set("ipv4_address", adapter.ipv4_address);
++        object.set("ipv6_address", adapter.ipv6_address);
++        object.set("packets_in", sysfs_uint(base, "statistics/rx_packets"sv));
++        object.set("packets_out", sysfs_uint(base, "statistics/tx_packets"sv));
++        object.set("bytes_in", sysfs_uint(base, "statistics/rx_bytes"sv));
++        object.set("bytes_out", sysfs_uint(base, "statistics/tx_bytes"sv));
++        object.set("packets_dropped", sysfs_uint(base, "statistics/rx_dropped"sv) + sysfs_uint(base, "statistics/tx_dropped"sv));
++        TRY(array.append(move(object)));
++    }
++    return array;
++}
++
++static ErrorOr<JsonArray> parse_sockets(ByteString const& path)
++{
++    JsonArray array;
++
++    auto file = Core::File::open(path, Core::File::OpenMode::Read);
++    if (file.is_error())
++        return array;
++    auto contents = file.value()->read_until_eof();
++    if (contents.is_error())
++        return array;
++
++    StringView text(contents.value().data(), contents.value().size());
++    bool first_line = true;
++    for (auto line : text.split_view('\n')) {
++        if (first_line) {
++            first_line = false;
++            continue;
++        }
++        auto fields = split_whitespace(line);
++        // sl local_address rem_address st ...
++        if (fields.size() < 4)
++            continue;
++
++        auto endpoint = [](StringView field, ByteString& address, u16& port) {
++            auto colon = field.find(':');
++            if (!colon.has_value())
++                return;
++            address = decode_address(field.substring_view(0, *colon));
++            port = AK::StringUtils::convert_to_uint_from_hex<u16>(field.substring_view(*colon + 1)).value_or(0);
++        };
++
++        ByteString local_address, peer_address;
++        u16 local_port = 0, peer_port = 0;
++        endpoint(fields[1], local_address, local_port);
++        endpoint(fields[2], peer_address, peer_port);
++        auto state = AK::StringUtils::convert_to_uint_from_hex<u16>(fields[3]).value_or(0);
++
++        JsonObject object;
++        object.set("local_address", local_address);
++        object.set("local_port", local_port);
++        object.set("peer_address", peer_address);
++        object.set("peer_port", peer_port);
++        object.set("state", socket_state_name(state));
++        // The Linux procfs socket tables do not expose these counters; report
++        // zeroes rather than SerenityOS's per-socket statistics.
++        object.set("ack_number", 0);
++        object.set("sequence_number", 0);
++        object.set("packets_in", 0);
++        object.set("packets_out", 0);
++        object.set("bytes_in", 0);
++        object.set("bytes_out", 0);
++        TRY(array.append(move(object)));
++    }
++    return array;
++}
++
++ErrorOr<JsonArray> tcp_sockets()
++{
++    auto array = TRY(parse_sockets("/proc/net/tcp"sv));
++    auto tcp6 = TRY(parse_sockets("/proc/net/tcp6"sv));
++    for (auto& row : tcp6.values())
++        TRY(array.append(row));
++    return array;
++}
++
++ErrorOr<JsonArray> udp_sockets()
++{
++    auto array = TRY(parse_sockets("/proc/net/udp"sv));
++    auto udp6 = TRY(parse_sockets("/proc/net/udp6"sv));
++    for (auto& row : udp6.values())
++        TRY(array.append(row));
++    return array;
++}
++
++// /proc/mounts escapes spaces/tabs/newlines/backslashes as octal sequences.
++static ByteString unescape_mount_path(StringView text)
++{
++    StringBuilder builder;
++    for (size_t i = 0; i < text.length(); ++i) {
++        if (text[i] == '\\' && i + 3 < text.length()) {
++            auto octal = text.substring_view(i + 1, 3);
++            if (auto value = AK::StringUtils::convert_to_uint_from_octal<u8>(octal); value.has_value()) {
++                builder.append(static_cast<char>(value.value()));
++                i += 3;
++                continue;
++            }
++        }
++        builder.append(text[i]);
++    }
++    return builder.to_byte_string();
++}
++
++ErrorOr<JsonArray> file_systems()
++{
++    JsonArray array;
++
++    auto file = Core::File::open("/proc/mounts"sv, Core::File::OpenMode::Read);
++    if (file.is_error())
++        return array;
++    auto contents = file.value()->read_until_eof();
++    if (contents.is_error())
++        return array;
++
++    StringView text(contents.value().data(), contents.value().size());
++    for (auto line : text.split_view('\n')) {
++        auto fields = split_whitespace(line);
++        if (fields.size() < 4)
++            continue;
++
++        auto source = unescape_mount_path(fields[0]);
++        auto mount_point = unescape_mount_path(fields[1]);
++        auto class_name = fields[2].to_byte_string();
++        auto options = fields[3];
++
++        bool readonly = false;
++        int mount_flags = 0;
++        for (auto option : options.split_view(',')) {
++            if (option == "ro"sv) {
++                readonly = true;
++                mount_flags |= MS_RDONLY;
++            } else if (option == "nodev"sv) {
++                mount_flags |= MS_NODEV;
++            } else if (option == "noexec"sv) {
++                mount_flags |= MS_NOEXEC;
++            } else if (option == "nosuid"sv) {
++                mount_flags |= MS_NOSUID;
++            }
++        }
++
++        u64 total_block_count = 0;
++        u64 free_block_count = 0;
++        u64 block_size = 0;
++        u64 free_inode_count = 0;
++        u64 total_inode_count = 0;
++        struct statvfs stats {
++        };
++        if (statvfs(mount_point.characters(), &stats) == 0) {
++            total_block_count = stats.f_blocks;
++            free_block_count = stats.f_bfree;
++            block_size = stats.f_frsize != 0 ? stats.f_frsize : stats.f_bsize;
++            free_inode_count = stats.f_ffree;
++            total_inode_count = stats.f_files;
++        }
++
++        JsonObject object;
++        object.set("mount_point", mount_point);
++        object.set("class_name", class_name);
++        object.set("source", source);
++        object.set("total_block_count", total_block_count);
++        object.set("free_block_count", free_block_count);
++        object.set("block_size", block_size);
++        object.set("readonly", readonly);
++        object.set("mount_flags", mount_flags);
++        object.set("free_inode_count", free_inode_count);
++        object.set("total_inode_count", total_inode_count);
++        TRY(array.append(move(object)));
++    }
++    return array;
++}
++
++}
+diff --git a/Userland/Applications/SystemMonitor/SystemMonitorLinux.h b/Userland/Applications/SystemMonitor/SystemMonitorLinux.h
+new file mode 100644
+index 00000000..381356ad
+--- /dev/null
++++ b/Userland/Applications/SystemMonitor/SystemMonitorLinux.h
+@@ -0,0 +1,24 @@
++/*
++ * Copyright (c) 2026, libgui-wayland contributors
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ *
++ * Linux equivalents of the SerenityOS kernel interfaces the SystemMonitor
++ * network and storage tabs used (/sys/kernel/net/{adapters,tcp,udp} and
++ * /sys/kernel/df). Each returns the same JSON rows the tabs' field specs expect,
++ * built from Linux APIs.
++ */
++
++#pragma once
++
++#include <AK/Error.h>
++#include <AK/JsonArray.h>
++
++namespace SystemMonitor::Linux {
++
++ErrorOr<JsonArray> network_adapters();
++ErrorOr<JsonArray> tcp_sockets();
++ErrorOr<JsonArray> udp_sockets();
++ErrorOr<JsonArray> file_systems();
++
++}
 diff --git a/Userland/Applications/SystemMonitor/ThreadStackWidget.cpp b/Userland/Applications/SystemMonitor/ThreadStackWidget.cpp
 index 9df72c86..02736ce8 100644
 --- a/Userland/Applications/SystemMonitor/ThreadStackWidget.cpp
@@ -299,10 +768,20 @@ index 9df72c86..02736ce8 100644
  
          [weak_this = make_weak_ptr()](auto result) -> ErrorOr<void> {
 diff --git a/Userland/Applications/SystemMonitor/main.cpp b/Userland/Applications/SystemMonitor/main.cpp
-index 02eb0ab6..04593bd1 100644
+index 02eb0ab6..03ca14c2 100644
 --- a/Userland/Applications/SystemMonitor/main.cpp
 +++ b/Userland/Applications/SystemMonitor/main.cpp
-@@ -57,6 +57,21 @@
+@@ -15,6 +15,9 @@
+ #include "ProcessStateWidget.h"
+ #include "ProcessUnveiledPathsWidget.h"
+ #include "ThreadStackWidget.h"
++#if !defined(AK_OS_SERENITY)
++#    include "SystemMonitorLinux.h"
++#endif
+ #include <AK/NumberFormat.h>
+ #include <Applications/SystemMonitor/ProcessWindowGML.h>
+ #include <Applications/SystemMonitor/SystemMonitorGML.h>
+@@ -57,6 +60,21 @@
  #include <stdio.h>
  #include <unistd.h>
  
@@ -324,7 +803,7 @@ index 02eb0ab6..04593bd1 100644
  static ErrorOr<NonnullRefPtr<GUI::Window>> build_process_window(pid_t);
  static ErrorOr<void> build_performance_tab(GUI::Widget&);
  
-@@ -167,10 +182,10 @@ public:
+@@ -167,10 +185,10 @@ public:
                  [](JsonObject const& object) {
                      return object.get_u64("free_block_count"sv).value_or(0) * object.get_u64("block_size"sv).value_or(0);
                  });
@@ -337,6 +816,20 @@ index 02eb0ab6..04593bd1 100644
              });
              df_fields.empend("Mount flags"_string, Gfx::TextAlignment::CenterLeft, [](JsonObject const& object) {
                  int mount_flags = object.get_i32("mount_flags"sv).value_or(0);
+@@ -202,7 +220,13 @@ public:
+             df_fields.empend("total_inode_count", "Total inodes"_string, Gfx::TextAlignment::CenterRight);
+             df_fields.empend("block_size", "Block size"_string, Gfx::TextAlignment::CenterRight);
+ 
++#if defined(AK_OS_SERENITY)
+             fs_table_view.set_model(MUST(GUI::SortingProxyModel::create(GUI::JsonArrayModel::create("/sys/kernel/df", move(df_fields)))));
++#else
++            // Linux: build the mount table from /proc/mounts + statvfs(), not the
++            // SerenityOS kernel's /sys/kernel/df JSON file.
++            fs_table_view.set_model(MUST(GUI::SortingProxyModel::create(GUI::JsonArrayModel::create_from_source([] { return Linux::file_systems(); }, move(df_fields)))));
++#endif
+ 
+             fs_table_view.set_column_painting_delegate(3, make<ProgressbarPaintingDelegate>());
+ 
 diff --git a/Userland/Libraries/LibCore/ProcessStatisticsReader.cpp b/Userland/Libraries/LibCore/ProcessStatisticsReader.cpp
 index 8a4503f1..d0392f85 100644
 --- a/Userland/Libraries/LibCore/ProcessStatisticsReader.cpp
