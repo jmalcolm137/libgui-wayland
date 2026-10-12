@@ -41,6 +41,9 @@ if [[ ${#TARGETS[@]} -eq 0 ]]; then
         2048 BrickGame Chess ColorLines FlappyBug Flood GameOfLife Hearts MasterWord
         Minesweeper Snake Solitaire Spider ChessEngine
         GMLPlayground HackStudio SQLStudio
+        # The demos and Magnifier (the Taskbar's Demos and Utilities menus).
+        CatDog Eyes Gradient LibGfxDemo LibGfxScaleDemo Mandelbrot ModelGallery
+        Screensaver Starfield WidgetGallery Magnifier
     )
 fi
 

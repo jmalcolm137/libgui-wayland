@@ -8,7 +8,7 @@
          Coredump
          Debug
          EDID        Keyboard
-@@ -700,6 +701,49 @@
+@@ -700,6 +701,73 @@
                  target_compile_definitions(${app} PRIVATE THREAD_PRIORITY_MAX=99 MS_WXALLOWED=0 MS_AXALLOWED=0 MS_NOREGULAR=0)
              endif()
          endforeach()
@@ -55,6 +55,30 @@
 +            target_link_libraries(${tool} PRIVATE wm serenity-audio)
 +            target_include_directories(${tool} PRIVATE "${SERENITY_PROJECT_ROOT}/../compat")
 +        endforeach()
++        # libgui-wayland: the SerenityOS demos (the Taskbar's Demos menu).
++        set(libgui_wayland_demos
++            CatDog
++            Eyes
++            Gradient
++            LibGfxDemo
++            LibGfxScaleDemo
++            Mandelbrot
++            ModelGallery
++            Screensaver
++            Starfield
++            WidgetGallery
++        )
++        foreach(demo ${libgui_wayland_demos})
++            add_serenity_subdirectory(Userland/Demos/${demo})
++            target_link_options(${demo} PRIVATE "-Wl,--no-as-needed")
++            target_link_libraries(${demo} PRIVATE wm serenity-audio)
++            target_include_directories(${demo} PRIVATE "${SERENITY_PROJECT_ROOT}/../compat")
++        endforeach()
++        # libgui-wayland: Magnifier (the Taskbar's Utilities menu).
++        add_serenity_subdirectory(Userland/Applications/Magnifier)
++        target_link_options(Magnifier PRIVATE "-Wl,--no-as-needed")
++        target_link_libraries(Magnifier PRIVATE wm serenity-audio)
++        target_include_directories(Magnifier PRIVATE "${SERENITY_PROJECT_ROOT}/../compat")
          # libgui-wayland: GL demo. Renders through the client-side LibGL/LibSoftGPU
          # stack like 3DFileViewer; no GPU or compositor cooperation required.
          add_serenity_subdirectory(Userland/Demos/Tubes)

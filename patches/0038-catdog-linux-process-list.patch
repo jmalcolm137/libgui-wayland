@@ -1,0 +1,42 @@
+diff --git a/Userland/Demos/CatDog/CatDog.cpp b/Userland/Demos/CatDog/CatDog.cpp
+index afafb624..2cf43b35 100644
+--- a/Userland/Demos/CatDog/CatDog.cpp
++++ b/Userland/Demos/CatDog/CatDog.cpp
+@@ -57,7 +57,9 @@ ErrorOr<NonnullRefPtr<CatDog>> CatDog::create()
+ }
+ 
+ CatDog::CatDog()
++#if defined(AK_OS_SERENITY)
+     : m_proc_all(MUST(Core::File::open("/sys/kernel/processes"sv, Core::File::OpenMode::Read)))
++#endif
+ {
+     m_idle_sleep_timer.start();
+ }
+@@ -86,7 +88,13 @@ void CatDog::set_sleeping(bool sleeping)
+ 
+ CatDog::State CatDog::special_application_states() const
+ {
++#if defined(AK_OS_SERENITY)
+     auto maybe_proc_info = Core::ProcessStatisticsReader::get_all(*m_proc_all);
++#else
++    // Linux: the process list comes from /proc (LibCore::ProcessStatisticsReader),
++    // not the SerenityOS kernel's /sys/kernel/processes interface.
++    auto maybe_proc_info = Core::ProcessStatisticsReader::get_all();
++#endif
+     if (maybe_proc_info.is_error())
+         return State::GenericCatDog;
+ 
+diff --git a/Userland/Demos/CatDog/CatDog.h b/Userland/Demos/CatDog/CatDog.h
+index c5b8d2f3..42668059 100644
+--- a/Userland/Demos/CatDog/CatDog.h
++++ b/Userland/Demos/CatDog/CatDog.h
+@@ -78,7 +78,9 @@ private:
+     Gfx::IntPoint m_mouse_offset {};
+     Core::ElapsedTimer m_idle_sleep_timer;
+ 
++#if defined(AK_OS_SERENITY)
+     NonnullOwnPtr<Core::File> m_proc_all;
++#endif
+ 
+     State m_state { State::Roaming };
+     State m_last_state { m_state };
