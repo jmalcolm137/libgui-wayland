@@ -1,0 +1,39 @@
+--- a/Meta/Lagom/CMakeLists.txt	2026-10-12 14:55:32.245156131 -0700
++++ b/Meta/Lagom/CMakeLists.txt	2026-10-12 14:55:28.549090528 -0700
+@@ -700,6 +700,36 @@
+                 target_compile_definitions(${app} PRIVATE THREAD_PRIORITY_MAX=99 MS_WXALLOWED=0 MS_AXALLOWED=0 MS_NOREGULAR=0)
+             endif()
+         endforeach()
++        # libgui-wayland: the SerenityOS games. The Taskbar's "Games" menu is
++        # generated from the .af files under the resource root, so building the
++        # binaries (next to the Taskbar) is enough to surface them.
++        set(libgui_wayland_games
++            BrickGame
++            Chess
++            ColorLines
++            FlappyBug
++            Flood
++            GameOfLife
++            Hearts
++            MasterWord
++            Minesweeper
++            Snake
++            Solitaire
++            Spider
++        )
++        foreach(game ${libgui_wayland_games})
++            add_serenity_subdirectory(Userland/Games/${game})
++            target_link_options(${game} PRIVATE "-Wl,--no-as-needed")
++            target_link_libraries(${game} PRIVATE wm serenity-audio)
++            target_include_directories(${game} PRIVATE "${SERENITY_PROJECT_ROOT}/../compat")
++        endforeach()
++        # The 2048 target's source directory is TwentyFourtyEight.
++        add_serenity_subdirectory(Userland/Games/TwentyFourtyEight)
++        target_link_options(2048 PRIVATE "-Wl,--no-as-needed")
++        target_link_libraries(2048 PRIVATE wm serenity-audio)
++        target_include_directories(2048 PRIVATE "${SERENITY_PROJECT_ROOT}/../compat")
++        # Chess plays against this engine (spawned as a child process).
++        add_serenity_subdirectory(Userland/Services/ChessEngine)
+         # libgui-wayland: GL demo. Renders through the client-side LibGL/LibSoftGPU
+         # stack like 3DFileViewer; no GPU or compositor cooperation required.
+         add_serenity_subdirectory(Userland/Demos/Tubes)
