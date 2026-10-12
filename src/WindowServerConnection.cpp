@@ -850,9 +850,9 @@ void WindowServerConnection::add_menu(i32 window_id, i32 menu_id)
     m_menu.add_menu(window_id, menu_id);
 }
 
-void WindowServerConnection::add_menu_item(i32 menu_id, i32 identifier, i32 submenu_id, ByteString const& text, bool enabled, bool visible, bool checkable, bool checked, bool is_default, ByteString const& shortcut, Gfx::ShareableBitmap const&, bool exclusive)
+void WindowServerConnection::add_menu_item(i32 menu_id, i32 identifier, i32 submenu_id, ByteString const& text, bool enabled, bool visible, bool checkable, bool checked, bool is_default, ByteString const& shortcut, Gfx::ShareableBitmap const& icon, bool exclusive)
 {
-    m_menu.add_menu_item(menu_id, identifier, submenu_id, text, enabled, visible, checkable, checked, is_default, shortcut, exclusive);
+    m_menu.add_menu_item(menu_id, identifier, submenu_id, text, enabled, visible, checkable, checked, is_default, shortcut, icon.is_valid() ? icon.bitmap() : nullptr, exclusive);
 }
 
 void WindowServerConnection::add_menu_separator(i32 menu_id)
@@ -860,9 +860,9 @@ void WindowServerConnection::add_menu_separator(i32 menu_id)
     m_menu.add_menu_separator(menu_id);
 }
 
-void WindowServerConnection::update_menu_item(i32 menu_id, i32 identifier, i32 submenu_id, ByteString const& text, bool enabled, bool visible, bool checkable, bool checked, bool is_default, ByteString const& shortcut, Gfx::ShareableBitmap const&)
+void WindowServerConnection::update_menu_item(i32 menu_id, i32 identifier, i32 submenu_id, ByteString const& text, bool enabled, bool visible, bool checkable, bool checked, bool is_default, ByteString const& shortcut, Gfx::ShareableBitmap const& icon)
 {
-    m_menu.update_menu_item(menu_id, identifier, submenu_id, text, enabled, visible, checkable, checked, is_default, shortcut);
+    m_menu.update_menu_item(menu_id, identifier, submenu_id, text, enabled, visible, checkable, checked, is_default, shortcut, icon.is_valid() ? icon.bitmap() : nullptr);
 }
 
 void WindowServerConnection::remove_menu_item(i32 menu_id, i32 identifier)

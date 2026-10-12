@@ -10,6 +10,7 @@
 #include <AK/Function.h>
 #include <AK/HashMap.h>
 #include <AK/NonnullOwnPtr.h>
+#include <AK/RefPtr.h>
 #include <AK/Vector.h>
 #include <LibGfx/Point.h>
 #include <LibGfx/Rect.h>
@@ -17,6 +18,7 @@
 
 namespace Gfx {
 class Painter;
+class Bitmap;
 }
 
 namespace LibWM {
@@ -42,6 +44,7 @@ public:
         ByteString shortcut;
         bool exclusive { false };
         bool is_separator { false };
+        RefPtr<Gfx::Bitmap> icon;
         Gfx::IntRect rect; // popup-local
     };
 
@@ -64,9 +67,9 @@ public:
     void set_menu_minimum_width(i32 menu_id, i32 minimum_width);
     void destroy_menu(i32 menu_id);
     void add_menu(i32 window_id, i32 menu_id);
-    void add_menu_item(i32 menu_id, i32 identifier, i32 submenu_id, ByteString const& text, bool enabled, bool visible, bool checkable, bool checked, bool is_default, ByteString const& shortcut, bool exclusive);
+    void add_menu_item(i32 menu_id, i32 identifier, i32 submenu_id, ByteString const& text, bool enabled, bool visible, bool checkable, bool checked, bool is_default, ByteString const& shortcut, Gfx::Bitmap const* icon, bool exclusive);
     void add_menu_separator(i32 menu_id);
-    void update_menu_item(i32 menu_id, i32 identifier, i32 submenu_id, ByteString const& text, bool enabled, bool visible, bool checkable, bool checked, bool is_default, ByteString const& shortcut);
+    void update_menu_item(i32 menu_id, i32 identifier, i32 submenu_id, ByteString const& text, bool enabled, bool visible, bool checkable, bool checked, bool is_default, ByteString const& shortcut, Gfx::Bitmap const* icon);
     void remove_menu_item(i32 menu_id, i32 identifier);
 
     // --- menubar ---

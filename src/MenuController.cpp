@@ -8,6 +8,7 @@
 #include <AK/CharacterTypes.h>
 #include <AK/NonnullOwnPtr.h>
 #include <Kernel/API/KeyCode.h>
+#include <LibGfx/Bitmap.h>
 #include <LibGfx/Font/Font.h>
 #include <LibGfx/Font/FontDatabase.h>
 #include <LibGfx/Painter.h>
@@ -95,7 +96,7 @@ void MenuController::add_menu(i32 window_id, i32 menu_id)
     }
 }
 
-void MenuController::add_menu_item(i32 menu_id, i32 identifier, i32 submenu_id, ByteString const& text, bool enabled, bool visible, bool checkable, bool checked, bool is_default, ByteString const& shortcut, bool exclusive)
+void MenuController::add_menu_item(i32 menu_id, i32 identifier, i32 submenu_id, ByteString const& text, bool enabled, bool visible, bool checkable, bool checked, bool is_default, ByteString const& shortcut, Gfx::Bitmap const* icon, bool exclusive)
 {
     auto* menu = find_menu(menu_id);
     if (!menu)
@@ -111,6 +112,11 @@ void MenuController::add_menu_item(i32 menu_id, i32 identifier, i32 submenu_id, 
     item.is_default = is_default;
     item.shortcut = shortcut;
     item.exclusive = exclusive;
+    if (icon) {
+        // The icon arrives in a transient ShareableBitmap; keep a private copy.
+        if (auto cloned = icon->clone(); !cloned.is_error())
+            item.icon = cloned.release_value();
+    }
     menu->items.append(move(item));
     if (menu->is_open)
         layout_popup(*menu);
@@ -132,7 +138,7 @@ void MenuController::add_menu_separator(i32 menu_id)
         menubar_changed(menu->window_id);
 }
 
-void MenuController::update_menu_item(i32 menu_id, i32 identifier, i32 submenu_id, ByteString const& text, bool enabled, bool visible, bool checkable, bool checked, bool is_default, ByteString const& shortcut)
+void MenuController::update_menu_item(i32 menu_id, i32 identifier, i32 submenu_id, ByteString const& text, bool enabled, bool visible, bool checkable, bool checked, bool is_default, ByteString const& shortcut, Gfx::Bitmap const* icon)
 {
     auto* menu = find_menu(menu_id);
     if (!menu)
@@ -148,6 +154,10 @@ void MenuController::update_menu_item(i32 menu_id, i32 identifier, i32 submenu_i
         item.checked = checked;
         item.is_default = is_default;
         item.shortcut = shortcut;
+        if (icon) {
+            if (auto cloned = icon->clone(); !cloned.is_error())
+                item.icon = cloned.release_value();
+        }
         break;
     }
 }
@@ -284,7 +294,11 @@ void MenuController::render_popup(i32 menu_id, Gfx::Painter& painter) const
         }
         Gfx::IntRect text_rect = item.rect.translated(24 + 6, 0);
 
-        if (item.checkable) {
+        if (item.icon) {
+            Gfx::IntPoint icon_position { item.rect.x() + 4, 0 };
+            icon_position.set_y(item.rect.y() + max(0, (item.rect.height() - item.icon->height()) / 2));
+            painter.blit(icon_position, *item.icon, item.icon->rect(), 1.0f);
+        } else if (item.checkable) {
             Gfx::IntRect check_rect { item.rect.x() + 6, 0, 12, 12 };
             check_rect.center_vertically_within(text_rect);
             if (item.checked)
