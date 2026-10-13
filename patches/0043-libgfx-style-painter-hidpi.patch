@@ -1,0 +1,76 @@
+diff --git a/Userland/Libraries/LibGfx/ClassicStylePainter.cpp b/Userland/Libraries/LibGfx/ClassicStylePainter.cpp
+index db0fe352..06267b41 100644
+--- a/Userland/Libraries/LibGfx/ClassicStylePainter.cpp
++++ b/Userland/Libraries/LibGfx/ClassicStylePainter.cpp
+@@ -44,19 +44,19 @@ void ClassicStylePainter::paint_tab_button(Painter& painter, IntRect const& rect
+         if (active && accented) {
+             painter.draw_line({ 3, 0 }, { rect.width() - 3, 0 }, accent.darkened());
+             painter.fill_rect_with_gradient({ 1, 1, rect.width() - 2, 2 }, accent, accent.lightened(1.5f));
+-            painter.set_pixel({ 2, 0 }, highlight_color2);
++            painter.fill_rect({ 2, 0, 1, 1 }, highlight_color2);
+         } else {
+             painter.draw_line({ 2, 0 }, { rect.width() - 3, 0 }, highlight_color2);
+         }
+ 
+         // Left side
+         painter.draw_line({ 0, 2 }, { 0, rect.height() - 1 }, highlight_color2);
+-        painter.set_pixel({ 1, 1 }, highlight_color2);
++        painter.fill_rect({ 1, 1, 1, 1 }, highlight_color2);
+ 
+         // Right side
+         painter.draw_line({ rect.width() - 1, 2 }, { rect.width() - 1, rect.height() - 1 }, shadow_color2);
+         painter.draw_line({ rect.width() - 2, 2 }, { rect.width() - 2, rect.height() - 1 }, shadow_color1);
+-        painter.set_pixel(rect.width() - 2, 1, shadow_color2);
++        painter.fill_rect({ rect.width() - 2, 1, 1, 1 }, shadow_color2);
+         break;
+     case TabPosition::Bottom:
+         // Base
+@@ -72,12 +72,12 @@ void ClassicStylePainter::paint_tab_button(Painter& painter, IntRect const& rect
+ 
+         // Left side
+         painter.draw_line({ 0, 0 }, { 0, rect.height() - 3 }, highlight_color2);
+-        painter.set_pixel({ 1, rect.height() - 2 }, highlight_color2);
++        painter.fill_rect({ 1, rect.height() - 2, 1, 1 }, highlight_color2);
+ 
+         // Right side
+         painter.draw_line({ rect.width() - 1, 0 }, { rect.width() - 1, rect.height() - 3 }, shadow_color2);
+         painter.draw_line({ rect.width() - 2, 0 }, { rect.width() - 2, rect.height() - 3 }, shadow_color1);
+-        painter.set_pixel({ rect.width() - 2, rect.height() - 2 }, shadow_color2);
++        painter.fill_rect({ rect.width() - 2, rect.height() - 2, 1, 1 }, shadow_color2);
+         break;
+     case TabPosition::Left:
+         // Base tab
+@@ -95,8 +95,8 @@ void ClassicStylePainter::paint_tab_button(Painter& painter, IntRect const& rect
+         }
+ 
+         // Make appear as if the tab is rounded
+-        painter.set_pixel({ 1, 1 }, highlight_color2);
+-        painter.set_pixel({ 1, rect.height() - 2 }, shadow_color2);
++        painter.fill_rect({ 1, 1, 1, 1 }, highlight_color2);
++        painter.fill_rect({ 1, rect.height() - 2, 1, 1 }, shadow_color2);
+         break;
+     case TabPosition::Right:
+         // Base tab
+@@ -114,8 +114,8 @@ void ClassicStylePainter::paint_tab_button(Painter& painter, IntRect const& rect
+         }
+ 
+         // Make appear as if the tab is rounded
+-        painter.set_pixel({ rect.width() - 1, 1 }, shadow_color1);
+-        painter.set_pixel({ rect.width() - 1, rect.height() - 2 }, shadow_color2);
++        painter.fill_rect({ rect.width() - 1, 1, 1, 1 }, shadow_color1);
++        painter.fill_rect({ rect.width() - 1, rect.height() - 2, 1, 1 }, shadow_color2);
+         break;
+     }
+ }
+@@ -522,7 +522,10 @@ void ClassicStylePainter::paint_radio_button(Painter& painter, IntRect const& a_
+ 
+     auto set_pixels = [&](auto const& points, Gfx::Color color) {
+         for (auto const& p : points) {
+-            painter.set_pixel(rect.location().translated(p), color);
++            // fill_rect honours the backing-store scale (HiDPI); set_pixel() takes
++            // physical coordinates, so at scale > 1 the pixel-art would be placed
++            // at the wrong position and the selection dot would not show.
++            painter.fill_rect(Gfx::IntRect { rect.location().translated(p), { 1, 1 } }, color);
+         }
+     };
+ 
