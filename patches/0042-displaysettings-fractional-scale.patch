@@ -1,0 +1,142 @@
+diff --git a/Userland/Applications/DisplaySettings/MonitorSettings.gml b/Userland/Applications/DisplaySettings/MonitorSettings.gml
+index ffdf3eb0..730b83c4 100644
+--- a/Userland/Applications/DisplaySettings/MonitorSettings.gml
++++ b/Userland/Applications/DisplaySettings/MonitorSettings.gml
+@@ -78,6 +78,18 @@
+                 fixed_width: 50
+             }
+ 
++            @GUI::RadioButton {
++                name: "scale_1_25x"
++                text: "1.25x"
++                fixed_width: 55
++            }
++
++            @GUI::RadioButton {
++                name: "scale_1_5x"
++                text: "1.5x"
++                fixed_width: 50
++            }
++
+             @GUI::RadioButton {
+                 name: "scale_2x"
+                 text: "2x"
+diff --git a/Userland/Applications/DisplaySettings/MonitorSettingsWidget.cpp b/Userland/Applications/DisplaySettings/MonitorSettingsWidget.cpp
+index 8b80281a..e6e91226 100644
+--- a/Userland/Applications/DisplaySettings/MonitorSettingsWidget.cpp
++++ b/Userland/Applications/DisplaySettings/MonitorSettingsWidget.cpp
+@@ -6,6 +6,7 @@
+  */
+ 
+ #include "MonitorSettingsWidget.h"
++#include <AK/Math.h>
+ #include <Applications/DisplaySettings/MonitorSettingsGML.h>
+ #include <LibGUI/BoxLayout.h>
+ #include <LibGUI/Button.h>
+@@ -139,27 +140,23 @@ ErrorOr<void> MonitorSettingsWidget::create_frame()
+ 
+     m_display_scale_radio_1x = *find_descendant_of_type_named<GUI::RadioButton>("scale_1x");
+     m_display_scale_radio_1x->on_checked = [this](bool checked) {
+-        if (checked) {
+-            auto& selected_screen = m_screen_layout.screens[m_selected_screen_index];
+-            selected_screen.scale_factor = 1;
+-            // Try to auto re-arrange things if there are overlaps or disconnected screens
+-            m_screen_layout.normalize();
+-            m_monitor_widget->set_desktop_scale_factor(1);
+-            m_monitor_widget->update();
+-            set_modified(true);
+-        }
++        if (checked)
++            apply_output_scale(1.0);
++    };
++    m_display_scale_radio_1_25x = *find_descendant_of_type_named<GUI::RadioButton>("scale_1_25x");
++    m_display_scale_radio_1_25x->on_checked = [this](bool checked) {
++        if (checked)
++            apply_output_scale(1.25);
++    };
++    m_display_scale_radio_1_5x = *find_descendant_of_type_named<GUI::RadioButton>("scale_1_5x");
++    m_display_scale_radio_1_5x->on_checked = [this](bool checked) {
++        if (checked)
++            apply_output_scale(1.5);
+     };
+     m_display_scale_radio_2x = *find_descendant_of_type_named<GUI::RadioButton>("scale_2x");
+     m_display_scale_radio_2x->on_checked = [this](bool checked) {
+-        if (checked) {
+-            auto& selected_screen = m_screen_layout.screens[m_selected_screen_index];
+-            selected_screen.scale_factor = 2;
+-            // Try to auto re-arrange things if there are overlaps or disconnected screens
+-            m_screen_layout.normalize();
+-            m_monitor_widget->set_desktop_scale_factor(2);
+-            m_monitor_widget->update();
+-            set_modified(true);
+-        }
++        if (checked)
++            apply_output_scale(2.0);
+     };
+ 
+     m_dpi_label = *find_descendant_of_type_named<GUI::Label>("display_dpi");
+@@ -290,6 +287,26 @@ void MonitorSettingsWidget::apply_settings()
+     return;
+ }
+ 
++void MonitorSettingsWidget::apply_output_scale(double scale)
++{
++    // R6 HiDPI: the scale radios apply immediately (the Monitor tab's Apply is a
++    // no-op in the port). We keep the layout/preview in sync and tell the
++    // compositor the *exact* scale as v120, so fractional values survive the
++    // integer ScreenLayout: the compositor writes them to [Output] DefaultScale,
++    // which it live-applies.
++    int const ceil_scale = static_cast<int>(AK::ceil(scale));
++    int const int_scale = ceil_scale < 1 ? 1 : ceil_scale;
++    if (m_selected_screen_index < m_screen_layout.screens.size()) {
++        auto& selected_screen = m_screen_layout.screens[m_selected_screen_index];
++        selected_screen.scale_factor = int_scale;
++        m_screen_layout.normalize();
++    }
++    m_monitor_widget->set_desktop_scale_factor(int_scale);
++    m_monitor_widget->update();
++    set_modified(true);
++    GUI::ConnectionToWindowServer::the().async_set_output_scale(static_cast<i32>(AK::round(scale * 120.0)));
++}
++
+ void MonitorSettingsWidget::show_screen_numbers(bool show)
+ {
+     if (m_showing_screen_numbers == show)
+diff --git a/Userland/Applications/DisplaySettings/MonitorSettingsWidget.h b/Userland/Applications/DisplaySettings/MonitorSettingsWidget.h
+index 4caa094d..ed80ab7b 100644
+--- a/Userland/Applications/DisplaySettings/MonitorSettingsWidget.h
++++ b/Userland/Applications/DisplaySettings/MonitorSettingsWidget.h
+@@ -50,6 +50,10 @@ private:
+     ErrorOr<void> generate_resolution_strings();
+     ErrorOr<void> selected_screen_index_or_resolution_changed(DidScreenIndexChange screen_index_changed);
+ 
++    // R6: apply an output scale (possibly fractional) to the compositor live, and
++    // keep the layout/preview in sync. Called by the scale radios.
++    void apply_output_scale(double scale);
++
+     size_t m_selected_screen_index { 0 };
+ 
+     WindowServer::ScreenLayout m_screen_layout;
+@@ -62,6 +66,8 @@ private:
+     RefPtr<GUI::ComboBox> m_screen_combo;
+     RefPtr<GUI::ComboBox> m_resolution_combo;
+     RefPtr<GUI::RadioButton> m_display_scale_radio_1x;
++    RefPtr<GUI::RadioButton> m_display_scale_radio_1_25x;
++    RefPtr<GUI::RadioButton> m_display_scale_radio_1_5x;
+     RefPtr<GUI::RadioButton> m_display_scale_radio_2x;
+     RefPtr<GUI::Label> m_dpi_label;
+ 
+diff --git a/Userland/Services/WindowServer/WindowServer.ipc b/Userland/Services/WindowServer/WindowServer.ipc
+index 40f7d549..8fb0c7ca 100644
+--- a/Userland/Services/WindowServer/WindowServer.ipc
++++ b/Userland/Services/WindowServer/WindowServer.ipc
+@@ -120,6 +120,9 @@ endpoint WindowServer
+     get_screen_layout() => (::WindowServer::ScreenLayout screen_layout)
+     save_screen_layout() => (bool success, ByteString error_msg)
+     show_screen_numbers(bool show) =|
++    // libgui-wayland/SDE: set the output scale (fractional), as v120 (scale*120).
++    // The shim writes [Output] DefaultScale; the compositor re-scales live.
++    set_output_scale(i32 scale_v120) =|
+ 
+     apply_workspace_settings(u32 rows, u32 columns, bool save) => (bool success)
+     get_workspace_settings() => (u32 rows, u32 columns, u32 max_rows, u32 max_columns)

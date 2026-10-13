@@ -1165,6 +1165,23 @@ Messages::WindowServer::SaveScreenLayoutResponse WindowServerConnection::save_sc
     return { true, {} };
 }
 
+void WindowServerConnection::set_output_scale(i32 scale_v120)
+{
+    // R6 HiDPI: the DisplaySettings scale control calls this; we write the
+    // compositor's [Output] DefaultScale, which it live-applies (see
+    // docs/14-r4.4-config.md). v120 carries a fractional scale exactly (1.5 -> 180).
+    if (scale_v120 < 60) // ignore nonsense (< 0.5x)
+        return;
+    double const scale = static_cast<double>(scale_v120) / 120.0;
+    (void)Core::Directory::create(sde_state_dir(), Core::Directory::CreateDirectories::Yes);
+    auto config = Core::ConfigFile::open(sde_state_file("WindowServer.ini"sv), Core::ConfigFile::AllowWriting::Yes);
+    if (config.is_error())
+        return;
+    config.value()->write_entry("Output"sv, "DefaultScale"sv, ByteString::formatted("{}", scale));
+    (void)config.value()->sync();
+    dbgln("LibWM: set output scale {}x ([Output] DefaultScale)", scale);
+}
+
 // --- mouse/pointer settings (R4.6) -----------------------------------------
 
 void WindowServerConnection::set_mouse_acceleration(float factor)

@@ -138,6 +138,7 @@ private:
     Messages::WindowServer::GetScreenLayoutResponse get_screen_layout() override;
     Messages::WindowServer::SetScreenLayoutResponse set_screen_layout(WindowServer::ScreenLayout const& screen_layout, bool save) override;
     Messages::WindowServer::SaveScreenLayoutResponse save_screen_layout() override;
+    void set_output_scale(i32 scale_v120) override;
 
     // Settings the host compositor accepts but does not act on (fonts are fixed to
     // the bundled bitmap family; workspaces are not implemented). Returning a valid

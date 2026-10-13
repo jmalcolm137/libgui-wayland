@@ -58,6 +58,7 @@ public:
     virtual Messages::WindowServer::GetScreenLayoutResponse get_screen_layout() override { return Messages::WindowServer::GetScreenLayoutResponse(nullptr); }
     virtual Messages::WindowServer::SaveScreenLayoutResponse save_screen_layout() override { return Messages::WindowServer::SaveScreenLayoutResponse(nullptr); }
     virtual void show_screen_numbers([[maybe_unused]] bool show) override { }
+    virtual void set_output_scale([[maybe_unused]] i32 scale_v120) override { }
     virtual Messages::WindowServer::ApplyWorkspaceSettingsResponse apply_workspace_settings([[maybe_unused]] u32 rows, [[maybe_unused]] u32 columns, [[maybe_unused]] bool save) override { return Messages::WindowServer::ApplyWorkspaceSettingsResponse(nullptr); }
     virtual Messages::WindowServer::GetWorkspaceSettingsResponse get_workspace_settings() override { return Messages::WindowServer::GetWorkspaceSettingsResponse(nullptr); }
     virtual void set_window_icon_bitmap([[maybe_unused]] i32 window_id, [[maybe_unused]] Gfx::ShareableBitmap const& icon) override { }
