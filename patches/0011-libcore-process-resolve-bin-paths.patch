@@ -1,5 +1,5 @@
 diff --git a/Userland/Libraries/LibCore/Process.cpp b/Userland/Libraries/LibCore/Process.cpp
-index 02a3ce57..5c44a7f2 100644
+index 2860cbb1..73234994 100644
 --- a/Userland/Libraries/LibCore/Process.cpp
 +++ b/Userland/Libraries/LibCore/Process.cpp
 @@ -8,6 +8,7 @@
@@ -19,18 +19,7 @@ index 02a3ce57..5c44a7f2 100644
  #include <errno.h>
  #include <signal.h>
  #include <spawn.h>
-@@ -80,8 +82,8 @@ ErrorOr<Process> Process::spawn(ProcessSpawnOptions const& options)
- #ifdef AK_OS_SERENITY
-         CHECK(posix_spawn_file_actions_addchdir(&spawn_actions, options.working_directory->characters()));
- #else
--        // FIXME: Support ProcessSpawnOptions::working_directory n platforms that support it.
--        TODO();
-+        // glibc and musl provide the non-POSIX _np variant on Linux.
-+        CHECK(posix_spawn_file_actions_addchdir_np(&spawn_actions, options.working_directory->characters()));
- #endif
-     }
- 
-@@ -108,19 +110,44 @@ ErrorOr<Process> Process::spawn(ProcessSpawnOptions const& options)
+@@ -108,19 +111,66 @@ ErrorOr<Process> Process::spawn(ProcessSpawnOptions const& options)
  
  #undef CHECK
  
@@ -72,6 +61,17 @@ index 02a3ce57..5c44a7f2 100644
 +            return candidate;
 +    }
 +
++    // The session's applications live in SDE_APP_BIN_DIR: the port builds most
++    // apps into one directory, but SDE builds some elsewhere (e.g. the taskbar
++    // applets in build/Applets). Consult it before the caller-directory fallback,
++    // so the ResourceGraph applet spawning /bin/SystemMonitor reaches the session's
++    // SystemMonitor rather than a non-existent <applet-dir>/SystemMonitor.
++    if (auto const* app_bin = getenv("SDE_APP_BIN_DIR"); app_bin && *app_bin) {
++        auto candidate = ByteString::formatted("{}/{}", app_bin, basename);
++        if (::access(candidate.characters(), X_OK) == 0)
++            return candidate;
++    }
++
 +    if (::access(as_byte_string.characters(), X_OK) == 0)
 +        return as_byte_string;
 +
@@ -90,10 +90,10 @@ index 02a3ce57..5c44a7f2 100644
  {
      auto process = TRY(spawn({
 diff --git a/Userland/Libraries/LibCore/Process.h b/Userland/Libraries/LibCore/Process.h
-index 21f09928..f66157f8 100644
+index 21f09928..a8fd1b89 100644
 --- a/Userland/Libraries/LibCore/Process.h
 +++ b/Userland/Libraries/LibCore/Process.h
-@@ -80,6 +80,10 @@ public:
+@@ -80,6 +80,11 @@ public:
  
      static ErrorOr<Process> spawn(ProcessSpawnOptions const& options);
  
