@@ -1510,6 +1510,8 @@ void WaylandClient::on_drag_enter(u32 serial, wl_data_offer* offer, wl_surface* 
     m_drag_position = position;
     m_drag_mime = preferred_mime_for(offer);
     m_drag_received.clear();
+    // Each drag starts undecided; the target widget accepts (or not).
+    m_accepts_drag = false;
     // Fetch the offered data (the source writes it on demand). Skipped while this
     // process is itself the source: reading would block the same event loop that
     // would answer the request.
@@ -1522,7 +1524,9 @@ void WaylandClient::on_drag_enter(u32 serial, wl_data_offer* offer, wl_surface* 
             }
         }
     }
-    if (offer && !m_drag_mime.is_empty())
+    // The widget decides whether it accepts; Application replies with
+    // set_accepts_drag() after the dispatched event, which accepts the offer.
+    if (m_accepts_drag && offer && !m_drag_mime.is_empty())
         wl_data_offer_accept(offer, serial, m_drag_mime.characters());
     if (m_drag_window >= 0 && m_input.drag_moved)
         m_input.drag_moved(m_drag_window, adjusted_drag_position(), m_pointer_buttons, current_modifiers(), m_drag_received);
@@ -1531,10 +1535,17 @@ void WaylandClient::on_drag_enter(u32 serial, wl_data_offer* offer, wl_surface* 
 void WaylandClient::on_drag_motion(Gfx::IntPoint position)
 {
     m_drag_position = position;
-    if (m_drag_offer && !m_drag_mime.is_empty())
+    if (m_drag_offer && m_accepts_drag && !m_drag_mime.is_empty())
         wl_data_offer_accept(m_drag_offer, m_drag_serial, m_drag_mime.characters());
     if (m_drag_window >= 0 && m_input.drag_moved)
         m_input.drag_moved(m_drag_window, adjusted_drag_position(), m_pointer_buttons, current_modifiers(), m_drag_received);
+}
+
+void WaylandClient::set_accepts_drag(bool accepts)
+{
+    m_accepts_drag = accepts;
+    if (accepts && m_drag_offer && !m_drag_mime.is_empty())
+        wl_data_offer_accept(m_drag_offer, m_drag_serial, m_drag_mime.characters());
 }
 
 void WaylandClient::on_drag_drop()

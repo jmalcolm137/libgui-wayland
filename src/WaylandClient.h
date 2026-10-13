@@ -235,7 +235,7 @@ public:
     void on_drag_source_drop_performed();
     void on_drag_source_finished();
     void on_drag_source_action(u32 action) { m_drag_action = action; }
-    void set_accepts_drag(bool accepts) { m_accepts_drag = accepts; }
+    void set_accepts_drag(bool accepts);
     void on_popup_done(xdg_popup*);
     void on_surface_configured(xdg_surface*);
     void on_frame_done(wl_callback*);
