@@ -39,7 +39,7 @@ if [[ ${#TARGETS[@]} -eq 0 ]]; then
         SystemMonitor Debugger CrashReporter TerminalSettings TextEditor ThemeEditor UsersSettings VideoPlayer Weather
         # The games and DevTools (the Taskbar's Games and Development menus).
         2048 BrickGame Chess ColorLines FlappyBug Flood GameOfLife Hearts MasterWord
-        Minesweeper Snake Solitaire Spider ChessEngine
+        Minesweeper Snake Solitaire Spider ChessEngine Sudoku
         GMLPlayground HackStudio Profiler SQLStudio
         # The demos and Magnifier (the Taskbar's Demos and Utilities menus).
         CatDog Eyes Gradient LibGfxDemo LibGfxScaleDemo Mandelbrot ModelGallery
