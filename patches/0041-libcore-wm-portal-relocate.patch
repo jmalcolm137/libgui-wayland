@@ -1,0 +1,17 @@
+--- a/Userland/Libraries/LibCore/SessionManagement.cpp
++++ b/Userland/Libraries/LibCore/SessionManagement.cpp
+@@ -37,6 +37,14 @@
+ 
+ ErrorOr<ByteString> parse_path_with_sid(StringView general_path, Optional<pid_t> force_sid)
+ {
++    // SDE: the WindowManagerServer socket (the Taskbar's shell protocol) is a
++    // single global path in SerenityOS. On the host the SDE session may relocate
++    // it per seat/session (SDE_WM_PORTAL_PATH) so several can coexist; the
++    // compositor honours the same variable when it listens.
++    if (general_path == "/tmp/portal/wm"sv) {
++        if (auto const* wm_portal = getenv("SDE_WM_PORTAL_PATH"); wm_portal && *wm_portal)
++            return ByteString(wm_portal);
++    }
+     if (general_path.contains("%sid"sv)) {
+         // A host can relocate the whole per-session runtime directory. This lets
+         // a test use its own session services (on private socket paths) without
