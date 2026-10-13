@@ -81,6 +81,11 @@ public:
         Function<void(i32 window_id)> window_close_request;
         Function<void(i32 window_id, bool activated)> window_activation;
         Function<void(i32 window_id, Gfx::IntSize content_size)> window_resize;
+        // Drag-and-drop. The source end reports its outcome; the target end
+        // receives the drop/motion with the transferred mime data.
+        Function<void(bool accepted)> drag_finished;
+        Function<void(i32 window_id, Gfx::IntPoint position, u32 buttons, u32 modifiers, HashMap<String, ByteBuffer>)> drag_moved;
+        Function<void(i32 window_id, Gfx::IntPoint position, u32 buttons, u32 modifiers, HashMap<String, ByteBuffer>)> drag_dropped;
         // Menubar (top inset) and popup (menu) input.
         Function<void(i32 window_id, Gfx::IntPoint position)> menubar_motion;
         Function<void(i32 window_id)> menubar_left;
@@ -219,6 +224,18 @@ public:
     void on_selection(wl_data_offer*);
     void on_source_send(wl_data_source*, char const* mime_type, int fd);
     void on_source_cancelled(wl_data_source*);
+    // Explicit drag-and-drop (data-device DnD). The source starts a drag from the
+    // focused window; the target receives enter/motion/drop with the mime data.
+    bool start_drag(ByteString const& text, HashMap<String, ByteBuffer> const& mime_data, Gfx::ShareableBitmap const& bitmap);
+    void on_drag_enter(u32 serial, wl_data_offer*, wl_surface*, Gfx::IntPoint position);
+    void on_drag_motion(Gfx::IntPoint position);
+    void on_drag_drop();
+    void on_drag_leave();
+    void on_drag_source_cancelled(wl_data_source*);
+    void on_drag_source_drop_performed();
+    void on_drag_source_finished();
+    void on_drag_source_action(u32 action) { m_drag_action = action; }
+    void set_accepts_drag(bool accepts) { m_accepts_drag = accepts; }
     void on_popup_done(xdg_popup*);
     void on_surface_configured(xdg_surface*);
     void on_frame_done(wl_callback*);
@@ -351,6 +368,23 @@ private:
     HashMap<u64, Vector<ByteString>> m_offer_mime_types;
     wl_data_source* m_data_source { nullptr };
     HashMap<ByteString, ByteBuffer> m_clipboard_offers;
+    // Drag-and-drop state (see on_drag_*).
+    HashMap<String, ByteBuffer> m_drag_payload;
+    u32 m_drag_action { 0 };
+    wl_data_source* m_drag_source { nullptr };
+    wl_surface* m_drag_icon { nullptr };
+    wl_buffer* m_drag_icon_buffer { nullptr };
+    Optional<Core::AnonymousBuffer> m_drag_icon_anon;
+    wl_data_offer* m_drag_offer { nullptr };
+    i32 m_drag_window { -1 };
+    Gfx::IntPoint m_drag_position;
+    u32 m_drag_serial { 0 };
+    bool m_accepts_drag { false };
+    bool m_drag_dropped { false };
+    ByteString m_drag_mime;
+    HashMap<String, ByteBuffer> m_drag_received;
+    ByteBuffer receive_offer_data(wl_data_offer*, ByteString const& mime);
+    Gfx::IntPoint adjusted_drag_position() const;
     u32 m_last_input_serial { 0 };
     u32 m_modifiers { 0 };
     Function<void(ByteString const&)> m_clipboard_changed;

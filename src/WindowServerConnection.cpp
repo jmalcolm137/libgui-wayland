@@ -463,6 +463,18 @@ void WindowServerConnection::install_input_callbacks()
     callbacks.popup_motion = [this](i32 popup_id, Gfx::IntPoint position) { m_menu.on_popup_motion(popup_id, position); };
     callbacks.popup_button = [this](i32 popup_id, Gfx::IntPoint position, bool pressed) { m_menu.on_popup_button(popup_id, position, pressed); };
     callbacks.popup_closed = [this](i32 popup_id) { m_menu.on_popup_closed(popup_id); };
+    callbacks.drag_finished = [this](bool accepted) {
+        if (accepted)
+            async_drag_accepted();
+        else
+            async_drag_cancelled();
+    };
+    callbacks.drag_moved = [this](i32 window_id, Gfx::IntPoint position, u32 buttons, u32 modifiers, HashMap<String, ByteBuffer> mime_data) {
+        async_drag_moved(window_id, position, 0, buttons, modifiers, {}, move(mime_data));
+    };
+    callbacks.drag_dropped = [this](i32 window_id, Gfx::IntPoint position, u32 buttons, u32 modifiers, HashMap<String, ByteBuffer> mime_data) {
+        async_drag_dropped(window_id, position, 0, buttons, modifiers, {}, move(mime_data));
+    };
 
     WaylandClient::the().set_input_callbacks(move(callbacks));
 }
@@ -823,9 +835,19 @@ void WindowServerConnection::set_background_color(ByteString const& background_c
     write_sde_state_file("wallpaper.color"sv, background_color.bytes());
 }
 
-Messages::WindowServer::StartDragResponse WindowServerConnection::start_drag(ByteString const&, HashMap<String, ByteBuffer> const&, Gfx::ShareableBitmap const&)
+Messages::WindowServer::StartDragResponse WindowServerConnection::start_drag(ByteString const& text, HashMap<String, ByteBuffer> const& mime_data, Gfx::ShareableBitmap const& drag_bitmap)
 {
-    return Messages::WindowServer::StartDragResponse { false };
+    // Bridge LibGUI's drag source onto the standard Wayland data-device DnD. The
+    // outcome arrives later, via callbacks.drag_finished (async_drag_accepted /
+    // async_drag_cancelled), so a Serenity app's DragOperation resolves when the
+    // drag ends — against any Wayland target, SDE or otherwise.
+    bool started = WaylandClient::the().start_drag(text, mime_data, drag_bitmap);
+    return Messages::WindowServer::StartDragResponse { started };
+}
+
+void WindowServerConnection::set_accepts_drag(bool accepts)
+{
+    WaylandClient::the().set_accepts_drag(accepts);
 }
 
 void WindowServerConnection::create_menu(i32 menu_id, String const& name, i32 minimum_width)

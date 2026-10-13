@@ -120,6 +120,12 @@ target_include_directories(libwm-clipboard-test PRIVATE "${CMAKE_CURRENT_SOURCE_
 target_link_options(libwm-clipboard-test PRIVATE "-Wl,--no-as-needed")
 target_link_libraries(libwm-clipboard-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC windowserver)
 
+# Starts a LibGUI DragOperation on a mouse press, to exercise the DnD bridge.
+add_executable(libwm-drag-test test/DragTest.cpp)
+target_include_directories(libwm-drag-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_options(libwm-drag-test PRIVATE "-Wl,--no-as-needed")
+target_link_libraries(libwm-drag-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC windowserver)
+
 # Shows the About dialog directly, to reproduce the About crash.
 add_executable(libwm-about-test test/AboutTest.cpp)
 target_include_directories(libwm-about-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")

@@ -112,6 +112,7 @@ private:
     void set_wallpaper_mode(ByteString const& mode) override;
     void set_background_color(ByteString const& background_color) override;
     Messages::WindowServer::StartDragResponse start_drag(ByteString const& text, HashMap<String, ByteBuffer> const& mime_data, Gfx::ShareableBitmap const& drag_bitmap) override;
+    void set_accepts_drag(bool accepts) override;
 
     // Menus (server-rendered).
     void create_menu(i32 menu_id, String const& name, i32 minimum_width) override;
