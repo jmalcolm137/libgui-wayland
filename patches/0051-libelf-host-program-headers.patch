@@ -1,0 +1,42 @@
+diff --git a/Userland/Libraries/LibELF/ELFABI.h b/Userland/Libraries/LibELF/ELFABI.h
+--- a/Userland/Libraries/LibELF/ELFABI.h
++++ b/Userland/Libraries/LibELF/ELFABI.h
+@@ -499,9 +499,10 @@
+ #define PT_RISCV_ATTRIBUTES 0x70000003 /* RISC-V ELF attribute section */
+ #define PT_HIPROC 0x7fffffff           /* end of reserved range for processor specific segment types */
+ 
+-#define PT_GNU_EH_FRAME 0x6474e550 /* Exception handling info */
+-#define PT_GNU_RELRO 0x6474e552    /* Read-only after relocation */
+-#define PT_GNU_STACK 0x6474e551    /* Stack permissions & size info */
++#define PT_GNU_EH_FRAME 0x6474e550  /* Exception handling info */
++#define PT_GNU_RELRO 0x6474e552     /* Read-only after relocation */
++#define PT_GNU_STACK 0x6474e551     /* Stack permissions & size info */
++#define PT_GNU_PROPERTY 0x6474e553  /* GNU object properties (modern PIE binaries) */
+ 
+ #define PT_OPENBSD_RANDOMIZE 0x65a3dbe6 /* fill with random data */
+ #define PT_OPENBSD_WXNEEDED 0x65a3dbe7  /* program performs W^X violations */
+diff --git a/Userland/Libraries/LibELF/Validation.cpp b/Userland/Libraries/LibELF/Validation.cpp
+--- a/Userland/Libraries/LibELF/Validation.cpp
++++ b/Userland/Libraries/LibELF/Validation.cpp
+@@ -140,7 +140,9 @@
+         return false;
+     }
+ 
+-    if (sizeof(Elf_Shdr) != elf_header.e_shentsize) {
++    // An object with no section header table (e.g. a Linux core dump) reports
++    // e_shnum == 0 and an e_shentsize of 0; that is valid, not malformed.
++    if (elf_header.e_shnum != 0 && sizeof(Elf_Shdr) != elf_header.e_shentsize) {
+         if (verbose)
+             dbgln("File has incorrect section header size..? ({}), expected ({}).", elf_header.e_shentsize, sizeof(Elf_Shdr));
+         return false;
+@@ -237,7 +239,9 @@
+             continue;
+         }
+ 
+-        if (program_header.p_filesz > program_header.p_memsz) {
++        // Only loadable segments must fit in memory; notes (e.g. in a Linux
++        // core dump) carry file data with p_memsz == 0.
++        if (program_header.p_type == PT_LOAD && program_header.p_filesz > program_header.p_memsz) {
+             if (verbose)
+                 dbgln("Program header ({}) has p_filesz ({}) larger than p_memsz ({})", header_index, program_header.p_filesz, program_header.p_memsz);
+             return false;

@@ -1,0 +1,102 @@
+diff --git a/Userland/Libraries/LibDebug/PtraceRegisters.h b/Userland/Libraries/LibDebug/PtraceRegisters.h
+--- a/Userland/Libraries/LibDebug/PtraceRegisters.h
++++ b/Userland/Libraries/LibDebug/PtraceRegisters.h
+@@ -19,6 +19,7 @@
+ #    include <signal.h>
+ #    include <stddef.h>
+ #    include <sys/ptrace.h>
++#    include <sys/uio.h>
+ #    include <sys/user.h>
+ #    include <sys/wait.h>
+ 
+@@ -51,3 +52,39 @@
+ 
+ #endif
+ 
++// NT_PRSTATUS (the ELF note type carrying the general-purpose registers); the
++// host's <elf.h> cannot be included here as it collides with Serenity's ELFABI.
++#ifndef NT_PRSTATUS
++#    define NT_PRSTATUS 1
++#endif
++
++// How to wait for a traced child to stop. SerenityOS spells this
++// WSTOPPED|WEXITED; on Linux those are waitid() flags that waitpid() rejects
++// with EINVAL, so use __WALL, which also reports cloned thread-children.
++#if defined(AK_OS_SERENITY)
++#    define SDE_WAITPID_TRACEE (WSTOPPED | WEXITED)
++#else
++#    define SDE_WAITPID_TRACEE (__WALL)
++#endif
++
++// SerenityOS exchanges the register set with PT_GETREGS/PT_SETREGS. Some host
++// kernels reject PTRACE_GETREGS with EFAULT, so use the regset API there.
++inline bool ptrace_get_registers(pid_t pid, PtraceRegisters& regs)
++{
++#if defined(AK_OS_SERENITY)
++    return ptrace(PT_GETREGS, pid, &regs, 0) >= 0;
++#else
++    iovec iov { &regs, sizeof(regs) };
++    return ptrace(PTRACE_GETREGSET, pid, reinterpret_cast<void*>(NT_PRSTATUS), &iov) >= 0;
++#endif
++}
++
++inline bool ptrace_set_registers(pid_t pid, PtraceRegisters const& regs)
++{
++#if defined(AK_OS_SERENITY)
++    return ptrace(PT_SETREGS, pid, const_cast<PtraceRegisters*>(&regs), 0) >= 0;
++#else
++    iovec iov { const_cast<PtraceRegisters*>(&regs), sizeof(regs) };
++    return ptrace(PTRACE_SETREGSET, pid, reinterpret_cast<void*>(NT_PRSTATUS), &iov) >= 0;
++#endif
++}
+diff --git a/Userland/Libraries/LibDebug/DebugSession.cpp b/Userland/Libraries/LibDebug/DebugSession.cpp
+--- a/Userland/Libraries/LibDebug/DebugSession.cpp
++++ b/Userland/Libraries/LibDebug/DebugSession.cpp
+@@ -160,7 +160,7 @@
+     }
+ 
+     int status = 0;
+-    if (waitpid(pid, &status, WSTOPPED | WEXITED) != pid || !WIFSTOPPED(status)) {
++    if (waitpid(pid, &status, SDE_WAITPID_TRACEE) != pid || !WIFSTOPPED(status)) {
+         perror("waitpid");
+         return {};
+     }
+@@ -361,8 +361,8 @@
+ PtraceRegisters DebugSession::get_registers() const
+ {
+     PtraceRegisters regs;
+-    if (ptrace(PT_GETREGS, m_debuggee_pid, &regs, 0) < 0) {
+-        perror("PT_GETREGS");
++    if (!ptrace_get_registers(m_debuggee_pid, regs)) {
++        perror("ptrace_get_registers");
+         VERIFY_NOT_REACHED();
+     }
+     return regs;
+@@ -370,8 +370,8 @@
+ 
+ void DebugSession::set_registers(PtraceRegisters const& regs)
+ {
+-    if (ptrace(PT_SETREGS, m_debuggee_pid, bit_cast<void*>(&regs), 0) < 0) {
+-        perror("PT_SETREGS");
++    if (!ptrace_set_registers(m_debuggee_pid, regs)) {
++        perror("ptrace_set_registers");
+         VERIFY_NOT_REACHED();
+     }
+ }
+@@ -389,7 +389,7 @@
+ {
+     continue_debuggee(type);
+     int wstatus = 0;
+-    if (waitpid(m_debuggee_pid, &wstatus, WSTOPPED | WEXITED) != m_debuggee_pid) {
++    if (waitpid(m_debuggee_pid, &wstatus, SDE_WAITPID_TRACEE) != m_debuggee_pid) {
+         perror("waitpid");
+         VERIFY_NOT_REACHED();
+     }
+@@ -408,6 +408,7 @@
+     // PT_CONTINUE actually resumes the debuggee. On Linux PT_SINGLESTEP resumes
+     // it itself, so an extra continue would run the process away.
+     continue_debuggee();
++#endif
+ 
+     if (waitpid(m_debuggee_pid, 0, WSTOPPED) != m_debuggee_pid) {
+         perror("waitpid");

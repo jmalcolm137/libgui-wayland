@@ -106,15 +106,18 @@ protocol. Rather than shim each one piecemeal, they are deferred until there is 
 Desktop Environment on Linux**: a Serenity-shaped session providing the corresponding services
 and per-compositor backends.
 
-Deferred applications (in `Userland/Applications`):
+Kernel/service-facing applications (in `Userland/Applications`) were originally
+deferred because they assumed the SerenityOS ABI. They are now built and ported to
+Linux **natively** (reading `/proc`, driving `ptrace`, parsing native core dumps)
+rather than against a SerenityOS shim:
 
-| App | Needs | Why deferred |
+| App | Was deferred because | Status |
 |---|---|---|
-| `Terminal` | a Serenity pty and `LibVT`'s Serenity terminal backend | Linux has ptys (`posix_openpt`), but `LibVT`'s plumbing is Serenity-specific |
-| `SystemMonitor` | Serenity `/proc` and `LibDebug`/`LibSymbolication` (`sys/arch/regs.h`, ptrace) | Linux `/proc` and the process model differ |
-| `Debugger` | Serenity's ptrace ABI, `sys/arch/regs.h`, and core/ELF model | a hostile, non-portable mismatch |
-| `CrashReporter` | Serenity's core-dump format, `LibCoredump`, `LibSymbolication` | same |
-| `MouseSettings` | WindowServer *service* internals plus compositor-specific pointer settings | see below |
+| `Terminal` | `LibVT`'s plumbing was Serenity-specific | built; runs on a Linux pty |
+| `SystemMonitor` | Serenity `/proc` and `LibSymbolication` (`sys/arch/regs.h`, ptrace) | built Linux-native (`/proc`, libunwind + libdw) |
+| `Debugger` | Serenity's ptrace ABI and `sys/arch/regs.h` | built Linux-native (`PTRACE_GETREGSET`, `__WALL`; patches 0050/0052) |
+| `CrashReporter` | Serenity's core-dump format and `LibCoredump` | built; reads a native ELF core dump (patch 0053) |
+| `MouseSettings` | WindowServer *service* internals plus compositor-specific pointer settings | built; compositor settings via the config seam (see below) |
 
 Compositor-specific settings (no Wayland standard exists):
 

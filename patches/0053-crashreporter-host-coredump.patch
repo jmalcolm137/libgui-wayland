@@ -1,0 +1,467 @@
+diff --git a/Userland/Libraries/LibELF/Core.h b/Userland/Libraries/LibELF/Core.h
+--- a/Userland/Libraries/LibELF/Core.h
++++ b/Userland/Libraries/LibELF/Core.h
+@@ -72,8 +72,10 @@
+         if (memory_region_name.contains("Loader.so"sv))
+             return "Loader.so"sv;
+         auto maybe_colon_index = memory_region_name.find(':');
++        // SerenityOS names regions "object:offset"; a host core dump names them
++        // with a plain path.
+         if (!maybe_colon_index.has_value())
+-            return {};
++            return memory_region_name.to_byte_string();
+         return memory_region_name.substring_view(0, *maybe_colon_index).to_byte_string();
+     }
+ #endif
+diff --git a/Userland/Applications/CrashReporter/main.cpp b/Userland/Applications/CrashReporter/main.cpp
+index 6dfd09c4..8f484af1 100644
+--- a/Userland/Applications/CrashReporter/main.cpp
++++ b/Userland/Applications/CrashReporter/main.cpp
+@@ -37,7 +37,9 @@
+ #include <LibMain/Main.h>
+ #include <LibThreading/BackgroundAction.h>
+ #include <LibURL/URL.h>
+-#include <mallocdefs.h>
++#if defined(AK_OS_SERENITY)
++#    include <mallocdefs.h>
++#endif
+ #include <spawn.h>
+ #include <string.h>
+ #include <unistd.h>
+@@ -82,9 +84,10 @@ static TitleAndText build_backtrace(Coredump::Reader const& coredump, ELF::Core:
+     auto fault_access = metadata.get("fault_access");
+     if (fault_address.has_value() && fault_access.has_value()) {
+         builder.appendff("{} fault on {} at address {}", fault_type.value_or("Page"), fault_access.value(), fault_address.value());
++        auto raw_fault_address = AK::StringUtils::convert_to_uint_from_hex(fault_address.value().substring_view(2));
++#if defined(AK_OS_SERENITY)
+         constexpr FlatPtr malloc_scrub_pattern = explode_byte(MALLOC_SCRUB_BYTE);
+         constexpr FlatPtr free_scrub_pattern = explode_byte(FREE_SCRUB_BYTE);
+-        auto raw_fault_address = AK::StringUtils::convert_to_uint_from_hex(fault_address.value().substring_view(2));
+         if (raw_fault_address.has_value() && (raw_fault_address.value() & 0xffff0000) == (malloc_scrub_pattern & 0xffff0000)) {
+             builder.append(", looks like it may be uninitialized malloc() memory\n"sv);
+             dbgln("NOTE: Address {:p} looks like it may be uninitialized malloc() memory\n", raw_fault_address.value());
+@@ -94,6 +97,12 @@ static TitleAndText build_backtrace(Coredump::Reader const& coredump, ELF::Core:
+         } else {
+             builder.append("\n"sv);
+         }
++#else
++        // The host C library does not scrub malloc memory with a known byte
++        // pattern, so this SerenityOS heuristic does not apply.
++        (void)raw_fault_address;
++        builder.append("\n"sv);
++#endif
+         builder.append("\n"sv);
+     }
+ 
+@@ -128,7 +137,12 @@ static TitleAndText build_cpu_registers(ELF::Core::ThreadInfo const& thread_info
+     builder.appendff("rbp={:p} rsp={:p} rsi={:p} rdi={:p}\n", regs.rbp, regs.rsp, regs.rsi, regs.rdi);
+     builder.appendff(" r8={:p}  r9={:p} r10={:p} r11={:p}\n", regs.r8, regs.r9, regs.r10, regs.r11);
+     builder.appendff("r12={:p} r13={:p} r14={:p} r15={:p}\n", regs.r12, regs.r13, regs.r14, regs.r15);
++#    if defined(AK_OS_SERENITY)
+     builder.appendff("rip={:p} rflags={:p}", regs.rip, regs.rflags);
++#    else
++    // The host register set is the native struct user_regs_struct (eflags).
++    builder.appendff("rip={:p} eflags={:p}", regs.rip, regs.eflags);
++#    endif
+ #elif ARCH(AARCH64)
+     builder.appendff("Stack pointer   sp={:p}\n", regs.sp);
+     builder.appendff("Program counter pc={:p}\n", regs.pc);
+diff --git a/Userland/Libraries/LibCoredump/Reader.h b/Userland/Libraries/LibCoredump/Reader.h
+index 16b8fd26..fa835c83 100644
+--- a/Userland/Libraries/LibCoredump/Reader.h
++++ b/Userland/Libraries/LibCoredump/Reader.h
+@@ -11,6 +11,7 @@
+ #include <AK/HashMap.h>
+ #include <AK/Noncopyable.h>
+ #include <AK/OwnPtr.h>
++#include <AK/Vector.h>
+ #include <LibCore/MappedFile.h>
+ #include <LibELF/Core.h>
+ #include <LibELF/Image.h>
+@@ -119,11 +120,33 @@ private:
+ 
+     ELF::Image m_coredump_image;
+     ssize_t m_notes_segment_index { -1 };
++
++#if !defined(AK_OS_SERENITY)
++    // A Linux ELF core dump has no SerenityOS note section. The host path reads
++    // the standard kernel notes (NT_PRSTATUS/NT_PRPSINFO/NT_FILE/NT_SIGINFO/
++    // NT_AUXV) and the PT_LOAD segments instead; see Reader::parse_host_core().
++    struct HostRegion {
++        u64 start { 0 };
++        u64 end { 0 };
++        u16 program_header_index { 0 };
++        ByteString name;
++    };
++    void parse_host_core();
++
++    Vector<HostRegion> m_host_regions;
++    Vector<ELF::Core::ThreadInfo> m_host_threads;
++    ByteString m_host_executable;
++    Vector<ByteString> m_host_arguments;
++    int m_host_pid { 0 };
++    u8 m_host_signal { 0 };
++    Optional<FlatPtr> m_host_fault_address;
++#endif
+ };
+ 
+ template<typename Func>
+ void Reader::for_each_memory_region_info(Func func) const
+ {
++#if defined(AK_OS_SERENITY)
+     NotesEntryIterator it(get_serenity_note_section().data());
+     for (; !it.at_end(); it.next()) {
+         if (it.type() != ELF::Core::NotesEntryHeader::Type::MemoryRegionInfo)
+@@ -147,11 +170,25 @@ void Reader::for_each_memory_region_info(Func func) const
+         if (decision == IterationDecision::Break)
+             return;
+     }
++#else
++    for (auto const& region : m_host_regions) {
++        MemoryRegionInfo memory_region_info {
++            ELF::Core::NotesEntryHeader { ELF::Core::NotesEntryHeader::MemoryRegionInfo },
++            region.start,
++            region.end,
++            region.program_header_index,
++            region.name.view(),
++        };
++        if (func(memory_region_info) == IterationDecision::Break)
++            return;
++    }
++#endif
+ }
+ 
+ template<typename Func>
+ void Reader::for_each_thread_info(Func func) const
+ {
++#if defined(AK_OS_SERENITY)
+     NotesEntryIterator it(get_serenity_note_section().data());
+     for (; !it.at_end(); it.next()) {
+         if (it.type() != ELF::Core::NotesEntryHeader::Type::ThreadInfo)
+@@ -163,6 +200,12 @@ void Reader::for_each_thread_info(Func func) const
+         if (decision == IterationDecision::Break)
+             return;
+     }
++#else
++    for (auto const& thread_info : m_host_threads) {
++        if (func(thread_info) == IterationDecision::Break)
++            return;
++    }
++#endif
+ }
+ 
+ }
+diff --git a/Userland/Libraries/LibCoredump/Reader.cpp b/Userland/Libraries/LibCoredump/Reader.cpp
+index ae5d872c..1347633b 100644
+--- a/Userland/Libraries/LibCoredump/Reader.cpp
++++ b/Userland/Libraries/LibCoredump/Reader.cpp
+@@ -9,6 +9,7 @@
+ #include <AK/Function.h>
+ #include <AK/HashTable.h>
+ #include <AK/JsonObject.h>
++#include <AK/StringBuilder.h>
+ #include <AK/JsonValue.h>
+ #include <AK/LexicalPath.h>
+ #include <LibCompress/Gzip.h>
+@@ -18,6 +19,30 @@
+ #include <string.h>
+ #include <unistd.h>
+ 
++#if !defined(AK_OS_SERENITY)
++#    include <sys/procfs.h>
++#    include <sys/user.h>
++
++#    ifndef NT_PRSTATUS
++#        define NT_PRSTATUS 1
++#    endif
++#    ifndef NT_PRPSINFO
++#        define NT_PRPSINFO 3
++#    endif
++#    ifndef NT_AUXV
++#        define NT_AUXV 6
++#    endif
++#    ifndef NT_SIGINFO
++#        define NT_SIGINFO 0x53494749
++#    endif
++#    ifndef NT_FILE
++#        define NT_FILE 0x46494c45
++#    endif
++#    ifndef AT_EXECFN
++#        define AT_EXECFN 31
++#    endif
++#endif
++
+ template<>
+ struct AK::Traits<Elf64_Note> : public AK::DefaultTraits<Elf64_Note> {
+     static constexpr bool is_trivially_serializable() { return true; }
+@@ -67,8 +92,179 @@ Reader::Reader(ReadonlyBytes coredump_bytes)
+         ++index;
+         return IterationDecision::Continue;
+     });
++#if defined(AK_OS_SERENITY)
+     VERIFY(m_notes_segment_index != -1);
++#else
++    parse_host_core();
++#endif
++}
++
++#if !defined(AK_OS_SERENITY)
++// The header of an ELF note (Elf64_Nhdr/Elf32_Nhdr are both three u32s). The
++// host's <elf.h> cannot be used here because it collides with Serenity's ELFABI.
++struct HostNoteHeader {
++    u32 namesz;
++    u32 descsz;
++    u32 type;
++};
++struct HostFileEntry {
++    u64 start;
++    u64 end;
++    u64 file_offset;
++};
++
++// Parse a Linux ELF core dump: the standard notes carry the threads, the process
++// info and the file mappings, and the PT_LOAD segments carry the memory.
++void Reader::parse_host_core()
++{
++    struct Note {
++        u32 type;
++        ReadonlyBytes desc;
++    };
++    Vector<Note> notes;
++    Vector<HostFileEntry> file_entries;
++    Vector<ByteString> file_names;
++
++    m_coredump_image.for_each_program_header([&](auto pheader) {
++        if (pheader.type() != PT_NOTE)
++            return;
++        auto const* base = reinterpret_cast<u8 const*>(pheader.raw_data());
++        size_t const size = pheader.size_in_memory();
++        size_t offset = 0;
++        while (offset + sizeof(HostNoteHeader) <= size) {
++            HostNoteHeader header {};
++            memcpy(&header, base + offset, sizeof(header));
++            size_t const name_padded = (static_cast<size_t>(header.namesz) + 3) & ~static_cast<size_t>(3);
++            size_t const desc_padded = (static_cast<size_t>(header.descsz) + 3) & ~static_cast<size_t>(3);
++            size_t const desc_offset = offset + sizeof(HostNoteHeader) + name_padded;
++            if (desc_offset + header.descsz > size)
++                break;
++            notes.append(Note { header.type, ReadonlyBytes { base + desc_offset, header.descsz } });
++            offset = desc_offset + desc_padded;
++        }
++    });
++
++    for (auto const& note : notes) {
++        if (note.type == NT_FILE) {
++            if (note.desc.size() < 2 * sizeof(u64))
++                continue;
++            u64 count = 0;
++            memcpy(&count, note.desc.data(), sizeof(count));
++            size_t const entries_offset = 2 * sizeof(u64);
++            if (entries_offset + count * sizeof(HostFileEntry) > note.desc.size())
++                continue;
++            for (u64 i = 0; i < count; ++i) {
++                HostFileEntry entry {};
++                memcpy(&entry, note.desc.data() + entries_offset + i * sizeof(HostFileEntry), sizeof(entry));
++                file_entries.append(entry);
++            }
++            size_t name_offset = entries_offset + count * sizeof(HostFileEntry);
++            while (name_offset < note.desc.size()) {
++                auto const* string = reinterpret_cast<char const*>(note.desc.data() + name_offset);
++                size_t const length = strnlen(string, note.desc.size() - name_offset);
++                file_names.append(ByteString { StringView { string, length } });
++                name_offset += length + 1;
++            }
++        } else if (note.type == NT_PRSTATUS) {
++            if (note.desc.size() < sizeof(prstatus_t))
++                continue;
++            prstatus_t status {};
++            memcpy(&status, note.desc.data(), sizeof(status));
++            static_assert(sizeof(PtraceRegisters) <= sizeof(status.pr_reg));
++            ELF::Core::ThreadInfo thread {};
++            thread.header.type = ELF::Core::NotesEntryHeader::ThreadInfo;
++            thread.tid = status.pr_pid;
++            memcpy(&thread.regs, &status.pr_reg, sizeof(PtraceRegisters));
++            m_host_threads.append(thread);
++            if (m_host_pid == 0)
++                m_host_pid = status.pr_pid;
++            if (m_host_signal == 0 && status.pr_cursig != 0)
++                m_host_signal = static_cast<u8>(status.pr_cursig);
++        } else if (note.type == NT_PRPSINFO) {
++            if (note.desc.size() < sizeof(prpsinfo_t))
++                continue;
++            prpsinfo_t info {};
++            memcpy(&info, note.desc.data(), sizeof(info));
++            m_host_pid = info.pr_pid;
++            if (m_host_executable.is_empty())
++                m_host_executable = ByteString { StringView { info.pr_fname, strnlen(info.pr_fname, sizeof(info.pr_fname)) } };
++            StringView const args { info.pr_psargs, strnlen(info.pr_psargs, sizeof(info.pr_psargs)) };
++            args.for_each_split_view(" "sv, SplitBehavior::Nothing, [&](StringView arg) {
++                if (!arg.is_empty())
++                    m_host_arguments.append(arg);
++            });
++        } else if (note.type == NT_SIGINFO) {
++            if (note.desc.size() < 24)
++                continue;
++            int signal_number = 0;
++            memcpy(&signal_number, note.desc.data(), sizeof(signal_number));
++            // siginfo_t: si_signo(4) si_errno(4) si_code(4) pad(4) then the
++            // fault address at offset 16.
++            FlatPtr fault_address = 0;
++            memcpy(&fault_address, note.desc.data() + 16, sizeof(fault_address));
++            if (signal_number != 0)
++                m_host_signal = static_cast<u8>(signal_number);
++            if (fault_address != 0)
++                m_host_fault_address = fault_address;
++        } else if (note.type == NT_AUXV) {
++            for (size_t offset = 0; offset + 2 * sizeof(u64) <= note.desc.size(); offset += 2 * sizeof(u64)) {
++                u64 type = 0, value = 0;
++                memcpy(&type, note.desc.data() + offset, sizeof(type));
++                memcpy(&value, note.desc.data() + offset + sizeof(u64), sizeof(value));
++                if (type == 0)
++                    break;
++                if (type == AT_EXECFN && value != 0) {
++                    // The auxiliary vector holds a pointer into the (dumped)
++                    // stack; read the NUL-terminated string through the image.
++                    StringBuilder builder;
++                    FlatPtr cursor = value;
++                    bool terminated = false;
++                    while (!terminated) {
++                        auto word = peek_memory(cursor);
++                        if (!word.has_value())
++                            break;
++                        auto const* bytes = reinterpret_cast<u8 const*>(&word.value());
++                        for (size_t i = 0; i < sizeof(FlatPtr); ++i) {
++                            if (bytes[i] == 0) {
++                                terminated = true;
++                                break;
++                            }
++                            builder.append(static_cast<char>(bytes[i]));
++                        }
++                        cursor += sizeof(FlatPtr);
++                    }
++                    if (!builder.is_empty())
++                        m_host_executable = builder.to_byte_string();
++                }
++            }
++        }
++    }
++
++    // The first NT_FILE entry is the main executable.
++    if (!file_names.is_empty())
++        m_host_executable = file_names.first();
++
++    // PT_LOAD segments become the memory regions, named from NT_FILE.
++    m_coredump_image.for_each_program_header([&](auto pheader) {
++        if (pheader.type() != PT_LOAD || pheader.size_in_memory() == 0)
++            return;
++        auto const& raw = pheader.raw_header();
++        HostRegion region;
++        region.start = raw.p_vaddr;
++        region.end = raw.p_vaddr + raw.p_memsz;
++        region.program_header_index = static_cast<u16>(pheader.index());
++        for (size_t i = 0; i < file_entries.size() && i < file_names.size(); ++i) {
++            if (region.start >= file_entries[i].start && region.start < file_entries[i].end) {
++                region.name = file_names[i];
++                break;
++            }
++        }
++        if (region.name.is_empty())
++            region.name = m_host_executable;
++        m_host_regions.append(move(region));
++    });
+ }
++#endif
+ 
+ Optional<ByteBuffer> Reader::decompress_coredump(ReadonlyBytes raw_coredump)
+ {
+@@ -218,29 +414,42 @@ Optional<MemoryRegionInfo> Reader::region_containing(FlatPtr address) const
+ 
+ int Reader::process_pid() const
+ {
++#if defined(AK_OS_SERENITY)
+     auto process_info = this->process_info();
+     auto pid = process_info.get_integer<int>("pid"sv).value_or(0);
+     return pid;
++#else
++    return m_host_pid;
++#endif
+ }
+ 
+ u8 Reader::process_termination_signal() const
+ {
++#if defined(AK_OS_SERENITY)
+     auto process_info = this->process_info();
+     auto termination_signal = process_info.get_u8("termination_signal"sv);
+     if (!termination_signal.has_value() || *termination_signal <= SIGINVAL || *termination_signal >= NSIG)
+         return SIGINVAL;
+     return *termination_signal;
++#else
++    return m_host_signal;
++#endif
+ }
+ 
+ ByteString Reader::process_executable_path() const
+ {
++#if defined(AK_OS_SERENITY)
+     auto process_info = this->process_info();
+     auto executable_path = process_info.get_byte_string("executable_path"sv);
+     return executable_path.value_or({});
++#else
++    return m_host_executable;
++#endif
+ }
+ 
+ Vector<ByteString> Reader::process_arguments() const
+ {
++#if defined(AK_OS_SERENITY)
+     auto process_info = this->process_info();
+     auto arguments = process_info.get_array("arguments"sv);
+     if (!arguments.has_value())
+@@ -251,10 +460,14 @@ Vector<ByteString> Reader::process_arguments() const
+             vector.append(value.as_string());
+     });
+     return vector;
++#else
++    return m_host_arguments;
++#endif
+ }
+ 
+ Vector<ByteString> Reader::process_environment() const
+ {
++#if defined(AK_OS_SERENITY)
+     auto process_info = this->process_info();
+     auto environment = process_info.get_array("environment"sv);
+     if (!environment.has_value())
+@@ -265,10 +478,24 @@ Vector<ByteString> Reader::process_environment() const
+             vector.append(value.as_string());
+     });
+     return vector;
++#else
++    return {};
++#endif
+ }
+ 
+ HashMap<ByteString, ByteString> Reader::metadata() const
+ {
++#if !defined(AK_OS_SERENITY)
++    // Present the same keys the CrashReporter asks for, derived from the host
++    // siginfo (the faulting address) rather than SerenityOS coredump metadata.
++    HashMap<ByteString, ByteString> host_metadata;
++    if (m_host_fault_address.has_value()) {
++        host_metadata.set("fault_address", ByteString::formatted("{:#x}", *m_host_fault_address));
++        host_metadata.set("fault_type", "Page");
++        host_metadata.set("fault_access", "access");
++    }
++    return host_metadata;
++#else
+     const ELF::Core::Metadata* metadata_notes_entry = nullptr;
+     NotesEntryIterator it(get_serenity_note_section().data());
+     for (; !it.at_end(); it.next()) {
+@@ -290,6 +517,7 @@ HashMap<ByteString, ByteString> Reader::metadata() const
+         metadata.set(key, value.as_string_or({}));
+     });
+     return metadata;
++#endif
+ }
+ 
+ Reader::LibraryData const* Reader::library_containing(FlatPtr address) const

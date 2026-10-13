@@ -1,0 +1,26 @@
+diff --git a/Userland/Applications/Debugger/main.cpp b/Userland/Applications/Debugger/main.cpp
+--- a/Userland/Applications/Debugger/main.cpp
++++ b/Userland/Applications/Debugger/main.cpp
+@@ -24,7 +24,7 @@
+ #include <signal.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+-#include <sys/arch/regs.h>
++#include <LibDebug/PtraceRegisters.h>
+ #include <unistd.h>
+ 
+ RefPtr<Line::Editor> editor;
+@@ -48,7 +48,13 @@
+     outln("rsp={:p} rbp={:p} rsi={:p} rdi={:p}", regs.rsp, regs.rbp, regs.rsi, regs.rdi);
+     outln(" r8={:p}  r9={:p} r10={:p} r11={:p}", regs.r8, regs.r9, regs.r10, regs.r11);
+     outln("r12={:p} r13={:p} r14={:p} r15={:p}", regs.r12, regs.r13, regs.r14, regs.r15);
++#    if defined(AK_OS_SERENITY)
+     outln("rip={:p} rflags={:p}", regs.rip, regs.rflags);
++#    else
++    // The host register set is the native struct user_regs_struct, whose flags
++    // field is named eflags.
++    outln("rip={:p} eflags={:p}", regs.rip, regs.eflags);
++#    endif
+ #elif ARCH(AARCH64)
+     outln("Stack pointer   sp={:p}", regs.sp);
+     outln("Program counter pc={:p}", regs.pc);

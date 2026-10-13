@@ -24,10 +24,10 @@ for arg in "$@"; do
     esac
 done
 if [[ ${#TARGETS[@]} -eq 0 ]]; then
-    # Everything that can run on the host (the SERENITYOS-service/kernel-facing
-    # apps -- Terminal, Debugger, CrashReporter -- are excluded; see README).
-    # SystemMonitor is now Linux-native (reads /proc; a libunwind + libdw
-    # thread-stack backend), so it is built too.
+    # Everything that can run on the host. SystemMonitor, Debugger and
+    # CrashReporter are Linux-native: SystemMonitor reads /proc with a
+    # libunwind + libdw thread-stack backend, Debugger drives ptrace directly,
+    # and CrashReporter reads a Linux ELF core dump (patches 0050-0053).
     TARGETS=(
         LibGfx LibGUI windowserver serenity-audio eglgpu
         Calculator PDFViewer Piano libwm-test-window
@@ -36,7 +36,7 @@ if [[ ${#TARGETS[@]} -eq 0 ]]; then
         FontEditor GamesSettings Help HexEditor ImageViewer KeyboardMapper
         KeyboardSettings Mail MailSettings Maps MapsSettings MouseSettings NetworkSettings
         Presenter Run Screenshot Settings SoundPlayer SpaceAnalyzer Spreadsheet
-        SystemMonitor TerminalSettings TextEditor ThemeEditor UsersSettings VideoPlayer Weather
+        SystemMonitor Debugger CrashReporter TerminalSettings TextEditor ThemeEditor UsersSettings VideoPlayer Weather
         # The games and DevTools (the Taskbar's Games and Development menus).
         2048 BrickGame Chess ColorLines FlappyBug Flood GameOfLife Hearts MasterWord
         Minesweeper Snake Solitaire Spider ChessEngine
