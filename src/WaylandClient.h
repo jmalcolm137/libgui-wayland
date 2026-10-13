@@ -152,6 +152,10 @@ public:
     // with the client's content shifted down by `inset` pixels.
     void set_window_inset(i32 window_id, int inset, Function<void(Gfx::Bitmap&, Gfx::IntRect)> draw);
 
+    // Record the regions an incoming paint will change, so the present can copy
+    // and damage only those (empty = the whole window).
+    void add_window_damage(i32 window_id, Vector<Gfx::IntRect> const& rects);
+
     // Popup surfaces for server-rendered menus. A submenu is parented to the
     // parent popup's surface and anchored at its item's right edge.
     void create_popup(i32 popup_id, i32 parent_window_id, i32 parent_popup_id, Gfx::IntRect anchor, Gfx::IntSize size, bool is_submenu);
@@ -263,6 +267,15 @@ private:
         Function<void(Gfx::Bitmap&, Gfx::IntRect)> draw_inset;
         Core::AnonymousBuffer composed_buffer;
         RefPtr<Gfx::Bitmap> composed_bitmap;
+        // The composed buffer is reused across presents; it is only recreated
+        // when the size/scale changes. `inset_dirty` forces the menubar strip to
+        // be redrawn (and damaged) when it changes.
+        bool composed_valid { false };
+        bool inset_dirty { true };
+        // Regions the next present must copy and damage (logical, visible
+        // coordinates). Empty means "the whole window".
+        Vector<Gfx::IntRect> damage;
+        bool damage_full { false };
         // Compositor frame-callback pacing: while a frame is in flight we keep
         // only the newest client content and attach it when the frame lands.
         wl_callback* frame_callback { nullptr };
@@ -305,7 +318,7 @@ private:
     i32 popup_id_for_surface(wl_surface*) const;
     void purge_released_buffers(WindowSurface&);
     void purge_released_buffers(Popup&);
-    void bind_bitmap(wl_surface*, Core::AnonymousBuffer const&, Gfx::Bitmap const&, Vector<NonnullOwnPtr<BufferRecord>>&);
+    void bind_bitmap(wl_surface*, Core::AnonymousBuffer const&, Gfx::Bitmap const&, Vector<NonnullOwnPtr<BufferRecord>>&, Vector<Gfx::IntRect> const* damage = nullptr);
     u32 current_modifiers() const;
     void maybe_create_data_device();
     ByteString preferred_mime_for(wl_data_offer*) const;

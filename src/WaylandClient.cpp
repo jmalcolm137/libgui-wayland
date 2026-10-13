@@ -1349,7 +1349,7 @@ void WaylandClient::purge_released_buffers(Popup& popup)
     popup.buffers = move(kept);
 }
 
-void WaylandClient::bind_bitmap(wl_surface* surface, Core::AnonymousBuffer const& buffer, Gfx::Bitmap const& bitmap, Vector<NonnullOwnPtr<BufferRecord>>& buffers)
+void WaylandClient::bind_bitmap(wl_surface* surface, Core::AnonymousBuffer const& buffer, Gfx::Bitmap const& bitmap, Vector<NonnullOwnPtr<BufferRecord>>& buffers, Vector<Gfx::IntRect> const* damage)
 {
     if (!m_shm)
         return;
@@ -1374,7 +1374,12 @@ void WaylandClient::bind_bitmap(wl_surface* surface, Core::AnonymousBuffer const
     if (bitmap.scale() > 1)
         wl_surface_set_buffer_scale(surface, bitmap.scale());
     wl_surface_attach(surface, wl_buf, 0, 0);
-    wl_surface_damage(surface, 0, 0, bitmap.width(), bitmap.height());
+    if (damage && !damage->is_empty()) {
+        for (auto const& rect : *damage)
+            wl_surface_damage(surface, rect.x(), rect.y(), rect.width(), rect.height());
+    } else {
+        wl_surface_damage(surface, 0, 0, bitmap.width(), bitmap.height());
+    }
     // Flush so the pool's fd is transferred before we close our copy.
     wl_display_flush(m_display);
     wl_shm_pool_destroy(pool);
@@ -1391,6 +1396,8 @@ void WaylandClient::set_window_inset(i32 window_id, int inset, Function<void(Gfx
     if (auto* window_surface = find(window_id)) {
         window_surface->inset = inset;
         window_surface->draw_inset = move(draw);
+        // The menubar strip must be redrawn (and re-damaged) on the next present.
+        window_surface->inset_dirty = true;
         // Non-resizable windows are pinned to their original size (plus inset);
         // the compositor still overrides this to go fullscreen.
         if (!window_surface->resizable && window_surface->toplevel) {
@@ -1401,6 +1408,22 @@ void WaylandClient::set_window_inset(i32 window_id, int inset, Function<void(Gfx
             wl_display_flush(m_display);
         }
     }
+}
+
+void WaylandClient::add_window_damage(i32 window_id, Vector<Gfx::IntRect> const& rects)
+{
+    auto* window_surface = find(window_id);
+    if (!window_surface || window_surface->damage_full)
+        return;
+    // Coalesce: too many rects (or a window that never presents) collapses to a
+    // full repaint rather than growing without bound.
+    if (window_surface->damage.size() + rects.size() > 64) {
+        window_surface->damage.clear();
+        window_surface->damage_full = true;
+        return;
+    }
+    for (auto const& rect : rects)
+        window_surface->damage.append(rect);
 }
 
 void WaylandClient::create_popup(i32 popup_id, i32 parent_window_id, i32 parent_popup_id, Gfx::IntRect anchor, Gfx::IntSize size, bool is_submenu)
@@ -2116,6 +2139,13 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
 
     purge_released_buffers(window_surface);
 
+    // Damage accumulated since the last present (logical, visible coordinates).
+    // Empty (or an overflow) means "the whole window".
+    Vector<Gfx::IntRect> damage = move(window_surface.damage);
+    window_surface.damage.clear();
+    bool const full_damage = window_surface.damage_full || damage.is_empty();
+    window_surface.damage_full = false;
+
     // If the window has a top inset (menubar), compose it above the client's
     // content into a single buffer. Otherwise attach the client's buffer as-is.
     if (window_surface.inset > 0 && window_surface.draw_inset) {
@@ -2128,29 +2158,73 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
         int const display_height = logical_height * scale;
         size_t const composed_pitch = Gfx::Bitmap::minimum_pitch(display_width, Gfx::BitmapFormat::BGRA8888);
         size_t const composed_height = static_cast<size_t>(display_height);
-        auto buffer = Core::AnonymousBuffer::create_with_size(composed_pitch * composed_height);
-        if (buffer.is_error())
-            return;
-        window_surface.composed_buffer = buffer.release_value();
-        auto composed = Gfx::Bitmap::create_with_anonymous_buffer(Gfx::BitmapFormat::BGRA8888, window_surface.composed_buffer, { visible_size.width(), logical_height }, scale);
-        if (composed.is_error())
-            return;
-        window_surface.composed_bitmap = composed.release_value();
+
+        // Reuse the composed buffer across presents; recreate only on a size or
+        // scale change (this used to allocate + fully memcpy on every commit).
+        bool recreate = !window_surface.composed_valid || !window_surface.composed_bitmap
+            || window_surface.composed_bitmap->size() != Gfx::IntSize { visible_size.width(), logical_height }
+            || window_surface.composed_bitmap->scale() != scale;
+        if (recreate) {
+            auto buffer = Core::AnonymousBuffer::create_with_size(composed_pitch * composed_height);
+            if (buffer.is_error())
+                return;
+            window_surface.composed_buffer = buffer.release_value();
+            auto composed = Gfx::Bitmap::create_with_anonymous_buffer(Gfx::BitmapFormat::BGRA8888, window_surface.composed_buffer, { visible_size.width(), logical_height }, scale);
+            if (composed.is_error())
+                return;
+            window_surface.composed_bitmap = composed.release_value();
+            window_surface.composed_valid = true;
+        }
         auto& destination = *window_surface.composed_bitmap;
 
         size_t client_bytes = static_cast<size_t>(pitch) * static_cast<size_t>(size.height());
         auto* source = static_cast<u8 const*>(mmap(nullptr, client_bytes, PROT_READ, MAP_SHARED, client_fd, 0));
         if (source == MAP_FAILED)
             return;
-        int const content_height = visible_size.height() * scale;
-        for (int y = 0; y < content_height; ++y)
-            memcpy(destination.scanline(window_surface.inset * scale + y), source + static_cast<size_t>(y) * pitch, static_cast<size_t>(display_width) * 4);
+        // Copy only the damaged content rows (everything on recreate/full damage).
+        auto copy_rect = [&](Gfx::IntRect rect) {
+            rect = rect.intersected({ 0, 0, visible_size.width(), visible_size.height() });
+            if (rect.is_empty())
+                return;
+            size_t const row_bytes = static_cast<size_t>(rect.width()) * scale * 4;
+            for (int row = rect.y() * scale; row < (rect.y() + rect.height()) * scale; ++row)
+                memcpy(destination.scanline(window_surface.inset * scale + row) + static_cast<size_t>(rect.x()) * scale,
+                    source + static_cast<size_t>(row) * pitch + static_cast<size_t>(rect.x()) * scale * 4,
+                    row_bytes);
+        };
+        if (recreate || full_damage) {
+            copy_rect({ 0, 0, visible_size.width(), visible_size.height() });
+        } else {
+            for (auto const& rect : damage)
+                copy_rect(rect);
+        }
         munmap(const_cast<u8*>(source), client_bytes);
 
-        window_surface.draw_inset(destination, { 0, 0, visible_size.width(), window_surface.inset });
+        // Redraw the menubar strip only when it can have changed.
+        bool const redraw_inset = recreate || window_surface.inset_dirty;
+        if (redraw_inset) {
+            window_surface.draw_inset(destination, { 0, 0, visible_size.width(), window_surface.inset });
+            window_surface.inset_dirty = false;
+        }
+
+        // Damage in surface coordinates: the content is shifted down by the inset.
+        Vector<Gfx::IntRect> surface_damage;
+        if (recreate || full_damage) {
+            surface_damage.append({ 0, 0, visible_size.width(), logical_height });
+        } else {
+            if (redraw_inset)
+                surface_damage.append({ 0, 0, visible_size.width(), window_surface.inset });
+            for (auto const& rect : damage) {
+                auto clipped = rect.intersected({ 0, 0, visible_size.width(), visible_size.height() });
+                if (!clipped.is_empty())
+                    surface_damage.append({ clipped.x(), clipped.y() + window_surface.inset, clipped.width(), clipped.height() });
+            }
+            if (surface_damage.is_empty())
+                surface_damage.append({ 0, 0, visible_size.width(), logical_height });
+        }
 
         request_frame();
-        bind_bitmap(window_surface.surface, window_surface.composed_buffer, destination, window_surface.buffers);
+        bind_bitmap(window_surface.surface, window_surface.composed_buffer, destination, window_surface.buffers, &surface_damage);
         wl_surface_commit(window_surface.surface);
         wl_display_flush(m_display);
         dbgln("LibWM/Wayland: presented window {} ({}x{} @{}x incl. {}px inset)", window_surface.window_id, visible_size.width(), visible_size.height(), scale, window_surface.inset);
@@ -2185,7 +2259,17 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
 
     request_frame();
     wl_surface_attach(window_surface.surface, buffer, 0, 0);
-    wl_surface_damage(window_surface.surface, 0, 0, visible_size.width(), visible_size.height());
+    // The backing store is the client's shared memory, so only the changed
+    // regions need re-reading; the rest is unchanged from the previous present.
+    if (full_damage) {
+        wl_surface_damage(window_surface.surface, 0, 0, visible_size.width(), visible_size.height());
+    } else {
+        for (auto const& rect : damage) {
+            auto clipped = rect.intersected({ 0, 0, visible_size.width(), visible_size.height() });
+            if (!clipped.is_empty())
+                wl_surface_damage(window_surface.surface, clipped.x(), clipped.y(), clipped.width(), clipped.height());
+        }
+    }
     wl_surface_commit(window_surface.surface);
     wl_display_flush(m_display);
 

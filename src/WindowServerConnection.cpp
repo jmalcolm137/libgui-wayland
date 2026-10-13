@@ -347,6 +347,9 @@ void WindowServerConnection::send_fast_greet()
 
 void WindowServerConnection::send_paint(Window& window, Vector<Gfx::IntRect> rects)
 {
+    // Record what the repaint will change, so the present copies and damages only
+    // those regions instead of the whole window.
+    WaylandClient::the().add_window_damage(window.id, rects);
     async_paint(window.id, window.rect.size(), move(rects));
 }
 
