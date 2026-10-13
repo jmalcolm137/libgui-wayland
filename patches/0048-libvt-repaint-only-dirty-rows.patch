@@ -1,0 +1,23 @@
+diff --git a/Userland/Libraries/LibVT/TerminalWidget.cpp b/Userland/Libraries/LibVT/TerminalWidget.cpp
+--- a/Userland/Libraries/LibVT/TerminalWidget.cpp
++++ b/Userland/Libraries/LibVT/TerminalWidget.cpp
+@@ -514,14 +514,16 @@
+         m_terminal.m_need_full_flush = false;
+         return;
+     }
+-    Gfx::IntRect rect;
++    // Update each dirty row on its own. update() accumulates the rects, so only
++    // the rows that changed are repainted: a single united rect would repaint
++    // every row between the topmost and bottommost change (a full-screen TUI
++    // that touches a header and a status line repainted the whole screen).
+     for (int i = 0; i < m_terminal.rows(); ++i) {
+         if (m_terminal.visible_line(i).is_dirty()) {
+-            rect = rect.united(row_rect(i));
++            update(row_rect(i));
+             m_terminal.visible_line(i).set_dirty(false);
+         }
+     }
+-    update(rect);
+ }
+ 
+ void TerminalWidget::resize_event(GUI::ResizeEvent& event)

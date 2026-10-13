@@ -1,0 +1,28 @@
+diff --git a/Userland/Libraries/LibVT/Terminal.cpp b/Userland/Libraries/LibVT/Terminal.cpp
+--- a/Userland/Libraries/LibVT/Terminal.cpp
++++ b/Userland/Libraries/LibVT/Terminal.cpp
+@@ -944,10 +944,21 @@
+     VERIFY(row < rows());
+     VERIFY(column < columns());
+     auto& line = active_buffer()[row];
++
++    // Only mark the line dirty if this write actually changes the cell. Full-screen
++    // TUIs (and synchronized-update redraws) rewrite whole frames with mostly
++    // identical content; treating an identical rewrite as a change made the widget
++    // repaint every row every frame.
++    bool changed = line->code_point(column) != code_point;
+     line->set_code_point(column, code_point);
+-    line->attribute_at(column) = m_current_state.attribute;
+-    line->attribute_at(column).flags |= Attribute::Flags::Touched;
+-    line->set_dirty(true);
++    auto new_attribute = m_current_state.attribute;
++    new_attribute.flags |= Attribute::Flags::Touched;
++    if (line->attribute_at(column) != new_attribute) {
++        line->attribute_at(column) = new_attribute;
++        changed = true;
++    }
++    if (changed)
++        line->set_dirty(true);
+ 
+     m_last_code_point = code_point;
+ }
