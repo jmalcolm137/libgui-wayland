@@ -1,0 +1,23 @@
+diff --git a/Userland/Applications/BrowserSettings/ContentFilterSettingsWidget.cpp b/Userland/Applications/BrowserSettings/ContentFilterSettingsWidget.cpp
+--- a/Userland/Applications/BrowserSettings/ContentFilterSettingsWidget.cpp
++++ b/Userland/Applications/BrowserSettings/ContentFilterSettingsWidget.cpp
+@@ -26,7 +26,18 @@
+ ErrorOr<void> DomainListModel::load()
+ {
+     // FIXME: This should be somewhat shared with Browser.
+-    auto file = TRY(Core::File::open(TRY(filter_list_file_path()), Core::File::OpenMode::Read));
++    auto path = TRY(filter_list_file_path());
++    auto maybe_file = Core::File::open(path, Core::File::OpenMode::Read);
++    if (maybe_file.is_error()) {
++        // The list file is optional: a fresh profile has none yet, and the tab
++        // must still open (upstream assumes the file always exists).
++        if (maybe_file.error().code() == ENOENT) {
++            m_domain_list.clear_with_capacity();
++            return {};
++        }
++        return maybe_file.release_error();
++    }
++    auto file = maybe_file.release_value();
+     auto content_filter_list = TRY(Core::InputBufferedFile::create(move(file)));
+     auto buffer = TRY(ByteBuffer::create_uninitialized(4096));
+ 

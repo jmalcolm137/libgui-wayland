@@ -1,0 +1,93 @@
+diff --git a/Userland/Libraries/LibCore/System.cpp b/Userland/Libraries/LibCore/System.cpp
+--- a/Userland/Libraries/LibCore/System.cpp
++++ b/Userland/Libraries/LibCore/System.cpp
+@@ -609,8 +609,17 @@
+     if (auto const* root = getenv("SERENITY_RES_ROOT"); root && *root) {
+         if (path.starts_with("/res/"sv))
+             return ByteString::formatted("{}{}", root, path.substring_view(4));
+-        if (path.starts_with("/usr/share/man/"sv))
+-            return ByteString::formatted("{}/../{}", root, path.substring_view(1));
++        // SerenityOS also keeps data under /etc (e.g. Network.ini, passwd) and
++        // /usr/share (e.g. Maps/TileProviders.json, man pages), which sit beside
++        // the resource root under Base. Relocate those only when the file exists
++        // there, so genuine host paths (/etc/resolv.conf, /usr/share/fonts, ...)
++        // still resolve normally.
++        if (path.starts_with("/etc/"sv) || path.starts_with("/usr/share/"sv)) {
++            auto relocated = ByteString::formatted("{}/../{}", root, path.substring_view(1));
++            struct stat st;
++            if (::stat(relocated.characters(), &st) == 0)
++                return relocated;
++        }
+     }
+     return path;
+ #endif
+diff --git a/Userland/Libraries/LibCore/FileWatcherLinux.cpp b/Userland/Libraries/LibCore/FileWatcherLinux.cpp
+--- a/Userland/Libraries/LibCore/FileWatcherLinux.cpp
++++ b/Userland/Libraries/LibCore/FileWatcherLinux.cpp
+@@ -9,6 +9,7 @@
+ #include <AK/Debug.h>
+ #include <AK/LexicalPath.h>
+ #include <LibCore/Notifier.h>
++#include <LibCore/System.h>
+ #include <errno.h>
+ #include <limits.h>
+ #include <string.h>
+@@ -143,7 +144,10 @@
+     if (has_flag(event_mask, FileWatcherEvent::Type::MetadataModified))
+         inotify_mask |= IN_ATTRIB;
+ 
+-    int watch_descriptor = ::inotify_add_watch(m_watcher_fd, path.characters(), inotify_mask);
++    // Host build: relocate "/res/...", "/etc/..." and "/usr/share/..." watches into
++    // the bundled Base tree. The maps keep the logical path, so events and
++    // remove_watch stay keyed the same way the caller provided them.
++    int watch_descriptor = ::inotify_add_watch(m_watcher_fd, System::resolve_resource_path(path).characters(), inotify_mask);
+     if (watch_descriptor < 0)
+         return Error::from_errno(errno);
+ 
+diff --git a/Userland/Libraries/LibGUI/FileSystemModel.cpp b/Userland/Libraries/LibGUI/FileSystemModel.cpp
+--- a/Userland/Libraries/LibGUI/FileSystemModel.cpp
++++ b/Userland/Libraries/LibGUI/FileSystemModel.cpp
+@@ -13,6 +13,7 @@
+ #include <AK/Types.h>
+ #include <LibCore/DirIterator.h>
+ #include <LibCore/StandardPaths.h>
++#include <LibCore/System.h>
+ #include <LibFileSystem/FileSystem.h>
+ #include <LibGUI/AbstractView.h>
+ #include <LibGUI/FileIconProvider.h>
+@@ -44,12 +45,15 @@
+ 
+ bool FileSystemModel::Node::fetch_data(ByteString const& full_path, bool is_root)
+ {
++    // Host build: the model keeps logical paths (e.g. "/res/..."), but the raw
++    // stat/access below bypass Core::System, so relocate resource paths here.
++    auto resolved_path = Core::System::resolve_resource_path(full_path);
+     struct stat st;
+     int rc;
+     if (is_root)
+-        rc = stat(full_path.characters(), &st);
++        rc = stat(resolved_path.characters(), &st);
+     else
+-        rc = lstat(full_path.characters(), &st);
++        rc = lstat(resolved_path.characters(), &st);
+     if (rc < 0) {
+         m_error = errno;
+         perror("stat/lstat");
+@@ -64,7 +68,7 @@
+     mtime = st.st_mtime;
+ 
+     if (S_ISLNK(mode)) {
+-        auto sym_link_target_or_error = FileSystem::read_link(full_path);
++        auto sym_link_target_or_error = FileSystem::read_link(resolved_path);
+         if (sym_link_target_or_error.is_error())
+             perror("readlink");
+         else {
+@@ -75,7 +79,7 @@
+     }
+ 
+     if (S_ISDIR(mode)) {
+-        is_accessible_directory = access(full_path.characters(), R_OK | X_OK) == 0;
++        is_accessible_directory = access(resolved_path.characters(), R_OK | X_OK) == 0;
+     }
+ 
+     return true;

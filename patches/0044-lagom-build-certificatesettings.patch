@@ -1,0 +1,11 @@
+diff --git a/Meta/Lagom/CMakeLists.txt b/Meta/Lagom/CMakeLists.txt
+--- a/Meta/Lagom/CMakeLists.txt
++++ b/Meta/Lagom/CMakeLists.txt
+@@ -644,6 +644,7 @@
+             Assistant
+             Calendar
+             CalendarSettings
++            CertificateSettings
+             CharacterMap
+             ClockSettings
+             Escalator
