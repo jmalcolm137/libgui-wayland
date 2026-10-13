@@ -1,8 +1,48 @@
 diff --git a/Userland/Applications/DisplaySettings/MonitorSettings.gml b/Userland/Applications/DisplaySettings/MonitorSettings.gml
-index ffdf3eb0..730b83c4 100644
+index ffdf3eb0..c6f6314e 100644
 --- a/Userland/Applications/DisplaySettings/MonitorSettings.gml
 +++ b/Userland/Applications/DisplaySettings/MonitorSettings.gml
-@@ -78,6 +78,18 @@
+@@ -58,6 +58,39 @@
+             }
+         }
+ 
++        @GUI::Widget {
++            preferred_height: "fit"
++            layout: @GUI::HorizontalBoxLayout {}
++
++            @GUI::Label {
++                text: "Position:"
++                text_alignment: "CenterLeft"
++                fixed_width: 95
++            }
++
++            @GUI::SpinBox {
++                name: "location_x"
++                fixed_size: [70, 21]
++                min: -32768
++                max: 32767
++            }
++
++            @GUI::Label {
++                text: "x"
++                text_alignment: "Center"
++                fixed_width: 14
++            }
++
++            @GUI::SpinBox {
++                name: "location_y"
++                fixed_size: [70, 21]
++                min: -32768
++                max: 32767
++            }
++
++            @GUI::Layout::Spacer {}
++        }
++
+         @GUI::Widget {
+             fixed_height: 8
+         }
+@@ -78,6 +111,18 @@
                  fixed_width: 50
              }
  
@@ -22,7 +62,7 @@ index ffdf3eb0..730b83c4 100644
                  name: "scale_2x"
                  text: "2x"
 diff --git a/Userland/Applications/DisplaySettings/MonitorSettingsWidget.cpp b/Userland/Applications/DisplaySettings/MonitorSettingsWidget.cpp
-index 8b80281a..e6e91226 100644
+index 8b80281a..4e69002d 100644
 --- a/Userland/Applications/DisplaySettings/MonitorSettingsWidget.cpp
 +++ b/Userland/Applications/DisplaySettings/MonitorSettingsWidget.cpp
 @@ -6,6 +6,7 @@
@@ -33,8 +73,27 @@ index 8b80281a..e6e91226 100644
  #include <Applications/DisplaySettings/MonitorSettingsGML.h>
  #include <LibGUI/BoxLayout.h>
  #include <LibGUI/Button.h>
-@@ -139,27 +140,23 @@ ErrorOr<void> MonitorSettingsWidget::create_frame()
+@@ -137,29 +138,42 @@ ErrorOr<void> MonitorSettingsWidget::create_frame()
+         set_modified(true);
+     };
  
++    m_location_x_spinbox = *find_descendant_of_type_named<GUI::SpinBox>("location_x");
++    m_location_y_spinbox = *find_descendant_of_type_named<GUI::SpinBox>("location_y");
++    auto update_location = [this] {
++        if (m_selected_screen_index >= m_screen_layout.screens.size())
++            return;
++        auto& selected_screen = m_screen_layout.screens[m_selected_screen_index];
++        selected_screen.location = { m_location_x_spinbox->value(), m_location_y_spinbox->value() };
++        // Auto re-arrange if the new position overlaps or disconnects a screen.
++        m_screen_layout.normalize();
++        m_location_x_spinbox->set_value(selected_screen.location.x(), GUI::AllowCallback::No);
++        m_location_y_spinbox->set_value(selected_screen.location.y(), GUI::AllowCallback::No);
++        m_monitor_widget->update();
++        set_modified(true);
++    };
++    m_location_x_spinbox->on_change = [update_location](int) { update_location(); };
++    m_location_y_spinbox->on_change = [update_location](int) { update_location(); };
++
      m_display_scale_radio_1x = *find_descendant_of_type_named<GUI::RadioButton>("scale_1x");
      m_display_scale_radio_1x->on_checked = [this](bool checked) {
 -        if (checked) {
@@ -75,10 +134,39 @@ index 8b80281a..e6e91226 100644
      };
  
      m_dpi_label = *find_descendant_of_type_named<GUI::Label>("display_dpi");
-@@ -290,6 +287,26 @@ void MonitorSettingsWidget::apply_settings()
-     return;
- }
+@@ -273,6 +287,10 @@ ErrorOr<void> MonitorSettingsWidget::selected_screen_index_or_resolution_changed
+     // Select the current selected resolution as it may differ
+     m_monitor_widget->set_desktop_resolution(current_resolution);
+     m_resolution_combo->set_selected_index(index, GUI::AllowCallback::No);
++    if (m_location_x_spinbox)
++        m_location_x_spinbox->set_value(screen.location.x(), GUI::AllowCallback::No);
++    if (m_location_y_spinbox)
++        m_location_y_spinbox->set_value(screen.location.y(), GUI::AllowCallback::No);
  
+     m_monitor_widget->update();
+ 
+@@ -281,13 +299,35 @@ ErrorOr<void> MonitorSettingsWidget::selected_screen_index_or_resolution_changed
+ 
+ void MonitorSettingsWidget::apply_settings()
+ {
+-    // libgui-wayland: the host compositor does not implement output configuration
+-    // (set_screen_layout is accepted but ignored). Applying the Monitor tab would
+-    // only raise SerenityOS's modal "Do you want to keep the new screen layout?
+-    // Reverting in N seconds." dialog - and then revert - which presents as a
+-    // multi-second freeze on every Apply (SettingsWindow applies all tabs). Skip
+-    // it: the Monitor tab is display-only in the port.
+-    return;
++    // libgui-wayland/SDE: the host compositor *does* implement output
++    // configuration, via screenlayout.ini: it watches the file and applies
++    // mode/position/scale live. Apply directly and save. We deliberately skip
++    // SerenityOS's "Do you want to keep the new screen layout? Reverting in N
++    // seconds." dialog - SettingsWindow applies every tab, so a modal here would
++    // freeze the window on every Apply.
++    auto result = GUI::ConnectionToWindowServer::the().set_screen_layout(m_screen_layout, true);
++    if (!result.success())
++        GUI::MessageBox::show_error(window(), MUST(String::formatted("Error setting screen layout: {}", result.error_msg())));
++}
++
 +void MonitorSettingsWidget::apply_output_scale(double scale)
 +{
 +    // R6 HiDPI: the scale radios apply immediately (the Monitor tab's Apply is a
@@ -97,16 +185,22 @@ index 8b80281a..e6e91226 100644
 +    m_monitor_widget->update();
 +    set_modified(true);
 +    GUI::ConnectionToWindowServer::the().async_set_output_scale(static_cast<i32>(AK::round(scale * 120.0)));
-+}
-+
+ }
+ 
  void MonitorSettingsWidget::show_screen_numbers(bool show)
- {
-     if (m_showing_screen_numbers == show)
 diff --git a/Userland/Applications/DisplaySettings/MonitorSettingsWidget.h b/Userland/Applications/DisplaySettings/MonitorSettingsWidget.h
-index 4caa094d..ed80ab7b 100644
+index 4caa094d..eb549661 100644
 --- a/Userland/Applications/DisplaySettings/MonitorSettingsWidget.h
 +++ b/Userland/Applications/DisplaySettings/MonitorSettingsWidget.h
-@@ -50,6 +50,10 @@ private:
+@@ -14,6 +14,7 @@
+ #include <LibGUI/ComboBox.h>
+ #include <LibGUI/RadioButton.h>
+ #include <LibGUI/SettingsWindow.h>
++#include <LibGUI/SpinBox.h>
+ #include <WindowServer/ScreenLayout.h>
+ 
+ namespace DisplaySettings {
+@@ -50,6 +51,10 @@ private:
      ErrorOr<void> generate_resolution_strings();
      ErrorOr<void> selected_screen_index_or_resolution_changed(DidScreenIndexChange screen_index_changed);
  
@@ -117,15 +211,18 @@ index 4caa094d..ed80ab7b 100644
      size_t m_selected_screen_index { 0 };
  
      WindowServer::ScreenLayout m_screen_layout;
-@@ -62,6 +66,8 @@ private:
+@@ -62,7 +67,11 @@ private:
      RefPtr<GUI::ComboBox> m_screen_combo;
      RefPtr<GUI::ComboBox> m_resolution_combo;
      RefPtr<GUI::RadioButton> m_display_scale_radio_1x;
 +    RefPtr<GUI::RadioButton> m_display_scale_radio_1_25x;
 +    RefPtr<GUI::RadioButton> m_display_scale_radio_1_5x;
      RefPtr<GUI::RadioButton> m_display_scale_radio_2x;
++    RefPtr<GUI::SpinBox> m_location_x_spinbox;
++    RefPtr<GUI::SpinBox> m_location_y_spinbox;
      RefPtr<GUI::Label> m_dpi_label;
  
+     bool m_showing_screen_numbers { false };
 diff --git a/Userland/Services/WindowServer/WindowServer.ipc b/Userland/Services/WindowServer/WindowServer.ipc
 index 40f7d549..8fb0c7ca 100644
 --- a/Userland/Services/WindowServer/WindowServer.ipc
