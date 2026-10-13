@@ -224,16 +224,16 @@ index 4caa094d..eb549661 100644
  
      bool m_showing_screen_numbers { false };
 diff --git a/Userland/Services/WindowServer/WindowServer.ipc b/Userland/Services/WindowServer/WindowServer.ipc
-index 40f7d549..8fb0c7ca 100644
+index 40f7d549..9c98166a 100644
 --- a/Userland/Services/WindowServer/WindowServer.ipc
 +++ b/Userland/Services/WindowServer/WindowServer.ipc
-@@ -120,6 +120,9 @@ endpoint WindowServer
-     get_screen_layout() => (::WindowServer::ScreenLayout screen_layout)
-     save_screen_layout() => (bool success, ByteString error_msg)
-     show_screen_numbers(bool show) =|
-+    // libgui-wayland/SDE: set the output scale (fractional), as v120 (scale*120).
-+    // The shim writes [Output] DefaultScale; the compositor re-scales live.
-+    set_output_scale(i32 scale_v120) =|
+@@ -211,4 +211,9 @@ endpoint WindowServer
+     remove_window_stealing(i32 window_id) => ()
  
-     apply_workspace_settings(u32 rows, u32 columns, bool save) => (bool success)
-     get_workspace_settings() => (u32 rows, u32 columns, u32 max_rows, u32 max_columns)
+     set_always_on_top(i32 window_id, bool always_on_top) => ()
++
++    // SDE: set the output scale as v120 (the shim writes [Output] DefaultScale).
++    // Keep new methods LAST: MessageID is positional, so a mid-file insert shifts
++    // ids and breaks already-built apps ("Failed to parse IPC message").
++    set_output_scale(i32 scale_v120) =|
+ }
