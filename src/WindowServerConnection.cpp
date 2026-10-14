@@ -18,6 +18,7 @@
 #include <LibGfx/SystemTheme.h>
 #include <LibGUI/Window.h>
 #include <WindowServer/SystemEffects.h>
+#include <WindowServer/WindowType.h>
 #include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
@@ -395,10 +396,20 @@ void WindowServerConnection::create_window(i32 window_id, i32, Gfx::IntRect cons
     // the output via layer-shell anchors, but the app builds its backing store
     // from window->size() before the configure arrives, and an empty size trips
     // `VERIFY(!size.is_empty())`.
+    //
+    // Only a window that will fill the output should assume the screen size,
+    // though. A panel or applet is laid out by the compositor from its applet
+    // area, so a screen-sized placeholder is allocated and thrown away: the Audio
+    // applet (the only one that shows an unsized window) allocated three
+    // 1280x720 buffers before its 16x16 configure — ~10 MB of memfd
+    // (docs/25-performance.md §4).
     if (fullscreen || window->rect.size().is_empty()) {
         auto screen = WaylandClient::the().screen_size();
-        if (!screen.is_empty())
-            window->rect.set_size(screen);
+        if (!screen.is_empty()) {
+            bool const compositor_sized = window_type == static_cast<i32>(WindowServer::WindowType::Applet)
+                || window_type == static_cast<i32>(WindowServer::WindowType::Taskbar);
+            window->rect.set_size(compositor_sized ? Gfx::IntSize { 16, 16 } : screen);
+        }
     }
 
     dbgln("LibWM: create_window id={} rect={},{},{}x{} fullscreen={} title='{}'", window_id, window->rect.x(), window->rect.y(), window->rect.width(), window->rect.height(), fullscreen, title);
