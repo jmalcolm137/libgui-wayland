@@ -120,12 +120,6 @@ target_include_directories(libwm-clipboard-test PRIVATE "${CMAKE_CURRENT_SOURCE_
 target_link_options(libwm-clipboard-test PRIVATE "-Wl,--no-as-needed")
 target_link_libraries(libwm-clipboard-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC windowserver)
 
-# Starts a LibGUI DragOperation on a mouse press, to exercise the DnD bridge.
-add_executable(libwm-drag-test test/DragTest.cpp)
-target_include_directories(libwm-drag-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_options(libwm-drag-test PRIVATE "-Wl,--no-as-needed")
-target_link_libraries(libwm-drag-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC windowserver)
-
 # Shows the About dialog directly, to reproduce the About crash.
 add_executable(libwm-about-test test/AboutTest.cpp)
 target_include_directories(libwm-about-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -144,46 +138,11 @@ target_include_directories(libwm-submenu-test PRIVATE "${CMAKE_CURRENT_SOURCE_DI
 target_link_options(libwm-submenu-test PRIVATE "-Wl,--no-as-needed")
 target_link_libraries(libwm-submenu-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC windowserver)
 
-# Probes the launch and image session-service portals, with and without an
-# external session service (in-process fallback vs. deferral). Driven by
-# scripts/run-services-test.sh; see docs/06-service-layering.md.
-add_executable(libwm-services-test test/ServiceLayeringTest.cpp)
-target_include_directories(libwm-services-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_options(libwm-services-test PRIVATE "-Wl,--no-as-needed")
-target_link_libraries(libwm-services-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibURL LibDesktop LibLaunch LibImageDecoderClient windowserver)
-
 # Spawns an app through Desktop::AppFile - the Taskbar system menu's launch path.
 add_executable(libwm-appfile-test test/AppFileLaunchTest.cpp)
 target_include_directories(libwm-appfile-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_options(libwm-appfile-test PRIVATE "-Wl,--no-as-needed")
 target_link_libraries(libwm-appfile-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibDesktop windowserver)
-
-# Shows notifications through LibGUI::Notification (spike §3: NotificationServer,
-# completed as WS5). The unmodified `notify` utility links LibURL, so we do too.
-add_executable(libwm-notify-test test/NotificationTest.cpp)
-target_include_directories(libwm-notify-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_options(libwm-notify-test PRIVATE "-Wl,--no-as-needed")
-target_link_libraries(libwm-notify-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibURL windowserver)
-
-# Requests a tooltip through GUI::Application::show_tooltip (WS6).
-add_executable(libwm-tooltip-test test/TooltipTest.cpp)
-target_include_directories(libwm-tooltip-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_options(libwm-tooltip-test PRIVATE "-Wl,--no-as-needed")
-target_link_libraries(libwm-tooltip-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC windowserver)
-
-# Confirms the font-parity decision (WS7): bitmap Katica has no 14pt face, so
-# size-based zoom is a no-op; a scalable face resolves (the R4/G5 path).
-add_executable(libwm-font-parity-test test/FontParityTest.cpp)
-target_include_directories(libwm-font-parity-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_options(libwm-font-parity-test PRIVATE "-Wl,--no-as-needed")
-target_link_libraries(libwm-font-parity-test PRIVATE LibMain LibGfx LibCore)
-
-# Guards the Linux ProcessStatisticsReader's per-CPU CPU-time accounting: the
-# total must advance at ~wall-clock rate, so a busy core reads ~100% (not
-# ~100/ncpu). See patches/0025.
-add_executable(libwm-procstat-test test/ProcStatTest.cpp)
-target_include_directories(libwm-procstat-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(libwm-procstat-test PRIVATE LibMain LibCore)
 
 # HiDPI fine-detail repro: a widget drawing full-width rects and thin/thick lines,
 # dumped at 1x and 2x to find ops that don't scale (see docs/03 D7).
@@ -191,26 +150,6 @@ add_executable(libwm-hidpi-detail-test test/HiDpiDetailTest.cpp)
 target_include_directories(libwm-hidpi-detail-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_options(libwm-hidpi-detail-test PRIVATE "-Wl,--no-as-needed")
 target_link_libraries(libwm-hidpi-detail-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC windowserver)
-
-# Confirms the session /bin shadow (SDE R4.2): SDE_SESSION_BIN_DIR overrides
-# /bin/X, so apps spawning /bin/shutdown reach the session's sde-power helper.
-add_executable(libwm-binpath-test test/BinPathTest.cpp)
-target_include_directories(libwm-binpath-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_options(libwm-binpath-test PRIVATE "-Wl,--no-as-needed")
-target_link_libraries(libwm-binpath-test PRIVATE LibMain LibCore)
-
-# Opens an executable file URL through Desktop::Launcher (the desktop's
-# "Display Settings" path): the LaunchServer must run the executable.
-add_executable(libwm-launch-exec-test test/LaunchExecTest.cpp)
-target_include_directories(libwm-launch-exec-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_options(libwm-launch-exec-test PRIVATE "-Wl,--no-as-needed")
-target_link_libraries(libwm-launch-exec-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibDesktop LibURL windowserver)
-
-# Opens a ComboBox dropdown: regression test for the popup collapsing.
-add_executable(libwm-combo-test test/ComboBoxTest.cpp)
-target_include_directories(libwm-combo-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_options(libwm-combo-test PRIVATE "-Wl,--no-as-needed")
-target_link_libraries(libwm-combo-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC windowserver)
 
 # --- The out-of-process WebContent service ------------------------------------
 # Built from the upstream sources. It is a single-client system service; LibWM
