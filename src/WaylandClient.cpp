@@ -10,6 +10,7 @@
 #include <Kernel/API/KeyCode.h>
 #include <LibCore/EventLoop.h>
 #include <LibCore/Notifier.h>
+#include <LibCore/Process.h>
 #include <LibGUI/Event.h>
 #include <LibGfx/Painter.h>
 #include <WindowServer/WindowType.h>
@@ -30,6 +31,22 @@
 #include "xdg-shell-client-protocol.h"
 
 namespace LibWM {
+
+// The application id reported to the compositor (`xdg_toplevel.app_id`): the
+// executable's base name, like an X11 WM_CLASS. The compositor uses it to group a
+// window's Taskbar button with the other windows of the same application. It is
+// the same for every window of this process.
+static ByteString const& application_id()
+{
+    static ByteString s_application_id = [] {
+        auto name = Core::Process::get_name().release_value_but_fixme_should_propagate_errors();
+        auto view = name.bytes_as_string_view();
+        if (auto slash = view.find_last('/'); slash.has_value())
+            view = view.substring_view(*slash + 1);
+        return ByteString { view };
+    }();
+    return s_application_id;
+}
 
 // --- registry -----------------------------------------------------------------
 
@@ -2127,7 +2144,7 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::In
     auto* toplevel = xdg_surface_get_toplevel(xdg_surface_object);
     xdg_toplevel_add_listener(toplevel, &s_toplevel_listener, this);
     xdg_toplevel_set_title(toplevel, title.characters());
-    xdg_toplevel_set_app_id(toplevel, "libwm");
+    xdg_toplevel_set_app_id(toplevel, application_id().characters());
     wl_surface_commit(surface);
 
     auto window_surface = make<WindowSurface>();

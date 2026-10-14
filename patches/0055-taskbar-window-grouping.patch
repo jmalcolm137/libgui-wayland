@@ -1,0 +1,552 @@
+diff --git a/Userland/Libraries/LibGUI/ConnectionToWindowManagerServer.cpp b/Userland/Libraries/LibGUI/ConnectionToWindowManagerServer.cpp
+index 2e618759..965953b1 100644
+--- a/Userland/Libraries/LibGUI/ConnectionToWindowManagerServer.cpp
++++ b/Userland/Libraries/LibGUI/ConnectionToWindowManagerServer.cpp
+@@ -22,10 +22,10 @@ ConnectionToWindowManagerServer& ConnectionToWindowManagerServer::the()
+ 
+ void ConnectionToWindowManagerServer::window_state_changed(i32 wm_id, i32 client_id, i32 window_id,
+     u32 workspace_row, u32 workspace_column, bool is_active, bool is_blocked, bool is_minimized, bool is_frameless,
+-    i32 window_type, ByteString const& title, Gfx::IntRect const& rect, Optional<i32> const& progress)
++    i32 window_type, ByteString const& title, Gfx::IntRect const& rect, Optional<i32> const& progress, ByteString const& app_id)
+ {
+     if (auto* window = Window::from_window_id(wm_id))
+-        Core::EventLoop::current().post_event(*window, make<WMWindowStateChangedEvent>(client_id, window_id, title, rect, workspace_row, workspace_column, is_active, is_blocked, static_cast<WindowType>(window_type), is_minimized, is_frameless, progress));
++        Core::EventLoop::current().post_event(*window, make<WMWindowStateChangedEvent>(client_id, window_id, title, rect, workspace_row, workspace_column, is_active, is_blocked, static_cast<WindowType>(window_type), is_minimized, is_frameless, progress, app_id));
+ }
+ 
+ void ConnectionToWindowManagerServer::applet_area_size_changed(i32 wm_id, Gfx::IntSize size)
+@@ -34,6 +34,12 @@ void ConnectionToWindowManagerServer::applet_area_size_changed(i32 wm_id, Gfx::I
+         Core::EventLoop::current().post_event(*window, make<WMAppletAreaSizeChangedEvent>(size));
+ }
+ 
++void ConnectionToWindowManagerServer::taskbar_group_windows(i32 wm_id, bool group)
++{
++    if (auto* window = Window::from_window_id(wm_id))
++        Core::EventLoop::current().post_event(*window, make<WMTaskbarGroupWindowsEvent>(group));
++}
++
+ void ConnectionToWindowManagerServer::window_rect_changed(i32 wm_id, i32 client_id, i32 window_id, Gfx::IntRect const& rect)
+ {
+     if (auto* window = Window::from_window_id(wm_id))
+diff --git a/Userland/Libraries/LibGUI/ConnectionToWindowManagerServer.h b/Userland/Libraries/LibGUI/ConnectionToWindowManagerServer.h
+index 143a5588..47abbe02 100644
+--- a/Userland/Libraries/LibGUI/ConnectionToWindowManagerServer.h
++++ b/Userland/Libraries/LibGUI/ConnectionToWindowManagerServer.h
+@@ -29,10 +29,11 @@ private:
+     }
+ 
+     virtual void window_removed(i32, i32, i32) override;
+-    virtual void window_state_changed(i32, i32, i32, u32, u32, bool, bool, bool, bool, i32, ByteString const&, Gfx::IntRect const&, Optional<i32> const&) override;
++    virtual void window_state_changed(i32, i32, i32, u32, u32, bool, bool, bool, bool, i32, ByteString const&, Gfx::IntRect const&, Optional<i32> const&, ByteString const&) override;
+     virtual void window_icon_bitmap_changed(i32, i32, i32, Gfx::ShareableBitmap const&) override;
+     virtual void window_rect_changed(i32, i32, i32, Gfx::IntRect const&) override;
+     virtual void applet_area_size_changed(i32, Gfx::IntSize) override;
++    virtual void taskbar_group_windows(i32, bool) override;
+     virtual void super_key_pressed(i32) override;
+     virtual void super_space_key_pressed(i32) override;
+     virtual void super_d_key_pressed(i32) override;
+diff --git a/Userland/Libraries/LibGUI/Event.h b/Userland/Libraries/LibGUI/Event.h
+index 0b8167a8..0bddffa6 100644
+--- a/Userland/Libraries/LibGUI/Event.h
++++ b/Userland/Libraries/LibGUI/Event.h
+@@ -69,6 +69,7 @@ public:
+         WM_WindowRectChanged,
+         WM_WindowIconBitmapChanged,
+         WM_AppletAreaSizeChanged,
++        WM_TaskbarGroupWindows,
+         WM_SuperKeyPressed,
+         WM_SuperSpaceKeyPressed,
+         WM_SuperDKeyPressed,
+@@ -159,6 +160,20 @@ private:
+     Gfx::IntSize m_size;
+ };
+ 
++class WMTaskbarGroupWindowsEvent : public WMEvent {
++public:
++    explicit WMTaskbarGroupWindowsEvent(bool group)
++        : WMEvent(Event::Type::WM_TaskbarGroupWindows, 0, 0)
++        , m_group(group)
++    {
++    }
++
++    bool group() const { return m_group; }
++
++private:
++    bool m_group { false };
++};
++
+ class WMWindowRemovedEvent : public WMEvent {
+ public:
+     WMWindowRemovedEvent(int client_id, int window_id)
+@@ -169,7 +184,7 @@ public:
+ 
+ class WMWindowStateChangedEvent : public WMEvent {
+ public:
+-    WMWindowStateChangedEvent(int client_id, int window_id, StringView title, Gfx::IntRect const& rect, unsigned workspace_row, unsigned workspace_column, bool is_active, bool is_blocked, WindowType window_type, bool is_minimized, bool is_frameless, Optional<int> progress)
++    WMWindowStateChangedEvent(int client_id, int window_id, StringView title, Gfx::IntRect const& rect, unsigned workspace_row, unsigned workspace_column, bool is_active, bool is_blocked, WindowType window_type, bool is_minimized, bool is_frameless, Optional<int> progress, ByteString const& app_id)
+         : WMEvent(Event::Type::WM_WindowStateChanged, client_id, window_id)
+         , m_title(title)
+         , m_rect(rect)
+@@ -181,6 +196,7 @@ public:
+         , m_minimized(is_minimized)
+         , m_frameless(is_frameless)
+         , m_progress(progress)
++        , m_app_id(app_id)
+     {
+     }
+ 
+@@ -194,6 +210,7 @@ public:
+     Optional<int> progress() const { return m_progress; }
+     unsigned workspace_row() const { return m_workspace_row; }
+     unsigned workspace_column() const { return m_workspace_column; }
++    ByteString const& app_id() const { return m_app_id; }
+ 
+ private:
+     ByteString m_title;
+@@ -206,6 +223,7 @@ private:
+     bool m_minimized;
+     bool m_frameless;
+     Optional<int> m_progress;
++    ByteString m_app_id;
+ };
+ 
+ class WMWindowRectChangedEvent : public WMEvent {
+diff --git a/Userland/Services/Taskbar/TaskbarButton.cpp b/Userland/Services/Taskbar/TaskbarButton.cpp
+index 065d587b..19a7cc5c 100644
+--- a/Userland/Services/Taskbar/TaskbarButton.cpp
++++ b/Userland/Services/Taskbar/TaskbarButton.cpp
+@@ -15,33 +15,59 @@
+ #include <LibGfx/WindowTheme.h>
+ 
+ TaskbarButton::TaskbarButton(WindowIdentifier const& identifier)
+-    : m_identifier(identifier)
+ {
++    m_identifiers.append(identifier);
+     set_checkable(true);
+ }
+ 
++WindowIdentifier const& TaskbarButton::primary_identifier() const
++{
++    // The window the button acts on: the group's active window if it has one,
++    // otherwise the first (oldest) window of the group.
++    for (auto const& identifier : m_identifiers) {
++        if (auto* window = WindowList::the().window(identifier); window && window->is_active())
++            return identifier;
++    }
++    return m_identifiers.first();
++}
++
++void TaskbarButton::add_identifier(WindowIdentifier const& identifier)
++{
++    if (!m_identifiers.contains_slow(identifier))
++        m_identifiers.append(identifier);
++}
++
++void TaskbarButton::remove_identifier(WindowIdentifier const& identifier)
++{
++    m_identifiers.remove_all_matching([&](WindowIdentifier const& candidate) { return candidate == identifier; });
++}
++
+ void TaskbarButton::context_menu_event(GUI::ContextMenuEvent&)
+ {
++    auto const& identifier = primary_identifier();
+     GUI::ConnectionToWindowManagerServer::the().async_popup_window_menu(
+-        m_identifier.client_id(),
+-        m_identifier.window_id(),
++        identifier.client_id(),
++        identifier.window_id(),
+         screen_relative_rect().location());
+ }
+ 
+ void TaskbarButton::update_taskbar_rect()
+ {
++    auto const& identifier = primary_identifier();
+     GUI::ConnectionToWindowManagerServer::the().async_set_window_taskbar_rect(
+-        m_identifier.client_id(),
+-        m_identifier.window_id(),
++        identifier.client_id(),
++        identifier.window_id(),
+         screen_relative_rect());
+ }
+ 
+ void TaskbarButton::clear_taskbar_rect()
+ {
+-    GUI::ConnectionToWindowManagerServer::the().async_set_window_taskbar_rect(
+-        m_identifier.client_id(),
+-        m_identifier.window_id(),
+-        {});
++    for (auto const& identifier : m_identifiers) {
++        GUI::ConnectionToWindowManagerServer::the().async_set_window_taskbar_rect(
++            identifier.client_id(),
++            identifier.window_id(),
++            {});
++    }
+ }
+ 
+ void TaskbarButton::resize_event(GUI::ResizeEvent& event)
+@@ -86,7 +112,7 @@ void TaskbarButton::paint_event(GUI::PaintEvent& event)
+     VERIFY(icon());
+     auto& icon = *this->icon();
+     auto& font = is_checked() ? this->font().bold_variant() : this->font();
+-    auto& window = WindowList::the().ensure_window(m_identifier);
++    auto* window = WindowList::the().window(primary_identifier());
+ 
+     GUI::Painter painter(*this);
+     painter.add_clip_rect(event.rect());
+@@ -116,14 +142,14 @@ void TaskbarButton::paint_event(GUI::PaintEvent& event)
+         icon_location.translate_by(1, 1);
+     }
+ 
+-    if (window.progress().has_value()) {
++    if (window && window->progress().has_value()) {
+         auto adjusted_rect = rect().shrunken(4, 4);
+         if (!is_being_pressed() && !is_checked()) {
+             adjusted_rect.translate_by(-1, -1);
+             adjusted_rect.set_width(adjusted_rect.width() + 1);
+             adjusted_rect.set_height(adjusted_rect.height() + 1);
+         }
+-        paint_custom_progressbar(painter, adjusted_rect, text_rect, palette(), 0, 100, window.progress().value(), text(), font, text_alignment());
++        paint_custom_progressbar(painter, adjusted_rect, text_rect, palette(), 0, 100, window->progress().value(), text(), font, text_alignment());
+     }
+ 
+     if (is_enabled()) {
+@@ -135,6 +161,6 @@ void TaskbarButton::paint_event(GUI::PaintEvent& event)
+         painter.blit_disabled(icon_location, icon, icon.rect(), palette());
+     }
+ 
+-    if (!window.progress().has_value())
++    if (!window || !window->progress().has_value())
+         paint_text(painter, text_rect, font, text_alignment());
+ }
+diff --git a/Userland/Services/Taskbar/TaskbarButton.h b/Userland/Services/Taskbar/TaskbarButton.h
+index e766803d..8e36d037 100644
+--- a/Userland/Services/Taskbar/TaskbarButton.h
++++ b/Userland/Services/Taskbar/TaskbarButton.h
+@@ -7,6 +7,7 @@
+ #pragma once
+ 
+ #include "WindowIdentifier.h"
++#include <AK/Vector.h>
+ #include <LibGUI/Button.h>
+ 
+ class TaskbarButton final : public GUI::Button {
+@@ -17,6 +18,16 @@ public:
+     void update_taskbar_rect();
+     void clear_taskbar_rect();
+ 
++    // A button stands for a single window, or — when the config option is on —
++    // for every window of one application (its Taskbar group).
++    WindowIdentifier const& primary_identifier() const;
++    Vector<WindowIdentifier> const& identifiers() const { return m_identifiers; }
++    void add_identifier(WindowIdentifier const&);
++    void remove_identifier(WindowIdentifier const&);
++
++    ByteString const& group_key() const { return m_group_key; }
++    void set_group_key(ByteString key) { m_group_key = move(key); }
++
+ private:
+     explicit TaskbarButton(WindowIdentifier const&);
+ 
+@@ -24,5 +35,6 @@ private:
+     virtual void resize_event(GUI::ResizeEvent&) override;
+     virtual void paint_event(GUI::PaintEvent&) override;
+ 
+-    WindowIdentifier m_identifier;
++    Vector<WindowIdentifier> m_identifiers;
++    ByteString m_group_key;
+ };
+diff --git a/Userland/Services/Taskbar/TaskbarWindow.cpp b/Userland/Services/Taskbar/TaskbarWindow.cpp
+index bc43a319..dc498d94 100644
+--- a/Userland/Services/Taskbar/TaskbarWindow.cpp
++++ b/Userland/Services/Taskbar/TaskbarWindow.cpp
+@@ -15,6 +15,8 @@
+ #include <AK/Debug.h>
+ #include <AK/Error.h>
+ #include <AK/String.h>
++#include <AK/StringBuilder.h>
++#include <AK/Vector.h>
+ #include <LibCore/StandardPaths.h>
+ #include <LibGUI/Action.h>
+ #include <LibGUI/BoxLayout.h>
+@@ -216,7 +218,7 @@ void TaskbarWindow::update_applet_area()
+     GUI::ConnectionToWindowManagerServer::the().async_set_applet_area_position(new_rect.location());
+ }
+ 
+-NonnullRefPtr<GUI::Button> TaskbarWindow::create_button(WindowIdentifier const& identifier)
++NonnullRefPtr<TaskbarButton> TaskbarWindow::create_button(WindowIdentifier const& identifier)
+ {
+     auto& button = m_task_button_container->add<TaskbarButton>(identifier);
+     button.set_min_size(20, 21);
+@@ -226,18 +228,35 @@ NonnullRefPtr<GUI::Button> TaskbarWindow::create_button(WindowIdentifier const&
+     return button;
+ }
+ 
++ByteString TaskbarWindow::group_key(::Window const& window) const
++{
++    // With grouping on, windows of one application collapse into a single button
++    // keyed by their app id. Windows with no app id — and every window when the
++    // feature is off — get a key of their own, i.e. one button per window.
++    if (m_group_windows && !window.app_id().is_empty())
++        return window.app_id();
++    return ByteString::formatted("{}:{}", window.identifier().client_id(), window.identifier().window_id());
++}
++
+ void TaskbarWindow::add_window_button(::Window& window, WindowIdentifier const& identifier)
+ {
+     if (window.button())
+         return;
+-    window.set_button(create_button(identifier));
+-    auto* button = window.button();
+-    button->on_click = [window = &window, identifier](auto) {
+-        if (window->is_minimized() || !window->is_active())
+-            GUI::ConnectionToWindowManagerServer::the().async_set_active_window(identifier.client_id(), identifier.window_id());
+-        else if (!window->is_blocked())
+-            GUI::ConnectionToWindowManagerServer::the().async_set_window_minimized(identifier.client_id(), identifier.window_id(), true);
+-    };
++    auto key = group_key(window);
++    NonnullRefPtr<TaskbarButton> button = [&]() -> NonnullRefPtr<TaskbarButton> {
++        if (auto it = m_group_buttons.find(key); it != m_group_buttons.end())
++            return it->value;
++        auto created = create_button(identifier);
++        created->set_group_key(key);
++        created->on_click = [this, key](auto) { activate_group(key); };
++        m_group_buttons.set(key, created);
++        return created;
++    }();
++    button->add_identifier(identifier);
++    window.set_button(button);
++    if (button->identifiers().size() > 1)
++        dbgln("Taskbar: window {}/{} joined group '{}' ({} windows)", identifier.client_id(), identifier.window_id(), key, button->identifiers().size());
++    refresh_window_button(*button);
+ }
+ 
+ void TaskbarWindow::remove_window_button(::Window& window, bool was_removed)
+@@ -245,21 +264,105 @@ void TaskbarWindow::remove_window_button(::Window& window, bool was_removed)
+     auto* button = window.button();
+     if (!button)
+         return;
+-    if (!was_removed)
+-        static_cast<TaskbarButton*>(button)->clear_taskbar_rect();
++    auto& taskbar_button = static_cast<TaskbarButton&>(*button);
++    taskbar_button.remove_identifier(window.identifier());
+     window.set_button(nullptr);
+-    button->remove_from_parent();
++    if (!taskbar_button.identifiers().is_empty()) {
++        refresh_window_button(taskbar_button);
++        return;
++    }
++    if (!was_removed)
++        taskbar_button.clear_taskbar_rect();
++    m_group_buttons.remove(taskbar_button.group_key());
++    taskbar_button.remove_from_parent();
+ }
+ 
+-void TaskbarWindow::update_window_button(::Window& window, bool show_as_active)
++void TaskbarWindow::refresh_window_button(TaskbarButton& button)
+ {
+-    auto* button = window.button();
+-    if (!button)
++    bool any_active = false;
++    bool any_visible = false;
++    ByteString primary_title;
++    StringBuilder tooltip;
++    auto const& primary = button.primary_identifier();
++    for (auto const& identifier : button.identifiers()) {
++        auto* window = WindowList::the().window(identifier);
++        if (!window)
++            continue;
++        if (window->is_active())
++            any_active = true;
++        if (is_window_on_current_workspace(*window))
++            any_visible = true;
++        if (identifier == primary)
++            primary_title = window->title();
++        if (!tooltip.is_empty())
++            tooltip.append('\n');
++        tooltip.append(window->title());
++    }
++    button.set_checked(any_active);
++    button.set_visible(any_visible);
++    if (button.identifiers().size() > 1)
++        primary_title = ByteString::formatted("{} ({})", primary_title, button.identifiers().size());
++    button.set_text(String::from_byte_string(primary_title).release_value_but_fixme_should_propagate_errors());
++    button.set_tooltip(String::from_byte_string(tooltip.to_byte_string()).release_value_but_fixme_should_propagate_errors());
++}
++
++void TaskbarWindow::update_window_button(::Window& window, bool)
++{
++    // A button is shared by a whole group, so recompute it from every member.
++    if (auto* button = window.button())
++        refresh_window_button(static_cast<TaskbarButton&>(*button));
++}
++
++void TaskbarWindow::activate_group(ByteString const& key)
++{
++    auto it = m_group_buttons.find(key);
++    if (it == m_group_buttons.end())
+         return;
+-    button->set_text(String::from_byte_string(window.title()).release_value_but_fixme_should_propagate_errors());
+-    button->set_tooltip(String::from_byte_string(window.title()).release_value_but_fixme_should_propagate_errors());
+-    button->set_checked(show_as_active);
+-    button->set_visible(is_window_on_current_workspace(window));
++    auto& button = *it->value;
++    auto const& identifiers = button.identifiers();
++    auto const& primary = button.primary_identifier();
++    auto* window = WindowList::the().window(primary);
++    if (!window)
++        return;
++    if (window->is_minimized() || !window->is_active()) {
++        GUI::ConnectionToWindowManagerServer::the().async_set_active_window(primary.client_id(), primary.window_id());
++        return;
++    }
++    // The group's active window is already active: a lone window toggles to
++    // minimized (as without grouping); a group cycles to its next window.
++    if (identifiers.size() <= 1) {
++        if (!window->is_blocked())
++            GUI::ConnectionToWindowManagerServer::the().async_set_window_minimized(primary.client_id(), primary.window_id(), true);
++        return;
++    }
++    size_t index = 0;
++    for (size_t i = 0; i < identifiers.size(); ++i) {
++        if (identifiers[i] == primary) {
++            index = i;
++            break;
++        }
++    }
++    for (size_t step = 1; step < identifiers.size(); ++step) {
++        auto const& next = identifiers[(index + step) % identifiers.size()];
++        if (!WindowList::the().window(next))
++            continue;
++        GUI::ConnectionToWindowManagerServer::the().async_set_active_window(next.client_id(), next.window_id());
++        return;
++    }
++}
++
++void TaskbarWindow::rebuild_window_buttons()
++{
++    for (auto& entry : m_group_buttons)
++        entry.value->remove_from_parent();
++    m_group_buttons.clear();
++    Vector<::Window*> windows;
++    WindowList::the().for_each_window([&](::Window& window) {
++        window.set_button(nullptr);
++        windows.append(&window);
++    });
++    for (auto* window : windows)
++        add_window_button(*window, window->identifier());
+ }
+ 
+ void TaskbarWindow::event(Core::Event& event)
+@@ -360,6 +463,11 @@ void TaskbarWindow::wm_event(GUI::WMEvent& event)
+             break;
+         }
+         auto& window = WindowList::the().ensure_window(identifier);
++        // A window's app id can arrive (or change) after it maps; move it to its
++        // new group when grouping is on.
++        if (m_group_windows && window.button() && window.app_id() != changed_event.app_id())
++            remove_window_button(window, false);
++        window.set_app_id(changed_event.app_id());
+         window.set_title(changed_event.title());
+         window.set_rect(changed_event.rect());
+         window.set_active(changed_event.is_active());
+@@ -378,6 +486,14 @@ void TaskbarWindow::wm_event(GUI::WMEvent& event)
+         update_applet_area();
+         break;
+     }
++    case GUI::Event::WM_TaskbarGroupWindows: {
++        auto& group_event = static_cast<GUI::WMTaskbarGroupWindowsEvent&>(event);
++        if (m_group_windows != group_event.group()) {
++            m_group_windows = group_event.group();
++            rebuild_window_buttons();
++        }
++        break;
++    }
+     case GUI::Event::WM_SuperKeyPressed: {
+         if (!m_system_menu)
+             break;
+diff --git a/Userland/Services/Taskbar/TaskbarWindow.h b/Userland/Services/Taskbar/TaskbarWindow.h
+index f7daa50d..012eead1 100644
+--- a/Userland/Services/Taskbar/TaskbarWindow.h
++++ b/Userland/Services/Taskbar/TaskbarWindow.h
+@@ -7,6 +7,7 @@
+ #pragma once
+ 
+ #include "ClockWidget.h"
++#include "TaskbarButton.h"
+ #include "WindowList.h"
+ #include <AK/NonnullRefPtr.h>
+ #include <LibConfig/Listener.h>
+@@ -36,11 +37,19 @@ private:
+     static void show_desktop_button_clicked(unsigned);
+     static void toggle_show_desktop();
+     void on_screen_rects_change(Vector<Gfx::IntRect, 4> const&, size_t);
+-    NonnullRefPtr<GUI::Button> create_button(WindowIdentifier const&);
++    NonnullRefPtr<TaskbarButton> create_button(WindowIdentifier const&);
+     void add_window_button(::Window&, WindowIdentifier const&);
+     void remove_window_button(::Window&, bool);
+     void update_window_button(::Window&, bool);
+ 
++    // Window grouping (Taskbar ▸ group by application). A group is keyed by the
++    // window's app id (an xdg app_id / an X11 WM_CLASS); with grouping off, every
++    // window gets its own key so there is one button per window.
++    ByteString group_key(::Window const&) const;
++    void refresh_window_button(TaskbarButton&);
++    void activate_group(ByteString const& key);
++    void rebuild_window_buttons();
++
+     ErrorOr<void> populate_taskbar();
+     ErrorOr<void> load_assistant();
+ 
+@@ -59,6 +68,11 @@ private:
+     RefPtr<GUI::Widget> m_task_button_container;
+     RefPtr<Gfx::Bitmap> m_default_icon;
+ 
++    // Grouping: when on (the compositor's `[Taskbar] GroupWindows`), windows that
++    // share an app id collapse into one button.
++    bool m_group_windows { false };
++    HashMap<ByteString, NonnullRefPtr<TaskbarButton>> m_group_buttons;
++
+     Gfx::IntSize m_applet_area_size;
+     RefPtr<GUI::Frame> m_applet_area_container;
+     RefPtr<GUI::Button> m_start_button;
+diff --git a/Userland/Services/Taskbar/WindowList.h b/Userland/Services/Taskbar/WindowList.h
+index 3d372bc1..4ac1d1ff 100644
+--- a/Userland/Services/Taskbar/WindowList.h
++++ b/Userland/Services/Taskbar/WindowList.h
+@@ -30,6 +30,11 @@ public:
+     ByteString title() const { return m_title; }
+     void set_title(ByteString const& title) { m_title = title; }
+ 
++    // The application identity (an xdg app_id / an X11 WM_CLASS) used to group
++    // this window's Taskbar button with other windows of the same application.
++    ByteString const& app_id() const { return m_app_id; }
++    void set_app_id(ByteString const& app_id) { m_app_id = app_id; }
++
+     Gfx::IntRect rect() const { return m_rect; }
+     void set_rect(Gfx::IntRect const& rect) { m_rect = rect; }
+ 
+@@ -69,6 +74,7 @@ public:
+ private:
+     WindowIdentifier m_identifier;
+     ByteString m_title;
++    ByteString m_app_id;
+     Gfx::IntRect m_rect;
+     RefPtr<GUI::Button> m_button;
+     RefPtr<Gfx::Bitmap> m_icon;
+diff --git a/Userland/Services/WindowServer/WindowManagerClient.ipc b/Userland/Services/WindowServer/WindowManagerClient.ipc
+index cd092d56..7891ce59 100644
+--- a/Userland/Services/WindowServer/WindowManagerClient.ipc
++++ b/Userland/Services/WindowServer/WindowManagerClient.ipc
+@@ -3,10 +3,11 @@
+ endpoint WindowManagerClient
+ {
+     window_removed(i32 wm_id, i32 client_id, i32 window_id) =|
+-    window_state_changed(i32 wm_id, i32 client_id, i32 window_id, u32 workspace_row, u32 workspace_column, bool is_active, bool is_blocking, bool is_minimized, bool is_frameless, i32 window_type, [UTF8] ByteString title, Gfx::IntRect rect, Optional<i32> progress) =|
++    window_state_changed(i32 wm_id, i32 client_id, i32 window_id, u32 workspace_row, u32 workspace_column, bool is_active, bool is_blocking, bool is_minimized, bool is_frameless, i32 window_type, [UTF8] ByteString title, Gfx::IntRect rect, Optional<i32> progress, [UTF8] ByteString app_id) =|
+     window_icon_bitmap_changed(i32 wm_id, i32 client_id, i32 window_id, Gfx::ShareableBitmap bitmap) =|
+     window_rect_changed(i32 wm_id, i32 client_id, i32 window_id, Gfx::IntRect rect) =|
+     applet_area_size_changed(i32 wm_id, Gfx::IntSize size) =|
++    taskbar_group_windows(i32 wm_id, bool group) =|
+     super_key_pressed(i32 wm_id) =|
+     super_space_key_pressed(i32 wm_id) =|
+     super_d_key_pressed(i32 wm_id) =|
