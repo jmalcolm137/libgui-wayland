@@ -22,7 +22,7 @@ index 00000000..2ede63a2
 +
 +class LocalSocket;
 +
-+// Lets an in-process component (LibWM, LibSerenityAudio, ...) answer
++// Lets an in-process component (LibWM, ...) answer
 +// connections that would normally go to a SerenityOS system service over a
 +// Unix socket. Each registered connector is asked in turn and may return an
 +// in-process peer or an empty Optional to decline. When no connector handles a

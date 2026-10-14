@@ -253,6 +253,60 @@ static void spawn_multi_client_service(StringView executable, ByteString const& 
         dbgln("LibWM: spawned {} pid={} (listening on '{}')", name, spawned.value(), path);
 }
 
+// The AudioServer serves TWO portals (audio + audiomanager) from one process, so
+// bind both listeners and hand them over in a single SOCKET_TAKEOVER.
+static void spawn_audio_server()
+{
+    auto executable = service_binary_path("AudioServer"sv);
+    if (Core::System::access(executable, X_OK).is_error()) {
+        dbgln("LibWM: service 'audioserver' not found at '{}'", executable);
+        return;
+    }
+
+    auto audio_path = expanded_portal_path("/tmp/session/%sid/portal/audio"sv);
+    auto manager_path = expanded_portal_path("/tmp/session/%sid/portal/audiomanager"sv);
+    auto audio_fd = bind_listening_socket(audio_path);
+    if (audio_fd < 0)
+        return; // someone else is already listening (or the bind failed)
+    auto manager_fd = bind_listening_socket(manager_path);
+    if (manager_fd < 0) {
+        ::close(audio_fd);
+        return;
+    }
+
+    // The service inherits both listening fds and accepts clients itself.
+    ::fcntl(audio_fd, F_SETFD, 0);
+    ::fcntl(manager_fd, F_SETFD, 0);
+
+    Optional<ByteString> previous_takeover;
+    if (auto const* existing = getenv("SOCKET_TAKEOVER"); existing && *existing)
+        previous_takeover = ByteString { existing };
+
+    auto takeover = ByteString::formatted("{}:{};{}:{}", audio_path, audio_fd, manager_path, manager_fd);
+    if (auto set = Core::Environment::set("SOCKET_TAKEOVER"sv, takeover, Core::Environment::Overwrite::Yes); set.is_error()) {
+        dbgln("LibWM: could not set SOCKET_TAKEOVER: {}", set.error());
+        ::close(audio_fd);
+        ::close(manager_fd);
+        return;
+    }
+
+    Vector<ByteString> arguments;
+    auto spawned = Core::Process::spawn(executable, arguments, {}, Core::Process::KeepAsChild::No);
+
+    if (previous_takeover.has_value())
+        (void)Core::Environment::set("SOCKET_TAKEOVER"sv, previous_takeover.value(), Core::Environment::Overwrite::Yes);
+    else
+        (void)Core::Environment::unset("SOCKET_TAKEOVER"sv);
+
+    ::close(audio_fd);
+    ::close(manager_fd);
+
+    if (spawned.is_error())
+        dbgln("LibWM: failed to spawn 'AudioServer': {}", spawned.error());
+    else
+        dbgln("LibWM: spawned AudioServer pid={} (listening on '{}')", spawned.value(), audio_path);
+}
+
 // All portals are served from a single thread with a single Core::EventLoop.
 //
 // This matters for two reasons: the client makes synchronous portal calls
@@ -395,6 +449,12 @@ static Optional<NonnullOwnPtr<Core::LocalSocket>> make_portal(ByteString const& 
     if (path == expanded_portal_path("/tmp/session/%sid/portal/notify"sv)) {
         // NotificationServer is also a multi-client (IPC::MultiServer) service.
         spawn_multi_client_service(service_binary_path("NotificationServer"sv), path, "notification"sv);
+        return {};
+    }
+    if (path == expanded_portal_path("/tmp/session/%sid/portal/audio"sv)) {
+        // The AudioServer serves the audio and audiomanager portals from one
+        // process; bind both, then defer so the caller's connect reaches them.
+        spawn_audio_server();
         return {};
     }
 

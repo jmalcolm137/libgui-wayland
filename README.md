@@ -52,12 +52,12 @@ The shim is called **LibWM**. It sits between `LibGUI`'s WindowServer IPC protoc
   (`F10`/`Alt`+accelerator, arrows, `Enter`, `Escape`). Window state
   (`fullscreen`/`maximize`/`minimize`) and SerenityOS `/res/...` path redirection are in. Long-menu
   scrolling, menu item icons and config persistence remain.
-- **Audio** — a second shim, **`LibSerenityAudio`**: `LibAudio` ↔ PipeWire, the same shape as
-  LibWM being LibGUI ↔ Wayland. It serves the AudioServer protocol in-process (the shared ring
-  buffer plus an `AudioServer`-style mixer) and feeds a PipeWire playback stream. The
-  **unmodified SerenityOS Piano** builds and runs, with multi-client mixing, and is verified
-  headlessly (window, AudioServer portal, PipeWire `streaming`, zero underruns) by
-  `scripts/run-piano-test.sh`.
+- **Audio** — `LibAudio` stays as upstream: a compositor/desktop-agnostic client library. On
+  Linux it does its own output over **PulseAudio** for clients that use `Audio::PlaybackStream`.
+  Applications that speak the SerenityOS **AudioServer / AudioManager protocols** directly
+  (Piano, SoundPlayer, `aplay`, the Audio applet) are served by an out-of-process **`AudioServer`
+  service that lives in the SDE**, not here; see `serenity-desktop-environment`'s
+  `scripts/run-audio-test.sh`.
 - **GPU / OpenGL** — the client-side GL stack (`LibGL` → `LibGPU`/`LibGLSL`) builds on the host
   unchanged, with two `GPU::Device` backends: **`EGLGPU`**, which drives a **Mesa** OpenGL
   compatibility context through EGL (the default), and **`LibSoftGPU`**, the CPU rasterizer.
@@ -85,8 +85,7 @@ The shim is called **LibWM**. It sits between `LibGUI`'s WindowServer IPC protoc
   already carries them; only the renderer ignores them).
 - **Config persistence.** The in-process Config portal is in memory only; values are not
   written to disk between runs.
-- **Audio polish.** `LibSerenityAudio` has no AudioManager portal (no system mixer/volume
-  integration), and cross-rate clients use LibAudio's naive resampler.
+- **Audio polish.** Cross-rate clients use LibAudio's naive resampler.
 - **GPU presentation and shaders.** `EGLGPU` renders on the GPU (Mesa) but reads the result
   back with `glReadPixels` into a `Gfx::Bitmap` and presents it over `wl_shm`; zero-copy
   `zwp_linux_dmabuf_v1` hand-off is not implemented, and the compositor still cannot render GL on

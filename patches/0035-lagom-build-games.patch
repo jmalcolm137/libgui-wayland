@@ -32,13 +32,13 @@
 +        foreach(game ${libgui_wayland_games})
 +            add_serenity_subdirectory(Userland/Games/${game})
 +            target_link_options(${game} PRIVATE "-Wl,--no-as-needed")
-+            target_link_libraries(${game} PRIVATE wm serenity-audio)
++            target_link_libraries(${game} PRIVATE wm)
 +            target_include_directories(${game} PRIVATE "${SERENITY_PROJECT_ROOT}/../compat")
 +        endforeach()
 +        # The 2048 target's source directory is TwentyFourtyEight.
 +        add_serenity_subdirectory(Userland/Games/TwentyFourtyEight)
 +        target_link_options(2048 PRIVATE "-Wl,--no-as-needed")
-+        target_link_libraries(2048 PRIVATE wm serenity-audio)
++        target_link_libraries(2048 PRIVATE wm)
 +        target_include_directories(2048 PRIVATE "${SERENITY_PROJECT_ROOT}/../compat")
 +        # Chess plays against this engine (spawned as a child process).
 +        add_serenity_subdirectory(Userland/Services/ChessEngine)
@@ -53,7 +53,7 @@
 +        foreach(tool ${libgui_wayland_devtools})
 +            add_serenity_subdirectory(Userland/DevTools/${tool})
 +            target_link_options(${tool} PRIVATE "-Wl,--no-as-needed")
-+            target_link_libraries(${tool} PRIVATE wm serenity-audio)
++            target_link_libraries(${tool} PRIVATE wm)
 +            target_include_directories(${tool} PRIVATE "${SERENITY_PROJECT_ROOT}/../compat")
 +        endforeach()
 +        # libgui-wayland: the SerenityOS demos (the Taskbar's Demos menu).
@@ -72,13 +72,13 @@
 +        foreach(demo ${libgui_wayland_demos})
 +            add_serenity_subdirectory(Userland/Demos/${demo})
 +            target_link_options(${demo} PRIVATE "-Wl,--no-as-needed")
-+            target_link_libraries(${demo} PRIVATE wm serenity-audio)
++            target_link_libraries(${demo} PRIVATE wm)
 +            target_include_directories(${demo} PRIVATE "${SERENITY_PROJECT_ROOT}/../compat")
 +        endforeach()
 +        # libgui-wayland: Magnifier (the Taskbar's Utilities menu).
 +        add_serenity_subdirectory(Userland/Applications/Magnifier)
 +        target_link_options(Magnifier PRIVATE "-Wl,--no-as-needed")
-+        target_link_libraries(Magnifier PRIVATE wm serenity-audio)
++        target_link_libraries(Magnifier PRIVATE wm)
 +        target_include_directories(Magnifier PRIVATE "${SERENITY_PROJECT_ROOT}/../compat")
          # libgui-wayland: GL demo. Renders through the client-side LibGL/LibSoftGPU
          # stack like 3DFileViewer; no GPU or compositor cooperation required.

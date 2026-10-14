@@ -10,7 +10,7 @@ diff --git a/Meta/Lagom/CMakeLists.txt b/Meta/Lagom/CMakeLists.txt
 +        # stack like 3DFileViewer; no GPU or compositor cooperation required.
 +        add_serenity_subdirectory(Userland/Demos/Tubes)
 +        target_link_options(Tubes PRIVATE "-Wl,--no-as-needed")
-+        target_link_libraries(Tubes PRIVATE wm serenity-audio)
++        target_link_libraries(Tubes PRIVATE wm)
  
          # Lagom Utilities
          lagom_utility(abench SOURCES ../../Userland/Utilities/abench.cpp LIBS LibMain LibFileSystem LibAudio)

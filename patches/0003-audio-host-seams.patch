@@ -18,7 +18,7 @@ index 6f50e24d..89875652 100644
  endif()
  
 +# libgui-wayland: the AudioServer *client* protocol is built on the host too;
-+# LibSerenityAudio provides the server side in-process over PipeWire. Only the
++# The AudioServer service (in SDE) provides the server side over the portal; only the
 +# generated endpoint headers and the client connections are needed for that.
 +list(APPEND SOURCES ConnectionToServer.cpp)
 +list(APPEND SOURCES ConnectionToManagerServer.cpp)

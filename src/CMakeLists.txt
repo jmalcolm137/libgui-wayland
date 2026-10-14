@@ -344,7 +344,7 @@ target_include_directories(PDFViewer PRIVATE "${PDFVIEWER_SRC}")
 target_link_options(PDFViewer PRIVATE "-Wl,--no-as-needed")
 target_link_libraries(PDFViewer PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibPDF LibFileSystemAccessClient LibConfig LibURL windowserver)
 
-# --- Unmodified Piano (audio through LibSerenityAudio -> PipeWire) ------------
+# --- Unmodified Piano (audio through the SDE AudioServer service) -----------
 set(PIANO_SRC "${SERENITY_PROJECT_ROOT}/Userland/Applications/Piano")
 set(PIANO_GEN "${CMAKE_CURRENT_BINARY_DIR}/Applications/Piano/ExportProgressWidget.h")
 add_custom_command(
@@ -372,6 +372,6 @@ add_executable(Piano
     "${PIANO_GEN}"
 )
 target_include_directories(Piano PRIVATE "${PIANO_SRC}" "${CMAKE_CURRENT_BINARY_DIR}")
-# LibWM and LibSerenityAudio register their portals from static initializers.
+# Keep LibWM loaded (its portal is registered from a static initializer).
 target_link_options(Piano PRIVATE "-Wl,--no-as-needed")
-target_link_libraries(Piano PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibAudio LibDSP LibThreading windowserver serenity-audio)
+target_link_libraries(Piano PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibAudio LibDSP LibThreading windowserver)

@@ -29,13 +29,13 @@ if [[ ${#TARGETS[@]} -eq 0 ]]; then
     # libunwind + libdw thread-stack backend, Debugger drives ptrace directly,
     # and CrashReporter reads a Linux ELF core dump (patches 0050-0053).
     TARGETS=(
-        LibGfx LibGUI windowserver serenity-audio eglgpu
-        Calculator PDFViewer Piano libwm-test-window
+        LibGfx LibGUI windowserver eglgpu
+        Calculator PDFViewer libwm-test-window
         3DFileViewer Tubes About AnalogClock Assistant Browser BrowserSettings
         Calendar CalendarSettings CharacterMap ClockSettings DisplaySettings Escalator FileManager
         FontEditor GamesSettings Help HexEditor ImageViewer KeyboardMapper
         KeyboardSettings Mail MailSettings Maps MapsSettings MouseSettings NetworkSettings
-        Presenter Run Screenshot Settings SoundPlayer SpaceAnalyzer Spreadsheet
+        Presenter Run Screenshot Settings SpaceAnalyzer Spreadsheet
         SystemMonitor Debugger CrashReporter TerminalSettings TextEditor ThemeEditor UsersSettings VideoPlayer Weather
         # The games and DevTools (the Taskbar's Games and Development menus).
         2048 BrickGame Chess ColorLines FlappyBug Flood GameOfLife Hearts MasterWord
@@ -95,8 +95,6 @@ if [[ "$RUN_TESTS" == "1" ]]; then
     SERENITY_SRC="$SERENITY_SRC" BUILD_DIR="$BUILD_DIR" "$PROJECT_ROOT/scripts/run-pdfviewer-test.sh"
     echo "==> Running 3DFileViewer GL integration test"
     SERENITY_SRC="$SERENITY_SRC" BUILD_DIR="$BUILD_DIR" "$PROJECT_ROOT/scripts/run-3dfileviewer-test.sh"
-    echo "==> Running Piano integration test"
-    SERENITY_SRC="$SERENITY_SRC" BUILD_DIR="$BUILD_DIR" "$PROJECT_ROOT/scripts/run-piano-test.sh"
 fi
 
 echo "==> Done. Libraries in $BUILD_DIR/lib"
