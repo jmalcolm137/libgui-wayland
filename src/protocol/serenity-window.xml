@@ -41,6 +41,26 @@
       Global factory for per-toplevel chrome handles.
     </description>
 
+    <event name="host_settings">
+      <description summary="the desktop-owned settings the shim answers from">
+        Key/value settings the desktop owns, as newline-separated `key=value`
+        lines. Sent with the host configuration (and again whenever they change),
+        so the shim answers an application's WindowServer config requests without
+        reading the desktop's configuration files. Keys are the desktop's
+        business; see docs/24 in the serenity-desktop-environment repository.
+      </description>
+      <arg name="settings" type="string"/>
+    </event>
+
+    <request name="set_host_setting">
+      <description summary="hand a changed setting to the desktop">
+        The application changed a setting the desktop owns; the shim forwards it
+        here. The desktop applies and persists it in its own configuration.
+      </description>
+      <arg name="key" type="string"/>
+      <arg name="value" type="string"/>
+    </request>
+
     <request name="get_toplevel">
       <description summary="create a chrome handle for an xdg_toplevel">
         Create a serenity_toplevel object for the given xdg_toplevel so the

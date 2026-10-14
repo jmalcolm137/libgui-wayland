@@ -62,85 +62,17 @@ ByteBuffer read_sde_state_bytes(StringView name)
 
 // Input settings (R4.6): a small input.ini the compositor watches and applies to
 // the (libinput) devices. Mouse Settings reads and writes it through here.
-ByteString read_input_entry(StringView group, StringView key, StringView fallback)
-{
-    auto config = Core::ConfigFile::open(sde_state_file("input.ini"sv));
-    if (config.is_error())
-        return ByteString { fallback };
-    auto value = config.value()->read_entry(group, key);
-    return value.is_empty() ? ByteString { fallback } : value;
-}
 
-void write_input_entry(StringView group, StringView key, StringView value)
-{
-    (void)Core::Directory::create(sde_state_dir(), Core::Directory::CreateDirectories::Yes);
-    auto config = Core::ConfigFile::open(sde_state_file("input.ini"sv), Core::ConfigFile::AllowWriting::Yes);
-    if (config.is_error())
-        return;
-    config.value()->write_entry(group, key, value);
-    (void)config.value()->sync();
-}
 
 // Cursor theme/highlight (cursor.ini): Mouse Settings' Highlight/Theme tabs. The
 // compositor applies these to the real cursor/highlight in R4.7.
-ByteString read_cursor_entry(StringView group, StringView key, StringView fallback)
-{
-    auto config = Core::ConfigFile::open(sde_state_file("cursor.ini"sv));
-    if (config.is_error())
-        return ByteString { fallback };
-    auto value = config.value()->read_entry(group, key);
-    return value.is_empty() ? ByteString { fallback } : value;
-}
 
-void write_cursor_entry(StringView group, StringView key, StringView value)
-{
-    (void)Core::Directory::create(sde_state_dir(), Core::Directory::CreateDirectories::Yes);
-    auto config = Core::ConfigFile::open(sde_state_file("cursor.ini"sv), Core::ConfigFile::AllowWriting::Yes);
-    if (config.is_error())
-        return;
-    config.value()->write_entry(group, key, value);
-    (void)config.value()->sync();
-}
 
 // The SDE WindowServer.ini (the compositor's config schema): effects, input
 // ranges, workspace grid, ... The port reads it for values clients need and
 // writes the [Effects] section back when the user changes effects.
-ByteString windowserver_ini_path()
-{
-    if (auto const* dir = getenv("SDE_STATE_DIR"); dir && *dir)
-        return ByteString::formatted("{}/WindowServer.ini", dir);
-    if (auto const* config = getenv("XDG_CONFIG_HOME"); config && *config)
-        return ByteString::formatted("{}/sde/WindowServer.ini", config);
-    if (auto const* home = getenv("HOME"); home && *home)
-        return ByteString::formatted("{}/.config/sde/WindowServer.ini", home);
-    return {};
-}
 
-void write_windowserver_entry(StringView group, StringView key, StringView value)
-{
-    auto path = windowserver_ini_path();
-    if (path.is_empty())
-        return;
-    if (auto directory = LexicalPath(path).dirname(); !directory.is_empty())
-        (void)Core::Directory::create(ByteString { directory }, Core::Directory::CreateDirectories::Yes);
-    auto config = Core::ConfigFile::open(path, Core::ConfigFile::AllowWriting::Yes);
-    if (config.is_error())
-        return;
-    config.value()->write_entry(group, key, value);
-    (void)config.value()->sync();
-}
 
-ByteString read_windowserver_entry(StringView group, StringView key, StringView fallback)
-{
-    auto path = windowserver_ini_path();
-    if (path.is_empty())
-        return ByteString { fallback };
-    auto config = Core::ConfigFile::open(path);
-    if (config.is_error())
-        return ByteString { fallback };
-    auto value = config.value()->read_entry(group, key);
-    return value.is_empty() ? ByteString { fallback } : value;
-}
 
 // The wallpaper state is stored as raw pixels, not a PNG: encoding a full-screen
 // image to PNG takes several hundred milliseconds and would stall the UI thread
@@ -953,8 +885,8 @@ Messages::WindowServer::SetSystemThemeResponse WindowServerConnection::set_syste
         (void)file.value()->write_until_depleted(host_theme);
     // Persist the choice so it survives a restart (the compositor applies [Theme]
     // at startup).
-    write_windowserver_entry("Theme"sv, "Name"sv, theme_name);
-    write_windowserver_entry("Theme"sv, "Path"sv, host_theme);
+    WaylandClient::the().set_host_setting("theme.name"sv, theme_name);
+    WaylandClient::the().set_host_setting("theme.path"sv, host_theme);
     return true;
 }
 
@@ -991,11 +923,11 @@ void WindowServerConnection::apply_theme_from_broker()
     }
     // Fall back to the persisted theme ([Theme]) when there is no live broker value.
     if (host_theme.is_empty())
-        host_theme = read_windowserver_entry("Theme"sv, "Path"sv, ""sv);
+        host_theme = WaylandClient::the().host_setting("theme.path"sv, ""sv);
     if (host_theme.is_empty())
         return;
     if (auto buffer = Gfx::load_system_theme(host_theme, {}); !buffer.is_error()) {
-        auto name = read_windowserver_entry("Theme"sv, "Name"sv, ""sv);
+        auto name = WaylandClient::the().host_setting("theme.name"sv, ""sv);
         m_theme_name = name.is_empty() ? ByteString { LexicalPath(host_theme).title() } : name;
         async_update_system_theme(buffer.value());
     }
@@ -1145,67 +1077,64 @@ void WindowServerConnection::set_output_scale(i32 scale_v120)
     if (scale_v120 < 60) // ignore nonsense (< 0.5x)
         return;
     double const scale = static_cast<double>(scale_v120) / 120.0;
-    (void)Core::Directory::create(sde_state_dir(), Core::Directory::CreateDirectories::Yes);
-    auto config = Core::ConfigFile::open(sde_state_file("WindowServer.ini"sv), Core::ConfigFile::AllowWriting::Yes);
-    if (config.is_error())
-        return;
-    config.value()->write_entry("Output"sv, "DefaultScale"sv, ByteString::formatted("{}", scale));
-    (void)config.value()->sync();
-    dbgln("LibWM: set output scale {}x ([Output] DefaultScale)", scale);
+    // The desktop owns the output scale; hand it over (the compositor applies and
+    // persists it) rather than writing its config.
+    WaylandClient::the().set_host_setting("output.default_scale"sv, ByteString::formatted("{}", scale));
+    dbgln("LibWM: set output scale {}x", scale);
 }
 
 // --- mouse/pointer settings (R4.6) -----------------------------------------
 
 void WindowServerConnection::set_mouse_acceleration(float factor)
 {
-    write_input_entry("Mouse"sv, "Acceleration"sv, ByteString::formatted("{}", factor));
+    WaylandClient::the().set_host_setting("mouse.acceleration"sv, ByteString::formatted("{}", factor));
 }
 
 Messages::WindowServer::GetMouseAccelerationResponse WindowServerConnection::get_mouse_acceleration()
 {
-    return read_input_entry("Mouse"sv, "Acceleration"sv, "1.0"sv).to_number<double>().value_or(1.0);
+    return WaylandClient::the().host_setting("mouse.acceleration"sv, "1.0"sv).to_number<double>().value_or(1.0);
 }
 
 void WindowServerConnection::set_scroll_step_size(u32 step_size)
 {
-    write_input_entry("Mouse"sv, "ScrollStepSize"sv, ByteString::number(step_size));
+    WaylandClient::the().set_host_setting("mouse.scroll_step_size"sv, ByteString::number(step_size));
 }
 
 Messages::WindowServer::GetScrollStepSizeResponse WindowServerConnection::get_scroll_step_size()
 {
-    return read_input_entry("Mouse"sv, "ScrollStepSize"sv, "1"sv).to_number<u32>().value_or(1);
+    return WaylandClient::the().host_setting("mouse.scroll_step_size"sv, "1"sv).to_number<u32>().value_or(1);
 }
 
 void WindowServerConnection::set_double_click_speed(int speed)
 {
     m_double_click_speed = speed;
-    write_input_entry("Mouse"sv, "DoubleClickSpeed"sv, ByteString::number(speed));
+    WaylandClient::the().set_host_setting("mouse.double_click_speed"sv, ByteString::number(speed));
 }
 
 Messages::WindowServer::GetDoubleClickSpeedResponse WindowServerConnection::get_double_click_speed()
 {
-    m_double_click_speed = read_input_entry("Mouse"sv, "DoubleClickSpeed"sv, "250"sv).to_number<int>().value_or(250);
+    m_double_click_speed = WaylandClient::the().host_setting("mouse.double_click_speed"sv, "250"sv).to_number<int>().value_or(250);
     return m_double_click_speed;
 }
 
 void WindowServerConnection::set_mouse_buttons_switched(bool switched)
 {
-    write_input_entry("Mouse"sv, "ButtonsSwitched"sv, switched ? "true"sv : "false"sv);
+    WaylandClient::the().set_host_setting("mouse.buttons_switched"sv, switched ? "true"sv : "false"sv);
 }
 
 Messages::WindowServer::AreMouseButtonsSwitchedResponse WindowServerConnection::are_mouse_buttons_switched()
 {
-    return read_input_entry("Mouse"sv, "ButtonsSwitched"sv, "false"sv) == "true"sv;
+    return WaylandClient::the().host_setting("mouse.buttons_switched"sv, "false"sv) == "true"sv;
 }
 
 void WindowServerConnection::set_natural_scroll(bool inverted)
 {
-    write_input_entry("Mouse"sv, "NaturalScroll"sv, inverted ? "true"sv : "false"sv);
+    WaylandClient::the().set_host_setting("mouse.natural_scroll"sv, inverted ? "true"sv : "false"sv);
 }
 
 Messages::WindowServer::IsNaturalScrollResponse WindowServerConnection::is_natural_scroll()
 {
-    return read_input_entry("Mouse"sv, "NaturalScroll"sv, "false"sv) == "true"sv;
+    return WaylandClient::the().host_setting("mouse.natural_scroll"sv, "false"sv) == "true"sv;
 }
 
 Messages::WindowServer::GetMouseAccelerationMinResponse WindowServerConnection::get_mouse_acceleration_min()
@@ -1235,50 +1164,50 @@ Messages::WindowServer::GetDoubleClickSpeedMaxResponse WindowServerConnection::g
 
 Messages::WindowServer::GetCursorThemeResponse WindowServerConnection::get_cursor_theme()
 {
-    return read_cursor_entry("Cursor"sv, "Theme"sv, "Default"sv);
+    return WaylandClient::the().host_setting("cursor.theme"sv, "Default"sv);
 }
 
 void WindowServerConnection::apply_cursor_theme(ByteString const& name)
 {
-    write_cursor_entry("Cursor"sv, "Theme"sv, name);
+    WaylandClient::the().set_host_setting("cursor.theme"sv, name);
 }
 
 Messages::WindowServer::GetCursorHighlightRadiusResponse WindowServerConnection::get_cursor_highlight_radius()
 {
-    return read_cursor_entry("Highlight"sv, "Radius"sv, "0"sv).to_number<int>().value_or(0);
+    return WaylandClient::the().host_setting("cursor.highlight_radius"sv, "0"sv).to_number<int>().value_or(0);
 }
 
 void WindowServerConnection::set_cursor_highlight_radius(int radius)
 {
-    write_cursor_entry("Highlight"sv, "Radius"sv, ByteString::number(radius));
+    WaylandClient::the().set_host_setting("cursor.highlight_radius"sv, ByteString::number(radius));
 }
 
 Messages::WindowServer::GetCursorHighlightColorResponse WindowServerConnection::get_cursor_highlight_color()
 {
-    if (auto color = Gfx::Color::from_string(read_cursor_entry("Highlight"sv, "Color"sv, "#000000"sv)); color.has_value())
+    if (auto color = Gfx::Color::from_string(WaylandClient::the().host_setting("cursor.highlight_color"sv, "#000000"sv)); color.has_value())
         return color.value();
     return Gfx::Color::Black;
 }
 
 void WindowServerConnection::set_cursor_highlight_color(Gfx::Color color)
 {
-    write_cursor_entry("Highlight"sv, "Color"sv, color.to_byte_string());
+    WaylandClient::the().set_host_setting("cursor.highlight_color"sv, color.to_byte_string());
 }
 
 Messages::WindowServer::GetKeyboardLayoutResponse WindowServerConnection::get_keyboard_layout()
 {
-    return { read_input_entry("Keyboard"sv, "Layouts"sv, "us"sv),
-        read_input_entry("Keyboard"sv, "Variant"sv, ""sv),
-        read_input_entry("Keyboard"sv, "Model"sv, "pc105"sv),
-        read_input_entry("Keyboard"sv, "Options"sv, ""sv) };
+    return { WaylandClient::the().host_setting("keyboard.layouts"sv, "us"sv),
+        WaylandClient::the().host_setting("keyboard.variant"sv, ""sv),
+        WaylandClient::the().host_setting("keyboard.model"sv, "pc105"sv),
+        WaylandClient::the().host_setting("keyboard.options"sv, ""sv) };
 }
 
 void WindowServerConnection::set_keyboard_layout(ByteString const& layouts, ByteString const& variant, ByteString const& model, ByteString const& options)
 {
-    write_input_entry("Keyboard"sv, "Layouts"sv, layouts);
-    write_input_entry("Keyboard"sv, "Variant"sv, variant);
-    write_input_entry("Keyboard"sv, "Model"sv, model);
-    write_input_entry("Keyboard"sv, "Options"sv, options);
+    WaylandClient::the().set_host_setting("keyboard.layouts"sv, layouts);
+    WaylandClient::the().set_host_setting("keyboard.variant"sv, variant);
+    WaylandClient::the().set_host_setting("keyboard.model"sv, model);
+    WaylandClient::the().set_host_setting("keyboard.options"sv, options);
 }
 
 Messages::WindowServer::GetKeyboardLayoutNamesResponse WindowServerConnection::get_keyboard_layout_names()
@@ -1325,15 +1254,15 @@ void WindowServerConnection::set_system_effects(Vector<bool> const& effects, u8 
     // Apply to this client (LibGUI's SystemEffects) and record the choices so the
     // compositor (geometry HUD) and other clients pick them up (R4.7).
     async_update_system_effects(effects);
-    write_windowserver_entry("Effects"sv, "ShowGeometry"sv, WindowServer::ShowGeometryTools::enum_to_string(static_cast<WindowServer::ShowGeometry>(geometry)));
-    write_windowserver_entry("Effects"sv, "TileWindow"sv, WindowServer::TileWindowTools::enum_to_string(static_cast<WindowServer::TileWindow>(tile_window)));
+    WaylandClient::the().set_host_setting("effects.show_geometry"sv, WindowServer::ShowGeometryTools::enum_to_string(static_cast<WindowServer::ShowGeometry>(geometry)));
+    WaylandClient::the().set_host_setting("effects.tile_window"sv, WindowServer::TileWindowTools::enum_to_string(static_cast<WindowServer::TileWindow>(tile_window)));
     static constexpr Array effect_names = {
         "AnimateMenus"sv, "FlashMenus"sv, "AnimateWindows"sv, "SmoothScrolling"sv,
         "TabAccents"sv, "SplitterKnurls"sv, "Tooltips"sv, "MenuShadow"sv,
         "WindowShadow"sv, "TooltipShadow"sv,
     };
     for (size_t i = 0; i < effects.size() && i < effect_names.size(); ++i)
-        write_windowserver_entry("Effects"sv, effect_names[i], effects[i] ? "true"sv : "false"sv);
+        WaylandClient::the().set_host_setting(ByteString::formatted("effects.{}", effect_names[i]), effects[i] ? "true"sv : "false"sv);
 }
 
 Messages::WindowServer::SetSystemFontsResponse WindowServerConnection::set_system_fonts(ByteString const& default_font_query, ByteString const& fixed_width_font_query, ByteString const& window_title_font_query)
@@ -1358,8 +1287,8 @@ Messages::WindowServer::ApplyWorkspaceSettingsResponse WindowServerConnection::a
     (void)save;
     if (rows < 1 || columns < 1)
         return false;
-    write_windowserver_entry("Workspaces"sv, "Rows"sv, ByteString::number(rows));
-    write_windowserver_entry("Workspaces"sv, "Columns"sv, ByteString::number(columns));
+    WaylandClient::the().set_host_setting("workspaces.rows"sv, ByteString::number(rows));
+    WaylandClient::the().set_host_setting("workspaces.columns"sv, ByteString::number(columns));
     return true;
 }
 

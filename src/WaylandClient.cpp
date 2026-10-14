@@ -272,12 +272,18 @@ static void serenity_window_manager_host_config(void* data, serenity_window_mana
         scroll_step_min, double_click_min, double_click_max);
 }
 
+static void serenity_window_manager_host_settings(void* data, serenity_window_manager*, char const* settings)
+{
+    static_cast<WaylandClient*>(data)->on_host_settings(StringView { settings, strlen(settings) });
+}
+
 static void serenity_window_manager_dismiss_menus(void* data, serenity_window_manager*)
 {
     static_cast<WaylandClient*>(data)->on_dismiss_menus();
 }
 
 static serenity_window_manager_listener const s_serenity_window_manager_listener = {
+    .host_settings = serenity_window_manager_host_settings,
     .dismiss_menus = serenity_window_manager_dismiss_menus,
     .host_config = serenity_window_manager_host_config,
 };
@@ -301,6 +307,40 @@ void WaylandClient::on_host_config(u32 workspace_rows, u32 workspace_columns, do
     dbgln("LibWM: host config: workspaces {}x{}, accel {}-{}, scroll min {}, double-click {}-{}",
         m_host_config.workspace_rows, m_host_config.workspace_columns, m_host_config.accel_min, m_host_config.accel_max,
         m_host_config.scroll_step_min, m_host_config.double_click_min, m_host_config.double_click_max);
+}
+
+void WaylandClient::on_host_settings(StringView blob)
+{
+    m_host_settings.clear();
+    for (auto line : blob.split_view('\n')) {
+        if (line.is_empty())
+            continue;
+        auto separator = line.find('=');
+        if (!separator.has_value())
+            continue;
+        m_host_settings.set(line.substring_view(0, *separator).to_byte_string(), line.substring_view(*separator + 1).to_byte_string());
+    }
+    dbgln("LibWM: host settings: {} entries", m_host_settings.size());
+}
+
+ByteString WaylandClient::host_setting(StringView key, StringView fallback) const
+{
+    if (auto it = m_host_settings.find(ByteString { key }); it != m_host_settings.end())
+        return it->value;
+    return ByteString { fallback };
+}
+
+void WaylandClient::set_host_setting(StringView key, StringView value)
+{
+    // Keep our own answers current, and hand the change to the desktop, which
+    // applies and persists it.
+    m_host_settings.set(ByteString { key }, ByteString { value });
+    if (m_serenity_window_manager) {
+        auto k = key.to_byte_string();
+        auto v = value.to_byte_string();
+        serenity_window_manager_set_host_setting(m_serenity_window_manager, k.characters(), v.characters());
+        wl_display_flush(m_display);
+    }
 }
 
 void WaylandClient::on_dismiss_menus()

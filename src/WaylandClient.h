@@ -198,6 +198,12 @@ public:
         int double_click_max { 900 };
     };
     HostConfig const& host_config() const { return m_host_config; }
+    // The desktop-owned settings, keyed semantically (see the protocol). The
+    // compositor sends them; the shim answers an application's WindowServer config
+    // requests from here and forwards changes back, so it never touches the
+    // desktop's configuration files.
+    ByteString host_setting(StringView key, StringView fallback = {}) const;
+    void set_host_setting(StringView key, StringView value);
     // The compositor asks the client to show/hide a window's menu bar.
     void set_menubar_visibility_callback(Function<void(i32 window_id, bool visible)> callback) { m_menubar_visibility_changed = move(callback); }
     // The compositor asks the client to close its open menus (see the protocol).
@@ -234,6 +240,7 @@ public:
     void on_toplevel_position(serenity_toplevel*, int32_t x, int32_t y);
     void on_dismiss_menus();
     void on_host_config(u32 workspace_rows, u32 workspace_columns, double accel_min, double accel_max, u32 scroll_step_min, int double_click_min, int double_click_max);
+    void on_host_settings(StringView blob);
 
     void on_data_offer(wl_data_offer*);
     void on_data_offer_mime(wl_data_offer*, char const* mime_type);
@@ -408,6 +415,7 @@ private:
     Function<void(i32 window_id, Gfx::IntPoint)> m_toplevel_position_changed;
     Function<void()> m_dismiss_menus;
     HostConfig m_host_config;
+    HashMap<ByteString, ByteString> m_host_settings;
 
     InputCallbacks m_input;
     i32 m_pointer_window { -1 };
