@@ -272,6 +272,11 @@ static void serenity_window_manager_host_config(void* data, serenity_window_mana
         scroll_step_min, double_click_min, double_click_max);
 }
 
+static void serenity_window_manager_wallpaper(void* data, serenity_window_manager*, int32_t width, int32_t height, int32_t pitch, uint32_t format, int32_t fd)
+{
+    static_cast<WaylandClient*>(data)->on_host_wallpaper(width, height, pitch, format, fd);
+}
+
 static void serenity_window_manager_host_settings(void* data, serenity_window_manager*, char const* settings)
 {
     static_cast<WaylandClient*>(data)->on_host_settings(StringView { settings, strlen(settings) });
@@ -284,6 +289,7 @@ static void serenity_window_manager_dismiss_menus(void* data, serenity_window_ma
 
 static serenity_window_manager_listener const s_serenity_window_manager_listener = {
     .host_settings = serenity_window_manager_host_settings,
+    .wallpaper = serenity_window_manager_wallpaper,
     .dismiss_menus = serenity_window_manager_dismiss_menus,
     .host_config = serenity_window_manager_host_config,
 };
@@ -307,6 +313,60 @@ void WaylandClient::on_host_config(u32 workspace_rows, u32 workspace_columns, do
     dbgln("LibWM: host config: workspaces {}x{}, accel {}-{}, scroll min {}, double-click {}-{}",
         m_host_config.workspace_rows, m_host_config.workspace_columns, m_host_config.accel_min, m_host_config.accel_max,
         m_host_config.scroll_step_min, m_host_config.double_click_min, m_host_config.double_click_max);
+}
+
+void WaylandClient::on_host_wallpaper(i32 width, i32 height, i32 pitch, u32 format, i32 fd)
+{
+    m_host_wallpaper = nullptr;
+    if (fd < 0 || width <= 0 || height <= 0 || pitch <= 0)
+        return;
+    auto size = static_cast<size_t>(pitch) * static_cast<size_t>(height);
+    auto* mapped = mmap(nullptr, size, PROT_READ, MAP_SHARED, fd, 0);
+    if (mapped != MAP_FAILED) {
+        if (auto bitmap = Gfx::Bitmap::create(static_cast<Gfx::BitmapFormat>(format), { width, height }); !bitmap.is_error()) {
+            auto& created = *bitmap.value();
+            auto const row_bytes = min(static_cast<size_t>(pitch), static_cast<size_t>(created.pitch()));
+            for (int y = 0; y < height; ++y)
+                memcpy(created.scanline(y), static_cast<u8 const*>(mapped) + static_cast<size_t>(y) * static_cast<size_t>(pitch), row_bytes);
+            m_host_wallpaper = bitmap.release_value();
+        }
+        munmap(mapped, size);
+    }
+    close(fd);
+    dbgln("LibWM: host wallpaper {}x{}", width, height);
+}
+
+void WaylandClient::set_host_wallpaper(Gfx::Bitmap* bitmap)
+{
+    int fd = -1;
+    if (bitmap) {
+        auto name = ByteString::formatted("libwm-wallpaper-{}", getpid());
+        fd = memfd_create(name.characters(), 0);
+        if (fd >= 0) {
+            auto size = static_cast<size_t>(bitmap->pitch()) * static_cast<size_t>(bitmap->height());
+            auto* mapped = MAP_FAILED;
+            if (ftruncate(fd, static_cast<off_t>(size)) == 0)
+                mapped = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+            if (mapped != MAP_FAILED) {
+                memcpy(mapped, bitmap->scanline(0), size);
+                munmap(mapped, size);
+            } else {
+                close(fd);
+                fd = -1;
+            }
+        }
+    }
+    if (m_serenity_window_manager) {
+        serenity_window_manager_set_wallpaper(m_serenity_window_manager,
+            bitmap ? bitmap->width() : 0, bitmap ? bitmap->height() : 0,
+            bitmap ? bitmap->pitch() : 0,
+            bitmap ? static_cast<uint32_t>(bitmap->format()) : 0, fd);
+        wl_display_flush(m_display);
+    }
+    if (fd >= 0)
+        close(fd);
+    // Keep our own answers current.
+    m_host_wallpaper = bitmap;
 }
 
 void WaylandClient::on_host_settings(StringView blob)

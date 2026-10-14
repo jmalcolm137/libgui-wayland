@@ -61,6 +61,33 @@
       <arg name="value" type="string"/>
     </request>
 
+    <event name="wallpaper">
+      <description summary="the wallpaper the desktop currently shows">
+        The desktop's wallpaper as raw pixels: format is a wl_shm format value
+        (0 = ARGB8888, little-endian) and fd carries width*height pixels. fd is
+        -1 (with width 0) when there is no wallpaper. Sent with the host
+        configuration, and again when it changes, so the shim answers
+        get_wallpaper without reading the desktop's state file.
+      </description>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+      <arg name="pitch" type="int"/>
+      <arg name="format" type="uint"/>
+      <arg name="fd" type="fd"/>
+    </event>
+
+    <request name="set_wallpaper">
+      <description summary="hand a new wallpaper to the desktop">
+        The application set a wallpaper. The desktop owns it: it stores what it
+        receives and shows it. fd is -1 (with width 0) to clear the wallpaper.
+      </description>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+      <arg name="pitch" type="int"/>
+      <arg name="format" type="uint"/>
+      <arg name="fd" type="fd"/>
+    </request>
+
     <request name="get_toplevel">
       <description summary="create a chrome handle for an xdg_toplevel">
         Create a serenity_toplevel object for the given xdg_toplevel so the

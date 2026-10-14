@@ -27,38 +27,9 @@ namespace {
 
 // Wallpaper/background state: written by apps, read by the compositor. Kept in a
 // persistent directory so a chosen wallpaper survives a session restart.
-ByteString sde_state_dir()
-{
-    if (auto const* dir = getenv("SDE_STATE_DIR"); dir && *dir)
-        return ByteString(dir);
-    if (auto const* config = getenv("XDG_CONFIG_HOME"); config && *config)
-        return ByteString::formatted("{}/sde", config);
-    if (auto const* home = getenv("HOME"); home && *home)
-        return ByteString::formatted("{}/.config/sde", home);
-    return ByteString { "/tmp/sde" };
-}
 
-ByteString sde_state_file(StringView name)
-{
-    return ByteString::formatted("{}/{}", sde_state_dir(), name);
-}
 
-void write_sde_state_file(StringView name, ReadonlyBytes bytes)
-{
-    if (auto file = Core::File::open(sde_state_file(name), Core::File::OpenMode::Write); !file.is_error())
-        (void)file.value()->write_until_depleted(bytes);
-}
 
-ByteBuffer read_sde_state_bytes(StringView name)
-{
-    auto file = Core::File::open(sde_state_file(name), Core::File::OpenMode::Read);
-    if (file.is_error())
-        return {};
-    auto contents = file.value()->read_until_eof();
-    if (contents.is_error())
-        return {};
-    return contents.release_value();
-}
 
 // Input settings (R4.6): a small input.ini the compositor watches and applies to
 // the (libinput) devices. Mouse Settings reads and writes it through here.
@@ -87,44 +58,7 @@ struct WallpaperHeader {
 };
 constexpr u32 wallpaper_magic = 0x53445750; // "SDWP"
 
-void write_sde_wallpaper(RefPtr<Gfx::Bitmap> const& bitmap)
-{
-    if (!bitmap) {
-        write_sde_state_file("wallpaper.raw"sv, {});
-        return;
-    }
-    auto const pixels = static_cast<size_t>(bitmap->pitch()) * bitmap->height();
-    WallpaperHeader header {
-        wallpaper_magic,
-        static_cast<u32>(bitmap->format()),
-        static_cast<u32>(bitmap->width()),
-        static_cast<u32>(bitmap->height()),
-        static_cast<u32>(bitmap->pitch()),
-    };
-    auto buffer = ByteBuffer::create_uninitialized(sizeof(header) + pixels).release_value_but_fixme_should_propagate_errors();
-    memcpy(buffer.data(), &header, sizeof(header));
-    memcpy(buffer.data() + sizeof(header), bitmap->scanline(0), pixels);
-    write_sde_state_file("wallpaper.raw"sv, buffer);
-}
 
-RefPtr<Gfx::Bitmap> read_sde_wallpaper()
-{
-    auto raw = read_sde_state_bytes("wallpaper.raw"sv);
-    if (raw.size() <= sizeof(WallpaperHeader))
-        return nullptr;
-    WallpaperHeader header {};
-    memcpy(&header, raw.data(), sizeof(header));
-    if (header.magic != wallpaper_magic || header.width == 0 || header.height == 0 || header.pitch == 0)
-        return nullptr;
-    auto bitmap = Gfx::Bitmap::create(static_cast<Gfx::BitmapFormat>(header.format), { static_cast<int>(header.width), static_cast<int>(header.height) });
-    if (bitmap.is_error())
-        return nullptr;
-    auto& created = *bitmap.value();
-    auto const row_bytes = min(static_cast<size_t>(header.pitch), static_cast<size_t>(created.pitch()));
-    for (int y = 0; y < created.height(); ++y)
-        memcpy(created.scanline(y), raw.data() + sizeof(header) + static_cast<size_t>(y) * header.pitch, row_bytes);
-    return bitmap.release_value();
-}
 
 }
 
@@ -683,9 +617,9 @@ Messages::WindowServer::GetWallpaperResponse WindowServerConnection::get_wallpap
 {
     if (m_wallpaper)
         return m_wallpaper->to_shareable_bitmap();
-    // Fall back to the persisted image (e.g. after a restart).
-    if (auto bitmap = read_sde_wallpaper()) {
-        m_wallpaper = move(bitmap);
+    // The desktop owns the wallpaper; the compositor sends it over serenity-window.
+    if (auto* host = WaylandClient::the().host_wallpaper()) {
+        m_wallpaper = host;
         return m_wallpaper->to_shareable_bitmap();
     }
     return Gfx::ShareableBitmap { };
@@ -694,24 +628,21 @@ Messages::WindowServer::GetWallpaperResponse WindowServerConnection::get_wallpap
 Messages::WindowServer::SetWallpaperResponse WindowServerConnection::set_wallpaper(Gfx::ShareableBitmap const& wallpaper_bitmap)
 {
     m_wallpaper = wallpaper_bitmap.bitmap();
-    (void)Core::Directory::create(sde_state_dir(), Core::Directory::CreateDirectories::Yes);
-    // Raw pixels, not PNG: encoding costs hundreds of milliseconds and would
-    // stall this application's UI thread (the calling thread).
-    write_sde_wallpaper(m_wallpaper);
+    // The desktop owns the wallpaper: hand the raw pixels over (no PNG encode,
+    // which would stall this application's UI thread).
+    WaylandClient::the().set_host_wallpaper(m_wallpaper.ptr());
     return true;
 }
 
 void WindowServerConnection::set_wallpaper_mode(ByteString const& mode)
 {
     m_wallpaper_mode = mode;
-    (void)Core::Directory::create(sde_state_dir(), Core::Directory::CreateDirectories::Yes);
-    write_sde_state_file("wallpaper.mode"sv, mode.bytes());
+    WaylandClient::the().set_host_setting("wallpaper.mode"sv, mode);
 }
 
 void WindowServerConnection::set_background_color(ByteString const& background_color)
 {
-    (void)Core::Directory::create(sde_state_dir(), Core::Directory::CreateDirectories::Yes);
-    write_sde_state_file("wallpaper.color"sv, background_color.bytes());
+    WaylandClient::the().set_host_setting("wallpaper.color"sv, background_color);
 }
 
 Messages::WindowServer::StartDragResponse WindowServerConnection::start_drag(ByteString const& text, HashMap<String, ByteBuffer> const& mime_data, Gfx::ShareableBitmap const& drag_bitmap)
@@ -983,42 +914,39 @@ Messages::WindowServer::GetPreferredColorSchemeResponse WindowServerConnection::
 
 Messages::WindowServer::GetScreenLayoutResponse WindowServerConnection::get_screen_layout()
 {
-    // R4.5: the compositor keeps the live layout in screenlayout.ini (the Serenity
-    // ScreenLayout format). Read it so DisplaySettings' Monitor tab shows reality;
-    // fall back to a single synthetic screen when it is absent/unreadable.
-    auto config = Core::ConfigFile::open(sde_state_file("screenlayout.ini"sv));
-    if (!config.is_error()) {
-        auto& file = *config.value();
-        WindowServer::ScreenLayout layout;
-        layout.main_screen_index = file.read_num_entry<unsigned>("Screens"sv, "MainScreen"sv, 0);
-        for (size_t index = 0;; ++index) {
-            auto group = ByteString::formatted("Screen{}", index);
-            if (!file.has_group(group))
-                break;
-            auto mode_string = file.read_entry(group, "Mode"sv);
-            auto mode = WindowServer::ScreenLayout::Screen::Mode::Invalid;
-            if (mode_string == "Device"sv)
-                mode = WindowServer::ScreenLayout::Screen::Mode::Device;
-            else if (mode_string == "Virtual"sv)
-                mode = WindowServer::ScreenLayout::Screen::Mode::Virtual;
-            if (mode == WindowServer::ScreenLayout::Screen::Mode::Invalid) {
-                layout = {};
-                break;
+    // R4.5: the desktop owns the output layout; it is served over serenity-window
+    // as "screenlayout" (main=<i>;<Mode>,<Device>,<L>,<T>,<W>,<H>,<Scale>;...).
+    auto encoded = WaylandClient::the().host_setting("screenlayout"sv);
+    if (!encoded.is_empty()) {
+        WindowServer::ScreenLayout parsed;
+        for (auto field : encoded.split_view(';')) {
+            if (field.starts_with("main="sv)) {
+                parsed.main_screen_index = field.substring_view(5).to_number<unsigned>().value_or(0);
+                continue;
             }
+            auto parts = field.split_view(',');
+            if (parts.size() < 7)
+                continue;
+            auto mode = WindowServer::ScreenLayout::Screen::Mode::Invalid;
+            if (parts[0] == "Device"sv)
+                mode = WindowServer::ScreenLayout::Screen::Mode::Device;
+            else if (parts[0] == "Virtual"sv)
+                mode = WindowServer::ScreenLayout::Screen::Mode::Virtual;
+            if (mode == WindowServer::ScreenLayout::Screen::Mode::Invalid)
+                continue;
             Optional<ByteString> device;
-            if (mode == WindowServer::ScreenLayout::Screen::Mode::Device)
-                device = file.read_entry(group, "Device"sv);
-            WindowServer::ScreenLayout::Screen screen {
+            if (mode == WindowServer::ScreenLayout::Screen::Mode::Device && !parts[1].is_empty())
+                device = parts[1].to_byte_string();
+            parsed.screens.append(WindowServer::ScreenLayout::Screen {
                 .mode = mode,
                 .device = move(device),
-                .location = { file.read_num_entry<int>(group, "Left"sv, 0), file.read_num_entry<int>(group, "Top"sv, 0) },
-                .resolution = { file.read_num_entry<int>(group, "Width"sv, 0), file.read_num_entry<int>(group, "Height"sv, 0) },
-                .scale_factor = file.read_num_entry<int>(group, "ScaleFactor"sv, 1),
-            };
-            layout.screens.append(move(screen));
+                .location = { parts[2].to_number<int>().value_or(0), parts[3].to_number<int>().value_or(0) },
+                .resolution = { parts[4].to_number<int>().value_or(0), parts[5].to_number<int>().value_or(0) },
+                .scale_factor = parts[6].to_number<int>().value_or(1),
+            });
         }
-        if (!layout.screens.is_empty())
-            return layout;
+        if (!parsed.screens.is_empty())
+            return parsed;
     }
 
     WindowServer::ScreenLayout layout;
@@ -1036,31 +964,16 @@ Messages::WindowServer::GetScreenLayoutResponse WindowServerConnection::get_scre
 
 Messages::WindowServer::SetScreenLayoutResponse WindowServerConnection::set_screen_layout(WindowServer::ScreenLayout const& screen_layout, bool save)
 {
-    // R4.5: hand the layout to the compositor by writing screenlayout.ini; the
-    // compositor watches it and applies mode/scale/position. `save` only controls
-    // whether Serenity would persist it, and here the file *is* the channel.
+    // R4.5: the desktop owns the output layout, so hand it over (the compositor
+    // applies and persists it) rather than writing its screenlayout.ini.
     (void)save;
-    (void)Core::Directory::create(sde_state_dir(), Core::Directory::CreateDirectories::Yes);
-    auto config = Core::ConfigFile::open(sde_state_file("screenlayout.ini"sv), Core::ConfigFile::AllowWriting::Yes);
-    if (config.is_error())
-        return { false, ByteString { "could not write screenlayout.ini" } };
-
-    auto& file = *config.value();
-    file.write_num_entry("Screens"sv, "MainScreen"sv, screen_layout.main_screen_index);
-    for (size_t index = 0; index < screen_layout.screens.size(); ++index) {
-        auto const& screen = screen_layout.screens[index];
-        auto group = ByteString::formatted("Screen{}", index);
-        file.write_entry(group, "Mode"sv, WindowServer::ScreenLayout::Screen::mode_to_string(screen.mode));
-        if (screen.mode == WindowServer::ScreenLayout::Screen::Mode::Device && screen.device.has_value())
-            file.write_entry(group, "Device"sv, screen.device.value());
-        file.write_num_entry(group, "Left"sv, screen.location.x());
-        file.write_num_entry(group, "Top"sv, screen.location.y());
-        file.write_num_entry(group, "Width"sv, screen.resolution.width());
-        file.write_num_entry(group, "Height"sv, screen.resolution.height());
-        file.write_num_entry(group, "ScaleFactor"sv, screen.scale_factor);
-    }
-    if (file.sync().is_error())
-        return { false, ByteString { "could not sync screenlayout.ini" } };
+    StringBuilder encoded;
+    encoded.appendff("main={}", screen_layout.main_screen_index);
+    for (auto const& screen : screen_layout.screens)
+        encoded.appendff(";{},{},{},{},{},{},{}", WindowServer::ScreenLayout::Screen::mode_to_string(screen.mode),
+            screen.device.value_or(ByteString {}), screen.location.x(), screen.location.y(),
+            screen.resolution.width(), screen.resolution.height(), screen.scale_factor);
+    WaylandClient::the().set_host_setting("screenlayout"sv, encoded.string_view());
     return { true, {} };
 }
 

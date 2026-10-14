@@ -204,6 +204,9 @@ public:
     // desktop's configuration files.
     ByteString host_setting(StringView key, StringView fallback = {}) const;
     void set_host_setting(StringView key, StringView value);
+    // The desktop's wallpaper, sent as raw pixels over serenity-window.
+    Gfx::Bitmap* host_wallpaper() { return m_host_wallpaper.ptr(); }
+    void set_host_wallpaper(Gfx::Bitmap* bitmap);
     // The compositor asks the client to show/hide a window's menu bar.
     void set_menubar_visibility_callback(Function<void(i32 window_id, bool visible)> callback) { m_menubar_visibility_changed = move(callback); }
     // The compositor asks the client to close its open menus (see the protocol).
@@ -241,6 +244,7 @@ public:
     void on_dismiss_menus();
     void on_host_config(u32 workspace_rows, u32 workspace_columns, double accel_min, double accel_max, u32 scroll_step_min, int double_click_min, int double_click_max);
     void on_host_settings(StringView blob);
+    void on_host_wallpaper(i32 width, i32 height, i32 pitch, u32 format, i32 fd);
 
     void on_data_offer(wl_data_offer*);
     void on_data_offer_mime(wl_data_offer*, char const* mime_type);
@@ -416,6 +420,7 @@ private:
     Function<void()> m_dismiss_menus;
     HostConfig m_host_config;
     HashMap<ByteString, ByteString> m_host_settings;
+    RefPtr<Gfx::Bitmap> m_host_wallpaper;
 
     InputCallbacks m_input;
     i32 m_pointer_window { -1 };
