@@ -24,26 +24,12 @@ for arg in "$@"; do
     esac
 done
 if [[ ${#TARGETS[@]} -eq 0 ]]; then
-    # Everything that can run on the host. SystemMonitor, Debugger and
-    # CrashReporter are Linux-native: SystemMonitor reads /proc with a
-    # libunwind + libdw thread-stack backend, Debugger drives ptrace directly,
-    # and CrashReporter reads a Linux ELF core dump (patches 0050-0053).
+    # The framework: the LibGUI/LibGfx host port, the WindowServer shim (LibWM)
+    # and the GPU backend. The *applications* are the desktop's, not the
+    # framework's — the SDE builds them (serenity-desktop-environment's
+    # scripts/build-apps.sh).
     TARGETS=(
         LibGfx LibGUI windowserver eglgpu
-        Calculator PDFViewer libwm-test-window
-        3DFileViewer Tubes About AnalogClock Assistant Browser BrowserSettings
-        Calendar CalendarSettings CharacterMap ClockSettings DisplaySettings Escalator FileManager
-        FontEditor GamesSettings Help HexEditor ImageViewer KeyboardMapper
-        KeyboardSettings Mail MailSettings Maps MapsSettings MouseSettings NetworkSettings
-        Presenter Run Screenshot Settings SpaceAnalyzer Spreadsheet
-        SystemMonitor Debugger CrashReporter TerminalSettings TextEditor ThemeEditor UsersSettings VideoPlayer Weather
-        # The games and DevTools (the Taskbar's Games and Development menus).
-        2048 BrickGame Chess ColorLines FlappyBug Flood GameOfLife Hearts MasterWord
-        Minesweeper Snake Solitaire Spider ChessEngine Sudoku
-        GMLPlayground HackStudio Profiler SQLStudio
-        # The demos and Magnifier (the Taskbar's Demos and Utilities menus).
-        CatDog Eyes Gradient LibGfxDemo LibGfxScaleDemo Mandelbrot ModelGallery
-        Screensaver Starfield WidgetGallery Magnifier
     )
 fi
 
