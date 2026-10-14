@@ -61,6 +61,10 @@ private:
         Gfx::IntSize minimum_size;
         bool has_alpha_channel { false };
         ByteString title;
+        // SerenityOS WindowMode (0 modeless .. 3 blocking) and the parent window
+        // id (for a transient/modal dialog), from create_window.
+        i32 window_mode { 0 };
+        i32 parent_window_id { -1 };
         RefPtr<Gfx::Bitmap> bitmap;
         i32 last_serial { -1 };
         // Coalesce configure-driven repaints: at most one resize+paint is in

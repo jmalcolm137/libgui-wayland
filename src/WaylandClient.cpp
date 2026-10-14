@@ -1982,7 +1982,7 @@ WaylandClient::WindowSurface* WaylandClient::find(i32 window_id)
     return it->value.ptr();
 }
 
-void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::IntSize size, ByteString const& title, bool has_alpha, bool resizable, i32 window_type)
+void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::IntSize size, ByteString const& title, bool has_alpha, bool resizable, i32 window_type, i32 window_mode, i32 parent_window_id)
 {
     if (!m_compositor || !m_wm_base)
         return;
@@ -2145,6 +2145,12 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::In
     xdg_toplevel_add_listener(toplevel, &s_toplevel_listener, this);
     xdg_toplevel_set_title(toplevel, title.characters());
     xdg_toplevel_set_app_id(toplevel, application_id().characters());
+    // A child window (a dialog) sets its transient parent, so the compositor can
+    // keep it above its parent and track the modal chain.
+    if (parent_window_id >= 0) {
+        if (auto it = m_windows.find(parent_window_id); it != m_windows.end() && it->value->toplevel)
+            xdg_toplevel_set_parent(toplevel, it->value->toplevel);
+    }
     wl_surface_commit(surface);
 
     auto window_surface = make<WindowSurface>();
@@ -2165,6 +2171,9 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::In
         if (auto* chrome = serenity_window_manager_get_toplevel(m_serenity_window_manager, surface)) {
             window_surface->chrome = chrome;
             serenity_toplevel_add_listener(chrome, &s_serenity_toplevel_listener, this);
+            // Tell the compositor the window's mode (modal chain): a blocking
+            // dialog preempts its chain and must keep above its parent.
+            serenity_toplevel_set_window_mode(chrome, static_cast<uint32_t>(window_mode));
         }
     }
 

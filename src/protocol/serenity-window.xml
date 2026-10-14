@@ -86,6 +86,18 @@
       <description summary="destroy the chrome handle"/>
     </request>
 
+    <request name="set_window_mode">
+      <description summary="set the window's mode in the modal chain">
+        The client's window mode (SerenityOS WindowMode): 0 modeless,
+        1 passive, 2 render-above (keep above the parent) and 3 blocking (a
+        modal dialog that preempts its modal chain). The compositor uses it to
+        block input to the windows behind a modal, to keep a transient above
+        its parent, and to refuse to minimize a blocking window. Sent once, when
+        the client creates the window.
+      </description>
+      <arg name="mode" type="uint"/>
+    </request>
+
     <event name="menubar_visibility">
       <description summary="show or hide the window's menu bar">
         Ask the client to show (visible != 0) or hide (visible == 0) the
