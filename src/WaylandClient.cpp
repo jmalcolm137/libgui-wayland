@@ -263,6 +263,15 @@ static serenity_toplevel_listener const s_serenity_toplevel_listener = {
     .position = serenity_toplevel_position,
 };
 
+static void serenity_window_manager_host_config(void* data, serenity_window_manager*,
+    uint32_t workspace_rows, uint32_t workspace_columns, wl_fixed_t accel_min, wl_fixed_t accel_max,
+    uint32_t scroll_step_min, int32_t double_click_min, int32_t double_click_max)
+{
+    static_cast<WaylandClient*>(data)->on_host_config(workspace_rows, workspace_columns,
+        wl_fixed_to_double(accel_min), wl_fixed_to_double(accel_max),
+        scroll_step_min, double_click_min, double_click_max);
+}
+
 static void serenity_window_manager_dismiss_menus(void* data, serenity_window_manager*)
 {
     static_cast<WaylandClient*>(data)->on_dismiss_menus();
@@ -270,6 +279,7 @@ static void serenity_window_manager_dismiss_menus(void* data, serenity_window_ma
 
 static serenity_window_manager_listener const s_serenity_window_manager_listener = {
     .dismiss_menus = serenity_window_manager_dismiss_menus,
+    .host_config = serenity_window_manager_host_config,
 };
 
 void WaylandClient::set_serenity_window_manager(serenity_window_manager* manager)
@@ -277,6 +287,20 @@ void WaylandClient::set_serenity_window_manager(serenity_window_manager* manager
     m_serenity_window_manager = manager;
     if (manager)
         serenity_window_manager_add_listener(manager, &s_serenity_window_manager_listener, this);
+}
+
+void WaylandClient::on_host_config(u32 workspace_rows, u32 workspace_columns, double accel_min, double accel_max, u32 scroll_step_min, int double_click_min, int double_click_max)
+{
+    m_host_config.workspace_rows = workspace_rows > 0 ? workspace_rows : 1;
+    m_host_config.workspace_columns = workspace_columns > 0 ? workspace_columns : 1;
+    m_host_config.accel_min = accel_min;
+    m_host_config.accel_max = accel_max;
+    m_host_config.scroll_step_min = scroll_step_min;
+    m_host_config.double_click_min = double_click_min;
+    m_host_config.double_click_max = double_click_max;
+    dbgln("LibWM: host config: workspaces {}x{}, accel {}-{}, scroll min {}, double-click {}-{}",
+        m_host_config.workspace_rows, m_host_config.workspace_columns, m_host_config.accel_min, m_host_config.accel_max,
+        m_host_config.scroll_step_min, m_host_config.double_click_min, m_host_config.double_click_max);
 }
 
 void WaylandClient::on_dismiss_menus()

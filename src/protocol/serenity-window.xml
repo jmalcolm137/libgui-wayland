@@ -58,6 +58,24 @@
         cannot dismiss them itself; the client closes them on this event.
       </description>
     </event>
+
+    <event name="host_config">
+      <description summary="the window-server configuration the desktop owns">
+        Sent once per bind. Carries the values an application asks the
+        WindowServer for and that the *desktop* owns: the workspace grid and the
+        input-setting bounds. The shim answers an application's
+        get_workspace_settings / get_mouse_acceleration_min / ... requests from
+        this, instead of reading the desktop's configuration file itself (see
+        docs/24 in the serenity-desktop-environment repository).
+      </description>
+      <arg name="workspace_rows" type="uint"/>
+      <arg name="workspace_columns" type="uint"/>
+      <arg name="accel_min" type="fixed"/>
+      <arg name="accel_max" type="fixed"/>
+      <arg name="scroll_step_min" type="uint"/>
+      <arg name="double_click_min" type="int"/>
+      <arg name="double_click_max" type="int"/>
+    </event>
   </interface>
 
   <interface name="serenity_toplevel" version="1">

@@ -112,11 +112,21 @@ static ByteString expanded_portal_path(StringView template_path)
     return MUST(Core::SessionManagement::parse_path_with_sid(template_path));
 }
 
-// A single-client service binary lives next to the running application (or in
-// SDE_APP_BIN_DIR when the session owns the app directory).
+// A single-client service binary lives next to the running application, or in
+// the session's application directory when a session owns one. LIBWM_APP_BIN_DIR
+// is the generic contract; SDE_APP_BIN_DIR is honoured as its historical name.
+static ByteString session_app_bin_dir()
+{
+    for (auto const* name : { "LIBWM_APP_BIN_DIR", "SDE_APP_BIN_DIR" }) {
+        if (auto const* dir = getenv(name); dir && *dir)
+            return ByteString { dir };
+    }
+    return {};
+}
+
 static ByteString service_binary_path(StringView name)
 {
-    if (auto const* app_bin_dir = getenv("SDE_APP_BIN_DIR"); app_bin_dir && *app_bin_dir)
+    if (auto app_bin_dir = session_app_bin_dir(); !app_bin_dir.is_empty())
         return ByteString::formatted("{}/{}", app_bin_dir, name);
     return Core::Process::resolve_executable_path(ByteString::formatted("/bin/{}", name));
 }

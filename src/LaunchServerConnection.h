@@ -147,11 +147,19 @@ private:
     // "/bin/TextEditor" -> "<dir of this executable>/TextEditor", so the handler
     // runs the host binary rather than the (nonexistent) Serenity /bin path.
     // A standalone session service (the SDE LaunchServer) is not built next to
-    // the applications, so it points at their directory with SDE_APP_BIN_DIR.
+    // the applications, so it points at their directory with the session's app
+    // directory: LIBWM_APP_BIN_DIR (generic) or SDE_APP_BIN_DIR (its older name).
     static ByteString port_binary_path(StringView executable)
     {
         auto name = LexicalPath(executable).basename();
-        if (auto const* app_bin_dir = getenv("SDE_APP_BIN_DIR"); app_bin_dir && *app_bin_dir)
+        ByteString app_bin_dir;
+        for (auto const* var : { "LIBWM_APP_BIN_DIR", "SDE_APP_BIN_DIR" }) {
+            if (auto const* dir = getenv(var); dir && *dir) {
+                app_bin_dir = ByteString { dir };
+                break;
+            }
+        }
+        if (!app_bin_dir.is_empty())
             return ByteString::formatted("{}/{}", app_bin_dir, name);
         char buffer[4096];
         auto length = ::readlink("/proc/self/exe", buffer, sizeof(buffer) - 1);

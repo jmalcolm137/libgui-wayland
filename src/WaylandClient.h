@@ -183,6 +183,21 @@ public:
     void set_viewporter(wp_viewporter* viewporter) { m_viewporter = viewporter; }
     void set_layer_shell(zwlr_layer_shell_v1* shell) { m_layer_shell = shell; }
     void set_serenity_window_manager(serenity_window_manager* manager);
+    // The window-server configuration the *desktop* owns: the workspace grid and
+    // the input-setting bounds. The compositor sends it over serenity-window (see
+    // the protocol and docs/24 in the serenity-desktop-environment repository), so
+    // the shim answers an application's WindowServer config requests from this
+    // rather than reading the desktop's config file.
+    struct HostConfig {
+        u32 workspace_rows { 1 };
+        u32 workspace_columns { 1 };
+        double accel_min { 0.5 };
+        double accel_max { 3.5 };
+        u32 scroll_step_min { 1 };
+        int double_click_min { 100 };
+        int double_click_max { 900 };
+    };
+    HostConfig const& host_config() const { return m_host_config; }
     // The compositor asks the client to show/hide a window's menu bar.
     void set_menubar_visibility_callback(Function<void(i32 window_id, bool visible)> callback) { m_menubar_visibility_changed = move(callback); }
     // The compositor asks the client to close its open menus (see the protocol).
@@ -218,6 +233,7 @@ public:
     void on_menubar_visibility(serenity_toplevel*, bool visible);
     void on_toplevel_position(serenity_toplevel*, int32_t x, int32_t y);
     void on_dismiss_menus();
+    void on_host_config(u32 workspace_rows, u32 workspace_columns, double accel_min, double accel_max, u32 scroll_step_min, int double_click_min, int double_click_max);
 
     void on_data_offer(wl_data_offer*);
     void on_data_offer_mime(wl_data_offer*, char const* mime_type);
@@ -391,6 +407,7 @@ private:
     Function<void(i32 window_id, bool visible)> m_menubar_visibility_changed;
     Function<void(i32 window_id, Gfx::IntPoint)> m_toplevel_position_changed;
     Function<void()> m_dismiss_menus;
+    HostConfig m_host_config;
 
     InputCallbacks m_input;
     i32 m_pointer_window { -1 };

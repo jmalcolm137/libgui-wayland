@@ -216,68 +216,11 @@ void WindowServerConnection::remove_window(i32 id)
 // in WindowServer.ini: the SerenityOS default overlaid by the user's file in the
 // session state directory). GUI::Desktop gets these with the screen rects, and the
 // WorkspacePicker applet sizes its grid from them.
-static Optional<int> config_dimension(ByteString const& path, StringView key)
-{
-    auto config = Core::ConfigFile::open(path);
-    if (config.is_error())
-        return {};
-    if (config.value()->read_entry("Workspaces"sv, key).is_empty())
-        return {};
-    return config.value()->read_num_entry("Workspaces"sv, key, 0);
-}
 
-static unsigned workspace_dimension(StringView key, unsigned fallback)
-{
-    ByteString user_path;
-    if (auto const* dir = getenv("SDE_STATE_DIR"); dir && *dir)
-        user_path = ByteString::formatted("{}/WindowServer.ini", dir);
-    else if (auto const* config = getenv("XDG_CONFIG_HOME"); config && *config)
-        user_path = ByteString::formatted("{}/sde/WindowServer.ini", config);
-    else if (auto const* home = getenv("HOME"); home && *home)
-        user_path = ByteString::formatted("{}/.config/sde/WindowServer.ini", home);
-
-    ByteString default_path;
-    if (auto const* root = getenv("SERENITY_RES_ROOT"); root && *root)
-        default_path = ByteString::formatted("{}/../etc/WindowServer.ini", root);
-
-    for (auto const& path : { user_path, default_path }) {
-        if (path.is_empty())
-            continue;
-        if (auto value = config_dimension(path, key); value.has_value() && value.value() > 0)
-            return static_cast<unsigned>(value.value());
-    }
-    return fallback;
-}
 
 // R4.6: input-setting bounds from WindowServer.ini [Input] (the SDE config
 // schema, the same file the compositor reads). Returns the raw entry so callers
 // can parse the type they need.
-static ByteString input_range_entry(StringView key)
-{
-    ByteString user_path;
-    if (auto const* dir = getenv("SDE_STATE_DIR"); dir && *dir)
-        user_path = ByteString::formatted("{}/WindowServer.ini", dir);
-    else if (auto const* config = getenv("XDG_CONFIG_HOME"); config && *config)
-        user_path = ByteString::formatted("{}/sde/WindowServer.ini", config);
-    else if (auto const* home = getenv("HOME"); home && *home)
-        user_path = ByteString::formatted("{}/.config/sde/WindowServer.ini", home);
-
-    ByteString default_path;
-    if (auto const* root = getenv("SERENITY_RES_ROOT"); root && *root)
-        default_path = ByteString::formatted("{}/../etc/WindowServer.ini", root);
-
-    for (auto const& path : { user_path, default_path }) {
-        if (path.is_empty())
-            continue;
-        auto config = Core::ConfigFile::open(path);
-        if (config.is_error())
-            continue;
-        auto value = config.value()->read_entry("Input"sv, key);
-        if (!value.is_empty())
-            return value;
-    }
-    return {};
-}
 
 namespace {
 struct FontQueries {
@@ -313,8 +256,10 @@ void WindowServerConnection::send_fast_greet()
         effects.append(false);
     effects[to_underlying(WindowServer::Effects::Tooltips)] = true;
 
-    unsigned const workspace_rows = workspace_dimension("Rows"sv, 1);
-    unsigned const workspace_columns = workspace_dimension("Columns"sv, 1);
+    // The compositor owns the grid and sends it over serenity-window; the shim
+    // does not read the desktop's config file (see WaylandClient::host_config()).
+    unsigned const workspace_rows = WaylandClient::the().host_config().workspace_rows;
+    unsigned const workspace_columns = WaylandClient::the().host_config().workspace_columns;
 
     // Client-side HiDPI: rasterise at the compositor's output scale so windows are
     // drawn at native resolution on any compositor, with no SDE-specific protocol.
@@ -1265,27 +1210,27 @@ Messages::WindowServer::IsNaturalScrollResponse WindowServerConnection::is_natur
 
 Messages::WindowServer::GetMouseAccelerationMinResponse WindowServerConnection::get_mouse_acceleration_min()
 {
-    return static_cast<float>(input_range_entry("AccelMin"sv).to_number<double>().value_or(0.5));
+    return static_cast<float>(WaylandClient::the().host_config().accel_min);
 }
 
 Messages::WindowServer::GetMouseAccelerationMaxResponse WindowServerConnection::get_mouse_acceleration_max()
 {
-    return static_cast<float>(input_range_entry("AccelMax"sv).to_number<double>().value_or(3.5));
+    return static_cast<float>(WaylandClient::the().host_config().accel_max);
 }
 
 Messages::WindowServer::GetScrollStepSizeMinResponse WindowServerConnection::get_scroll_step_size_min()
 {
-    return input_range_entry("ScrollStepMin"sv).to_number<u32>().value_or(1);
+    return WaylandClient::the().host_config().scroll_step_min;
 }
 
 Messages::WindowServer::GetDoubleClickSpeedMinResponse WindowServerConnection::get_double_click_speed_min()
 {
-    return input_range_entry("DoubleClickMin"sv).to_number<int>().value_or(100);
+    return WaylandClient::the().host_config().double_click_min;
 }
 
 Messages::WindowServer::GetDoubleClickSpeedMaxResponse WindowServerConnection::get_double_click_speed_max()
 {
-    return input_range_entry("DoubleClickMax"sv).to_number<int>().value_or(900);
+    return WaylandClient::the().host_config().double_click_max;
 }
 
 Messages::WindowServer::GetCursorThemeResponse WindowServerConnection::get_cursor_theme()
