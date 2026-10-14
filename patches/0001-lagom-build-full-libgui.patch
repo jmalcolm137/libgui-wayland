@@ -239,17 +239,6 @@ index 213a1e77..dbfd6844 100644
 +        target_link_options(Tubes PRIVATE "-Wl,--no-as-needed")
 +        target_link_libraries(Tubes PRIVATE wm)
 +
-+        # Serenity Desktop Environment: the Taskbar. It is built when SDE_ROOT is
-+        # set and links the WindowServer compatibility library only; the
-+        # WindowServer serves the WindowManagerServer protocol itself.
-+        if (DEFINED SDE_ROOT AND NOT "${SDE_ROOT}" STREQUAL "")
-+            add_serenity_subdirectory(Userland/Services/Taskbar)
-+            target_link_options(Taskbar PRIVATE "-Wl,--no-as-needed")
-+            target_link_libraries(Taskbar PRIVATE windowserver)
-+            target_include_directories(Taskbar BEFORE PRIVATE "${SDE_ROOT}/compat")
-+            target_include_directories(Taskbar PRIVATE "${SERENITY_PROJECT_ROOT}/../compat")
-+        endif()
-+
          # Lagom Utilities
          lagom_utility(abench SOURCES ../../Userland/Utilities/abench.cpp LIBS LibMain LibFileSystem LibAudio)
          lagom_utility(aconv SOURCES ../../Userland/Utilities/aconv.cpp LIBS LibMain LibFileSystem LibAudio)
