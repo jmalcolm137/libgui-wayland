@@ -357,6 +357,12 @@ void WaylandClient::set_host_wallpaper(Gfx::Bitmap* bitmap)
         }
     }
     if (m_serenity_window_manager) {
+        // A `h` argument must be a real file descriptor: libwayland cannot dup a
+        // -1, and aborts the whole request (breaking this connection with it).
+        // "No wallpaper" is expressed by a zero width/height, so hand over a
+        // valid placeholder fd in that case.
+        if (fd < 0)
+            fd = memfd_create("libwm-wallpaper-none", MFD_CLOEXEC);
         serenity_window_manager_set_wallpaper(m_serenity_window_manager,
             bitmap ? bitmap->width() : 0, bitmap ? bitmap->height() : 0,
             bitmap ? bitmap->pitch() : 0,
