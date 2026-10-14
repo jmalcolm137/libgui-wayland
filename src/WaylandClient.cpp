@@ -2112,7 +2112,7 @@ WaylandClient::WindowSurface* WaylandClient::find(i32 window_id)
     return it->value.ptr();
 }
 
-void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::IntSize size, ByteString const& title, bool has_alpha, bool resizable, i32 window_type, i32 window_mode, i32 parent_window_id)
+void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::IntSize size, ByteString const& title, bool has_alpha, bool resizable, i32 window_type, i32 window_mode, i32 parent_window_id, Gfx::IntRect const& launch_origin)
 {
     if (!m_compositor || !m_wm_base)
         return;
@@ -2304,6 +2304,10 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::In
             // Tell the compositor the window's mode (modal chain): a blocking
             // dialog preempts its chain and must keep above its parent.
             serenity_toplevel_set_window_mode(chrome, static_cast<uint32_t>(window_mode));
+            // The launcher's origin rect (SerenityOS __libgui_launch_origin_rect,
+            // read by GUI::Window), so the compositor can animate the launch.
+            if (!launch_origin.is_empty())
+                serenity_toplevel_set_launch_origin(chrome, launch_origin.x(), launch_origin.y(), launch_origin.width(), launch_origin.height());
         }
     }
 

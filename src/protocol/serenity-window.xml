@@ -163,6 +163,21 @@
       <arg name="mode" type="uint"/>
     </request>
 
+    <request name="set_launch_origin">
+      <description summary="the rect the window was launched from">
+        The launcher hands the application the rect of the icon or menu item it
+        was launched from (SerenityOS's __libgui_launch_origin_rect, read by
+        GUI::Window), and the client passes it on here so the compositor can
+        animate the window growing out of that rect (SerenityOS
+        Window::start_launch_animation). Sent once, when the window is created;
+        a zero size means "no animation".
+      </description>
+      <arg name="x" type="int"/>
+      <arg name="y" type="int"/>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+    </request>
+
     <event name="menubar_visibility">
       <description summary="show or hide the window's menu bar">
         Ask the client to show (visible != 0) or hide (visible == 0) the
