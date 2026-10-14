@@ -451,9 +451,11 @@ static Optional<NonnullOwnPtr<Core::LocalSocket>> make_portal(ByteString const& 
         spawn_multi_client_service(service_binary_path("NotificationServer"sv), path, "notification"sv);
         return {};
     }
-    if (path == expanded_portal_path("/tmp/session/%sid/portal/audio"sv)) {
+    if (path == expanded_portal_path("/tmp/session/%sid/portal/audio"sv)
+        || path == expanded_portal_path("/tmp/session/%sid/portal/audiomanager"sv)) {
         // The AudioServer serves the audio and audiomanager portals from one
-        // process; bind both, then defer so the caller's connect reaches them.
+        // process; bind both (whichever portal the client asks for first), then
+        // defer so the caller's connect reaches them.
         spawn_audio_server();
         return {};
     }
