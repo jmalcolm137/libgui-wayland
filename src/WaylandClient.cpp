@@ -1218,7 +1218,14 @@ void WaylandClient::on_keyboard_key(u32 key, bool pressed)
     // rather than depend on xkbcommon applying it (whether it does is a property of
     // the keymap, not something to rely on). Already-control characters are left
     // alone, so this cannot double-convert.
-    if ((current_modifiers() & Mod_Ctrl) && code_point >= '@' && code_point <= '_')
+    //
+    // The range must be the same one LibVT uses for the same conversion
+    // ('@' .. <DEL), or lowercase letters fall through: Ctrl-c is 'c' (0x63),
+    // which is above '_' (0x5f), so a range that stops at '_' silently misses
+    // every lowercase Ctrl+<letter>. LibVT still converted those on its own, which
+    // is why the narrower range went unnoticed, but the contract here is that a
+    // client sees the control character itself.
+    if ((current_modifiers() & Mod_Ctrl) && code_point >= '@' && code_point < 0x7f)
         code_point &= 0x1f;
 
     if (u32 bit = modifier_bit_for_evdev(key); bit != 0) {

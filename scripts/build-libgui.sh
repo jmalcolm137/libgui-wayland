@@ -83,7 +83,7 @@ unverified_count=0
 unverified_names=""
 for patch in "$PROJECT_ROOT"/patches/*.patch; do
     name="$(basename "$patch")"
-    if git -C "$SERENITY_SRC" apply --recount --reverse --check "$patch" >/dev/null 2>&1; then
+    if git -C "$SERENITY_SRC" apply --recount -C1 --reverse --check "$patch" >/dev/null 2>&1; then
         echo "==> $name already applied"
         already_count=$((already_count + 1))
     elif git -C "$SERENITY_SRC" apply --recount -C1 --check "$patch" >/dev/null 2>&1; then
