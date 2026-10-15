@@ -32,14 +32,30 @@ if [[ ${#TARGETS[@]} -eq 0 ]]; then
         LibGfx LibGUI windowserver eglgpu
     )
     # Two passes, not one. The shim (windowserver) includes endpoint headers the
-    # Lagom side *generates* (FileSystemAccessServer, Clipboard, LaunchServer, ...)
-    # and its CMake does not declare that dependency, so a parallel build of a
-    # fresh tree can compile the shim before the headers exist and fail with
-    # "FileSystemAccessServer/FileSystemAccessClientEndpoint.h: No such file or
-    # directory". Building the libraries first makes the generation happen before
-    # anything consumes it. Seen on a clean CI build; never locally, where the
-    # headers were already there.
+    # build *generates* (WindowServer, Clipboard, LaunchServer,
+    # FileSystemAccessServer, Config, ...) and its CMake does not declare that
+    # dependency — header inclusion is invisible to ninja — so a parallel build of
+    # a fresh tree can compile the shim before the headers exist:
+    #
+    #   FileSystemAccessServerConnection.h:19:10: fatal error:
+    #     FileSystemAccessServer/FileSystemAccessClientEndpoint.h: No such file
+    #
+    # Building the libraries first is not enough on its own (LibGUI does not pull
+    # all of them), so name the generators explicitly. Both were invisible on a
+    # development machine, where an earlier build had left the headers in place;
+    # the first clean CI build hit them.
     TWO_PHASES=1
+    GENERATED=(
+        generate_WindowServerEndpoint.h generate_WindowClientEndpoint.h
+        generate_WindowManagerServerEndpoint.h generate_WindowManagerClientEndpoint.h
+        generate_ClipboardClientEndpoint.h generate_ClipboardServerEndpoint.h
+        generate_NotificationClientEndpoint.h generate_NotificationServerEndpoint.h
+        generate_LaunchClientEndpoint.h generate_LaunchServerEndpoint.h
+        generate_FileSystemAccessClientEndpoint.h generate_FileSystemAccessServerEndpoint.h
+        generate_AudioClientEndpoint.h generate_AudioServerEndpoint.h
+        generate_AudioManagerClientEndpoint.h generate_AudioManagerServerEndpoint.h
+        generate_ConfigClientEndpoint.h generate_ConfigServerEndpoint.h
+    )
 fi
 
 if [[ ! -d "$SERENITY_SRC/.git" ]]; then
@@ -76,7 +92,7 @@ cmake -S "$SERENITY_SRC/Meta/Lagom" -B "$BUILD_DIR" -GNinja \
 
 echo "==> Building: ${TARGETS[*]}"
 if [[ "${TWO_PHASES:-0}" -eq 1 ]]; then
-    ninja -C "$BUILD_DIR" -j"$JOBS" LibGfx LibGUI
+    ninja -C "$BUILD_DIR" -j"$JOBS" LibGfx LibGUI "${GENERATED[@]}"
     ninja -C "$BUILD_DIR" -j"$JOBS" windowserver eglgpu
 else
     ninja -C "$BUILD_DIR" -j"$JOBS" "${TARGETS[@]}"
