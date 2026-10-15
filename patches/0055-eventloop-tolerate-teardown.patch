@@ -1,0 +1,29 @@
+diff --git a/Userland/Libraries/LibCore/EventLoop.cpp b/Userland/Libraries/LibCore/EventLoop.cpp
+index 506c01d..aaf9430 100644
+--- a/Userland/Libraries/LibCore/EventLoop.cpp
++++ b/Userland/Libraries/LibCore/EventLoop.cpp
+@@ -54,8 +54,22 @@ bool EventLoop::is_running()
+ 
+ EventLoop& EventLoop::current()
+ {
+-    if (event_loop_stack().is_empty())
+-        dbgln("No EventLoop is present, unable to return current one!");
++    if (event_loop_stack().is_empty()) {
++        // No loop: we are being torn down. Typically a GUI application exiting after
++        // the connection to the WindowServer died, where the Application has already
++        // destroyed its EventLoop while a widget tree is still being destroyed — and
++        // destroying a widget can defer work (a relayout, for instance). Returning a
++        // reference into the empty stack is undefined behaviour, and it segfaulted
++        // every client whose teardown defers: the whole session dumped core around a
++        // compositor restart instead of exiting quietly.
++        //
++        // Hand back an inert loop instead. Anything deferred onto it is never run,
++        // which is what teardown wants, and it is deliberately leaked so it outlives
++        // static destruction and cannot be popped out from under a late caller.
++        dbgln("No EventLoop is present, so using an inert one for teardown");
++        static EventLoop* s_inert_event_loop = new EventLoop();
++        return *s_inert_event_loop;
++    }
+     return event_loop_stack().last();
+ }
+ 
