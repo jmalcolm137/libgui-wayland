@@ -1,0 +1,27 @@
+--- a/Userland/Applications/Terminal/main.cpp
++++ b/Userland/Applications/Terminal/main.cpp
+@@ -40,6 +40,7 @@
+ #include <LibURL/URL.h>
+ #include <LibVT/TerminalWidget.h>
+ #include <pty.h>
++#include <signal.h>
+ 
+ class TerminalChangeListener : public Config::Listener {
+ public:
+@@ -253,6 +254,16 @@
+ 
+     // We're the child process; run the startup command.
+     if (shell_pid == 0) {
++        // A terminal starts a fresh session for the shell, so the shell must not
++        // inherit the terminal's own job-control signal dispositions. An
++        // application launched from the desktop is started as a background job of
++        // a non-interactive shell, which leaves SIGINT and SIGQUIT ignored (POSIX
++        // requires it), and neither a shell nor anything it runs can un-ignore
++        // them again -- which is why Ctrl-C did nothing in a shell started here,
++        // or in any program that shell ran. Reset them before exec, as a login
++        // session would.
++        signal(SIGINT, SIG_DFL);
++        signal(SIGQUIT, SIG_DFL);
+         if (!command_to_execute.is_empty())
+             TRY(run_command(command_to_execute, keep_open));
+         else

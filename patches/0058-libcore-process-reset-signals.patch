@@ -1,0 +1,39 @@
+--- a/Userland/Libraries/LibCore/Process.cpp
++++ b/Userland/Libraries/LibCore/Process.cpp
+@@ -109,6 +109,24 @@
+             }));
+     }
+ 
++    // Reset the signals a non-interactive shell sets to SIG_IGN for a background
++    // job. The session starts its applications as `... app & ...` in one `sh -c`,
++    // so every one of them inherits the ignore, and so does everything they go on
++    // to run: a shell started by our Terminal had SIGINT ignored, which made
++    // Ctrl-C do nothing in it and in every program started from it. A launcher
++    // should hand the application default dispositions and let it decide.
++    posix_spawnattr_t spawn_attributes;
++    CHECK(posix_spawnattr_init(&spawn_attributes));
++    ScopeGuard cleanup_spawn_attributes = [&] {
++        posix_spawnattr_destroy(&spawn_attributes);
++    };
++    sigset_t default_signals;
++    sigemptyset(&default_signals);
++    sigaddset(&default_signals, SIGINT);
++    sigaddset(&default_signals, SIGQUIT);
++    CHECK(posix_spawnattr_setsigdefault(&spawn_attributes, &default_signals));
++    CHECK(posix_spawnattr_setflags(&spawn_attributes, POSIX_SPAWN_SETSIGDEF));
++
+ #undef CHECK
+ 
+     ArgvList argv_list(resolve_executable_path(options.executable), options.arguments.size());
+@@ -119,9 +137,9 @@
+ 
+     pid_t pid;
+     if (options.search_for_executable_in_path) {
+-        pid = TRY(System::posix_spawnp(executable.view(), &spawn_actions, nullptr, const_cast<char**>(argv_list.get().data()), Core::Environment::raw_environ()));
++        pid = TRY(System::posix_spawnp(executable.view(), &spawn_actions, &spawn_attributes, const_cast<char**>(argv_list.get().data()), Core::Environment::raw_environ()));
+     } else {
+-        pid = TRY(System::posix_spawn(executable.view(), &spawn_actions, nullptr, const_cast<char**>(argv_list.get().data()), Core::Environment::raw_environ()));
++        pid = TRY(System::posix_spawn(executable.view(), &spawn_actions, &spawn_attributes, const_cast<char**>(argv_list.get().data()), Core::Environment::raw_environ()));
+     }
+     return Process { pid };
+ }
