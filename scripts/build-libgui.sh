@@ -66,20 +66,49 @@ fi
 
 # Apply the build-system patches idempotently. --recount tolerates approximate
 # hunk line counts, which keeps hand-maintained patches easy to edit.
+#
+# The third branch is the honest one. Several patches edit the same files (e.g.
+# Meta/Lagom/CMakeLists.txt), so once earlier ones are in, `git apply` can neither
+# apply nor reverse this one — and no per-patch check can tell "already applied"
+# from "written against a different revision", because overlapping sets make the
+# reverse-check fail in both cases. (GNU patch does not help: measured on a
+# correctly patched tree, it rejects all of them.) So the loop no longer claims to
+# know: it counts what it could not verify and says so at the end, which is the
+# one line that makes a *later* failure legible. A stale SerenityOS pin once made
+# every SDE patch unverifiable and the build failed much later, in CMake, with no
+# hint of the cause.
+applied_count=0
+already_count=0
+unverified_count=0
 for patch in "$PROJECT_ROOT"/patches/*.patch; do
     name="$(basename "$patch")"
     if git -C "$SERENITY_SRC" apply --recount --reverse --check "$patch" >/dev/null 2>&1; then
         echo "==> $name already applied"
+        already_count=$((already_count + 1))
     elif git -C "$SERENITY_SRC" apply --recount --check "$patch" >/dev/null 2>&1; then
         echo "==> Applying $name"
         git -C "$SERENITY_SRC" apply --recount "$patch"
+        applied_count=$((applied_count + 1))
     else
-        # Several patches edit the same files (e.g. Meta/Lagom/CMakeLists.txt), so
-        # once those are applied a clean reverse-check is impossible even though
-        # this patch is too. Treat that as already applied rather than failing.
-        echo "==> $name already applied (overlapping context)"
+        echo "==> $name assumed applied (overlapping context; unverifiable)"
+        unverified_count=$((unverified_count + 1))
     fi
 done
+echo "==> patches: $applied_count applied, $already_count already applied, $unverified_count assumed"
+# Say more only when it is actionable: a checkout that differs from the pin is
+# the case where "unassumable" patches mean something.
+if [[ "$unverified_count" -gt 0 ]]; then
+    # The pin line is SERENITY_REVISION="${SERENITY_REVISION:-<hash>}"; take
+    # the first hash-looking token on it.
+    pinned="$(grep -m1 '^SERENITY_REVISION=' "${PROJECT_ROOT}/scripts/fetch-serenity.sh" 2>/dev/null | grep -oE '[0-9a-f]{7,40}' | head -1)"
+    head_rev="$(git -C "$SERENITY_SRC" rev-parse HEAD 2>/dev/null || true)"
+    if [[ -n "$pinned" && -n "$head_rev" && "$head_rev" != "$pinned" ]]; then
+        echo "    WARNING: this checkout is at ${head_rev:0:12}, not the pinned ${pinned:0:12}." >&2
+        echo "             $unverified_count patch(es) could not be verified against it; if a" >&2
+        echo "             build step below fails unexpectedly, that is the likely reason." >&2
+        echo "             scripts/fetch-serenity.sh pins it." >&2
+    fi
+fi
 
 echo "==> Configuring Lagom"
 cmake -S "$SERENITY_SRC/Meta/Lagom" -B "$BUILD_DIR" -GNinja \

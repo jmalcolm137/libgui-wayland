@@ -29,7 +29,14 @@ SERENITY_SRC="${SERENITY_SRC:-$PROJECT_ROOT/serenity}"
 SPARSE_DIRS=(AK Userland Meta Base/res Base/home Base/etc Base/usr/share/man Tests Kernel/API Kernel/Memory)
 
 if [[ -d "$SERENITY_SRC/.git" ]]; then
+    # A checkout that has drifted ahead of the pin is the state that hides a stale
+    # pin: every patch still "applies" to the newer tree, so nothing complains, and
+    # a later build fails somewhere unrelated. Say it out loud.
+    previous="$(git -C "$SERENITY_SRC" rev-parse HEAD 2>/dev/null || true)"
     echo "==> Updating existing checkout at $SERENITY_SRC"
+    if [[ -n "$previous" && "$previous" != "$SERENITY_REVISION" ]]; then
+        echo "    (it was at ${previous:0:12}, moving to the pinned ${SERENITY_REVISION:0:12})"
+    fi
     git -C "$SERENITY_SRC" fetch --depth 1 origin "$SERENITY_REVISION"
 else
     echo "==> Cloning SerenityOS (blobless) into $SERENITY_SRC"
