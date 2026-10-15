@@ -8,7 +8,14 @@ set -euo pipefail
 
 SERENITY_REMOTE="${SERENITY_REMOTE:-https://github.com/SerenityOS/serenity.git}"
 # Pinned so the audit and patch in this repo are reproducible. See DESIGN.md.
-SERENITY_REVISION="${SERENITY_REVISION:-80baeb29708ae10f4a4cc8a07ca57e9876c3e3d8}"
+#
+# Advanced 2026-10-15: the previous pin (80baeb29) predates upstream work the port
+# and the SDE now depend on — e.g. it has no Userland/Games/Sudoku at all, which
+# the SDE's Lagom targets add by name, so a fresh tree failed to configure
+# ("add_subdirectory given source .../Userland/Games/Sudoku which is not an
+# existing directory"). The development checkouts had drifted ahead of the pin,
+# which is why nothing noticed.
+SERENITY_REVISION="${SERENITY_REVISION:-a43d652b44066ab4d2605e4be4dc0bc9aa8c116e}"
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERENITY_SRC="${SERENITY_SRC:-$PROJECT_ROOT/serenity}"
