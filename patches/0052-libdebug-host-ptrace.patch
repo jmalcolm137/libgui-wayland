@@ -92,9 +92,14 @@ diff --git a/Userland/Libraries/LibDebug/DebugSession.cpp b/Userland/Libraries/L
          perror("waitpid");
          VERIFY_NOT_REACHED();
      }
-@@ -408,6 +408,7 @@
-     // PT_CONTINUE actually resumes the debuggee. On Linux PT_SINGLESTEP resumes
-     // it itself, so an extra continue would run the process away.
+@@ -403,7 +403,12 @@
+         VERIFY_NOT_REACHED();
+     }
+ 
++#if defined(AK_OS_SERENITY)
++    // On SerenityOS, PT_SINGLESTEP only arms single stepping and a following
++    // PT_CONTINUE actually resumes the debuggee. On Linux PT_SINGLESTEP resumes
++    // it itself, so an extra continue would run the process away.
      continue_debuggee();
 +#endif
  
