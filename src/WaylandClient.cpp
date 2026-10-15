@@ -1482,10 +1482,13 @@ void WaylandClient::on_data_offer_mime(wl_data_offer* offer, char const* mime_ty
 void WaylandClient::on_selection(wl_data_offer* offer)
 {
     for (auto* pending : m_pending_offers) {
-        if (pending != offer) {
-            m_offer_mime_types.remove(reinterpret_cast<u64>(pending));
-            wl_data_offer_destroy(pending);
-        }
+        // The drag offer belongs to the drag, not to the selection. Destroying it
+        // here used to leave m_drag_offer dangling, and the drop/leave destroyed it
+        // again -- a segfault inside wl_data_offer_destroy (a freed wl_proxy).
+        if (pending == offer || pending == m_drag_offer)
+            continue;
+        m_offer_mime_types.remove(reinterpret_cast<u64>(pending));
+        wl_data_offer_destroy(pending);
     }
     m_pending_offers.clear();
     if (offer)
@@ -1720,6 +1723,7 @@ void WaylandClient::on_drag_drop()
         m_input.drag_dropped(m_drag_window, adjusted_drag_position(), m_pointer_buttons, current_modifiers(), m_drag_received);
     if (m_drag_offer) {
         wl_data_offer_finish(m_drag_offer);
+        forget_offer(m_drag_offer);
         wl_data_offer_destroy(m_drag_offer);
         m_drag_offer = nullptr;
     }
@@ -1730,11 +1734,25 @@ void WaylandClient::on_drag_drop()
 void WaylandClient::on_drag_leave()
 {
     if (m_drag_offer) {
+        forget_offer(m_drag_offer);
         wl_data_offer_destroy(m_drag_offer);
         m_drag_offer = nullptr;
     }
     m_drag_window = -1;
     m_drag_received.clear();
+}
+
+// An offer we are about to destroy must not be reachable from the selection state
+// any more (the drag and the selection share m_pending_offers / m_offer_mime_types).
+void WaylandClient::forget_offer(wl_data_offer* offer)
+{
+    m_offer_mime_types.remove(reinterpret_cast<u64>(offer));
+    if (m_current_offer == offer)
+        m_current_offer = nullptr;
+    for (size_t i = m_pending_offers.size(); i > 0; --i) {
+        if (m_pending_offers[i - 1] == offer)
+            m_pending_offers.remove(i - 1);
+    }
 }
 
 WaylandClient::Popup* WaylandClient::find_popup(i32 popup_id)

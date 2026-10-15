@@ -259,6 +259,9 @@ public:
     void on_data_offer(wl_data_offer*);
     void on_data_offer_mime(wl_data_offer*, char const* mime_type);
     void on_selection(wl_data_offer*);
+    // Drop an offer we are about to destroy from the selection state (the drag and
+    // the selection share the pending-offer list).
+    void forget_offer(wl_data_offer*);
     void on_source_send(wl_data_source*, char const* mime_type, int fd);
     void on_source_cancelled(wl_data_source*);
     // Explicit drag-and-drop (data-device DnD). The source starts a drag from the
