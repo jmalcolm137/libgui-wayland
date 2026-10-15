@@ -31,6 +31,15 @@ if [[ ${#TARGETS[@]} -eq 0 ]]; then
     TARGETS=(
         LibGfx LibGUI windowserver eglgpu
     )
+    # Two passes, not one. The shim (windowserver) includes endpoint headers the
+    # Lagom side *generates* (FileSystemAccessServer, Clipboard, LaunchServer, ...)
+    # and its CMake does not declare that dependency, so a parallel build of a
+    # fresh tree can compile the shim before the headers exist and fail with
+    # "FileSystemAccessServer/FileSystemAccessClientEndpoint.h: No such file or
+    # directory". Building the libraries first makes the generation happen before
+    # anything consumes it. Seen on a clean CI build; never locally, where the
+    # headers were already there.
+    TWO_PHASES=1
 fi
 
 if [[ ! -d "$SERENITY_SRC/.git" ]]; then
@@ -66,7 +75,12 @@ cmake -S "$SERENITY_SRC/Meta/Lagom" -B "$BUILD_DIR" -GNinja \
     -DCMAKE_BUILD_TYPE=Release
 
 echo "==> Building: ${TARGETS[*]}"
-ninja -C "$BUILD_DIR" -j"$JOBS" "${TARGETS[@]}"
+if [[ "${TWO_PHASES:-0}" -eq 1 ]]; then
+    ninja -C "$BUILD_DIR" -j"$JOBS" LibGfx LibGUI
+    ninja -C "$BUILD_DIR" -j"$JOBS" windowserver eglgpu
+else
+    ninja -C "$BUILD_DIR" -j"$JOBS" "${TARGETS[@]}"
+fi
 
 if [[ "$RUN_TESTS" == "1" ]]; then
     echo "==> Running upstream library test suites (set RUN_TESTS=0 or pass --no-tests to skip)"
