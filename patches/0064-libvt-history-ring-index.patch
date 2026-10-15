@@ -1,0 +1,68 @@
+diff --git a/Userland/Libraries/LibVT/Terminal.cpp b/Userland/Libraries/LibVT/Terminal.cpp
+index 3dc48176..3b432f92 100644
+--- a/Userland/Libraries/LibVT/Terminal.cpp
++++ b/Userland/Libraries/LibVT/Terminal.cpp
+@@ -80,6 +80,9 @@ void Terminal::clear_to_mark(Mark mark)
+     }
+ 
+     // If the mark is not found, go through the history.
++    // The ring has to be linearised first: the search below (and the removal) treat
++    // m_history as an ordered list.
++    normalize_history();
+     auto it = AK::find_if(
+         m_history.rbegin(),
+         m_history.rend(),
+@@ -1737,6 +1789,10 @@ void Terminal::set_size(u16 columns, u16 rows)
+         return old_cursor;
+     };
+ 
++    // resize_and_rewrap() below walks m_history -- and moves lines through it -- as an
++    // ordered list, so linearise the scrollback ring first.
++    normalize_history();
++
+     auto old_history_size = m_history.size();
+     m_history.extend(move(m_normal_screen_buffer));
+     CursorPosition cursor_tracker { cursor_row() + old_history_size, cursor_column() };
+diff --git a/Userland/Libraries/LibVT/Terminal.h b/Userland/Libraries/LibVT/Terminal.h
+index ed170c5a..3466290a 100644
+--- a/Userland/Libraries/LibVT/Terminal.h
++++ b/Userland/Libraries/LibVT/Terminal.h
+@@ -396,6 +405,27 @@ protected:
+ #ifndef KERNEL
+     size_t m_history_start = 0;
+     Vector<NonnullOwnPtr<Line>> m_history;
++
++    // The history is a ring buffer: while it is full, add_line_to_history() below
++    // overwrites the oldest line at m_history_start and advances that index. Code
++    // that treats m_history as an ordered list -- the mark search in clear_to_mark(),
++    // the rewrap in set_size() -- has to linearise the ring first. Otherwise it reads
++    // the lines in the wrong order and, worse, leaves m_history_start past the end of
++    // a shortened vector, so the next add_line_to_history() inserts out of bounds and
++    // AK::Vector::insert's `index <= size()` VERIFY trips (SIGILL).
++    void normalize_history()
++    {
++        if (m_history_start == 0)
++            return;
++
++        Vector<NonnullOwnPtr<Line>> linearized;
++        linearized.ensure_capacity(m_history.size());
++        for (size_t i = 0; i < m_history.size(); ++i)
++            linearized.unchecked_append(move(m_history[(m_history_start + i) % m_history.size()]));
++        m_history = move(linearized);
++        m_history_start = 0;
++    }
++
+     void add_line_to_history(NonnullOwnPtr<Line>&& line)
+     {
+         if (max_history_size() == 0)
+@@ -404,6 +434,10 @@ protected:
+         // If m_history can expand, add the new line to the end of the list.
+         // If there is an overflow wrap, the end is at the index before the start.
+         if (m_history.size() < max_history_size()) {
++            // m_history_start is only non-zero while the ring is full; a stale index
++            // (see normalize_history()) would make the insert below go out of bounds.
++            if (m_history_start >= m_history.size())
++                m_history_start = 0;
+             if (m_history_start == 0)
+                 m_history.append(move(line));
+             else
