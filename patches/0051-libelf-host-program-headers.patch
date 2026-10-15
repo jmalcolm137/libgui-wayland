@@ -1,7 +1,7 @@
 diff --git a/Userland/Libraries/LibELF/ELFABI.h b/Userland/Libraries/LibELF/ELFABI.h
 --- a/Userland/Libraries/LibELF/ELFABI.h
 +++ b/Userland/Libraries/LibELF/ELFABI.h
-@@ -499,9 +499,10 @@
+@@ -499,9 +499,10 @@ typedef struct {
  #define PT_RISCV_ATTRIBUTES 0x70000003 /* RISC-V ELF attribute section */
  #define PT_HIPROC 0x7fffffff           /* end of reserved range for processor specific segment types */
  
@@ -18,7 +18,7 @@ diff --git a/Userland/Libraries/LibELF/ELFABI.h b/Userland/Libraries/LibELF/ELFA
 diff --git a/Userland/Libraries/LibELF/Validation.cpp b/Userland/Libraries/LibELF/Validation.cpp
 --- a/Userland/Libraries/LibELF/Validation.cpp
 +++ b/Userland/Libraries/LibELF/Validation.cpp
-@@ -140,7 +140,9 @@
+@@ -140,7 +140,9 @@ bool validate_elf_header(Elf_Ehdr const& elf_header, size_t file_size, bool verb
          return false;
      }
  
@@ -29,7 +29,7 @@ diff --git a/Userland/Libraries/LibELF/Validation.cpp b/Userland/Libraries/LibEL
          if (verbose)
              dbgln("File has incorrect section header size..? ({}), expected ({}).", elf_header.e_shentsize, sizeof(Elf_Shdr));
          return false;
-@@ -237,7 +239,9 @@
+@@ -237,7 +239,9 @@ bool validate_program_headers(Elf_Ehdr const& elf_header, size_t file_size, Read
              continue;
          }
  
@@ -40,3 +40,16 @@ diff --git a/Userland/Libraries/LibELF/Validation.cpp b/Userland/Libraries/LibEL
              if (verbose)
                  dbgln("Program header ({}) has p_filesz ({}) larger than p_memsz ({})", header_index, program_header.p_filesz, program_header.p_memsz);
              return false;
+@@ -341,6 +345,12 @@ bool validate_program_headers(Elf_Ehdr const& elf_header, size_t file_size, Read
+             }
+             break;
+         default:
++            // The range [PT_LOOS, PT_HIOS] is reserved for OS/ABI-specific
++            // extensions. On Linux that is the PT_GNU_* family (EH_FRAME, STACK,
++            // RELRO, PROPERTY, SFRAME); none carries load information a parser
++            // needs, so accept and ignore them rather than rejecting the file.
++            if (program_header.p_type >= PT_LOOS && program_header.p_type <= PT_HIOS)
++                break;
+             // Not handling other program header types in other code so... let's not surprise them
+             if (verbose)
+                 dbgln("Found program header ({}) of unrecognized type {}!", header_index, program_header.p_type);
