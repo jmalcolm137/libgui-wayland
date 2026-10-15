@@ -45,27 +45,3 @@ index 4e70ac1e..a79997e1 100644
      m_double_click_speed_slider->set_value(GUI::ConnectionToWindowServer::the().get_double_click_speed(), GUI::AllowCallback::No);
      m_double_click_speed_slider->on_change = [&](int speed) {
          m_double_click_arrow_widget->set_double_click_speed(speed);
-diff --git a/Userland/Services/WindowServer/WindowServer.ipc b/Userland/Services/WindowServer/WindowServer.ipc
-index e0b6dc9a..40f7d549 100644
---- a/Userland/Services/WindowServer/WindowServer.ipc
-+++ b/Userland/Services/WindowServer/WindowServer.ipc
-@@ -187,6 +187,19 @@ endpoint WindowServer
-     set_natural_scroll(bool inverted) =|
-     is_natural_scroll() => (bool inverted)
- 
-+    // R4.6: input-setting bounds, from the SDE config schema, so the settings UI
-+    // does not hardcode them.
-+    get_mouse_acceleration_min() => (float value)
-+    get_mouse_acceleration_max() => (float value)
-+    get_scroll_step_size_min() => (u32 value)
-+    get_double_click_speed_min() => (int value)
-+    get_double_click_speed_max() => (int value)
-+
-+    // R4.6: keyboard layouts (xkb). Keyboard Settings reads/writes these.
-+    get_keyboard_layout() => (ByteString layouts, ByteString variant, ByteString model, ByteString options)
-+    set_keyboard_layout(ByteString layouts, ByteString variant, ByteString model, ByteString options) =|
-+    get_keyboard_layout_names() => (Vector<ByteString> names)
-+
-     get_desktop_display_scale(u32 screen_index) => (int desktop_display_scale)
- 
-     set_flash_flush(bool enabled) =|

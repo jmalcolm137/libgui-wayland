@@ -1,0 +1,34 @@
+diff --git a/Userland/Services/WindowServer/WindowServer.ipc b/Userland/Services/WindowServer/WindowServer.ipc
+index e0b6dc9..9c98166 100644
+--- a/Userland/Services/WindowServer/WindowServer.ipc
++++ b/Userland/Services/WindowServer/WindowServer.ipc
+@@ -187,6 +187,19 @@ endpoint WindowServer
+     set_natural_scroll(bool inverted) =|
+     is_natural_scroll() => (bool inverted)
+ 
++    // R4.6: input-setting bounds, from the SDE config schema, so the settings UI
++    // does not hardcode them.
++    get_mouse_acceleration_min() => (float value)
++    get_mouse_acceleration_max() => (float value)
++    get_scroll_step_size_min() => (u32 value)
++    get_double_click_speed_min() => (int value)
++    get_double_click_speed_max() => (int value)
++
++    // R4.6: keyboard layouts (xkb). Keyboard Settings reads/writes these.
++    get_keyboard_layout() => (ByteString layouts, ByteString variant, ByteString model, ByteString options)
++    set_keyboard_layout(ByteString layouts, ByteString variant, ByteString model, ByteString options) =|
++    get_keyboard_layout_names() => (Vector<ByteString> names)
++
+     get_desktop_display_scale(u32 screen_index) => (int desktop_display_scale)
+ 
+     set_flash_flush(bool enabled) =|
+@@ -198,4 +211,9 @@ endpoint WindowServer
+     remove_window_stealing(i32 window_id) => ()
+ 
+     set_always_on_top(i32 window_id, bool always_on_top) => ()
++
++    // SDE: set the output scale as v120 (the shim writes [Output] DefaultScale).
++    // Keep new methods LAST: MessageID is positional, so a mid-file insert shifts
++    // ids and breaks already-built apps ("Failed to parse IPC message").
++    set_output_scale(i32 scale_v120) =|
+ }

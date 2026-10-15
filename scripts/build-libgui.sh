@@ -80,21 +80,29 @@ fi
 applied_count=0
 already_count=0
 unverified_count=0
+unverified_names=""
 for patch in "$PROJECT_ROOT"/patches/*.patch; do
     name="$(basename "$patch")"
     if git -C "$SERENITY_SRC" apply --recount --reverse --check "$patch" >/dev/null 2>&1; then
         echo "==> $name already applied"
         already_count=$((already_count + 1))
-    elif git -C "$SERENITY_SRC" apply --recount --check "$patch" >/dev/null 2>&1; then
+    elif git -C "$SERENITY_SRC" apply --recount -C1 --check "$patch" >/dev/null 2>&1; then
         echo "==> Applying $name"
-        git -C "$SERENITY_SRC" apply --recount "$patch"
+        git -C "$SERENITY_SRC" apply --recount -C1 "$patch"
         applied_count=$((applied_count + 1))
     else
         echo "==> $name assumed applied (overlapping context; unverifiable)"
         unverified_count=$((unverified_count + 1))
+        unverified_names="$unverified_names $name"
     fi
 done
 echo "==> patches: $applied_count applied, $already_count already applied, $unverified_count assumed"
+if [[ -n "$unverified_names" ]]; then
+    # Naming them matters: a patch the loop cannot verify may simply not be in
+    # effect, and the failure it causes appears much later and elsewhere. Seeing the
+    # names in one build beats discovering them one 40-minute build at a time.
+    echo "    not verified (they may not be applied at all):$unverified_names"
+fi
 # Say more only when it is actionable: a checkout that differs from the pin is
 # the case where "unassumable" patches mean something.
 if [[ "$unverified_count" -gt 0 ]]; then
