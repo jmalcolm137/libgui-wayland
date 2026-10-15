@@ -1,0 +1,11 @@
+diff --git a/Meta/Lagom/CMakeLists.txt b/Meta/Lagom/CMakeLists.txt
+--- a/Meta/Lagom/CMakeLists.txt
++++ b/Meta/Lagom/CMakeLists.txt
+@@ -516,6 +516,7 @@
+         Cards
+         Chess
+         CMake
++        CodeComprehension
+         Coredump
+         Debug
+         EDID        Keyboard
