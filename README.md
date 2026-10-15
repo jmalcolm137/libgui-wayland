@@ -1,9 +1,7 @@
 # libgui-wayland
 
 Run **unmodified SerenityOS `LibGUI`/`LibGfx` applications** (e.g. Calculator, PDFViewer)
-natively on **Wayland** — no SerenityOS WindowServer, no X server, and no XWayland. LibWM
-links none of `xlib-wayland`; we reuse only that project's pure-Wayland headless compositor as
-a test harness.
+natively on **Wayland** — no SerenityOS WindowServer, no X server, and no XWayland.
 
 The shim is called **LibWM**. It sits between `LibGUI`'s WindowServer IPC protocol and
 `libwayland-client`: the application side is Serenity, the system side is Wayland.
