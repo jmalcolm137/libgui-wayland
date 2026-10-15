@@ -387,6 +387,8 @@ void WaylandClient::on_host_settings(StringView blob)
         m_host_settings.set(line.substring_view(0, *separator).to_byte_string(), line.substring_view(*separator + 1).to_byte_string());
     }
     dbgln("LibWM: host settings: {} entries", m_host_settings.size());
+    if (on_host_settings_updated)
+        on_host_settings_updated();
 }
 
 ByteString WaylandClient::host_setting(StringView key, StringView fallback) const

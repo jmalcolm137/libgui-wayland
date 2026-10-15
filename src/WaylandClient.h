@@ -204,6 +204,16 @@ public:
     // desktop's configuration files.
     ByteString host_setting(StringView key, StringView fallback = {}) const;
     void set_host_setting(StringView key, StringView value);
+
+    // Called after the compositor's host settings arrive, or change.
+    //
+    // They can be the *only* source of a value. The system theme, for instance,
+    // falls back to the `theme.path`/`theme.name` settings when no live broker file
+    // exists -- which is the normal case for a client started after the session
+    // began -- and the settings are delivered over IPC, i.e. after the constructor
+    // that reads them has already run. Anything derived from a host setting has to
+    // be recomputed here, or it keeps the value it read when there was nothing yet.
+    Function<void()> on_host_settings_updated;
     // The desktop's wallpaper, sent as raw pixels over serenity-window.
     Gfx::Bitmap* host_wallpaper() { return m_host_wallpaper.ptr(); }
     void set_host_wallpaper(Gfx::Bitmap* bitmap);

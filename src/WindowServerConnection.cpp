@@ -859,9 +859,12 @@ void WindowServerConnection::watch_theme()
 void WindowServerConnection::apply_theme_from_broker()
 {
     ByteString host_theme;
+    bool from_broker = false;
     if (auto file = Core::File::open(theme_broker_path(), Core::File::OpenMode::Read); !file.is_error()) {
-        if (auto contents = file.value()->read_until_eof(); !contents.is_error())
+        if (auto contents = file.value()->read_until_eof(); !contents.is_error()) {
             host_theme = StringView { contents.value() }.trim_whitespace().to_byte_string();
+            from_broker = !host_theme.is_empty();
+        }
     }
     // Fall back to the persisted theme ([Theme]) when there is no live broker value.
     if (host_theme.is_empty())
@@ -871,6 +874,11 @@ void WindowServerConnection::apply_theme_from_broker()
     if (auto buffer = Gfx::load_system_theme(host_theme, {}); !buffer.is_error()) {
         auto name = WaylandClient::the().host_setting("theme.name"sv, ""sv);
         m_theme_name = name.is_empty() ? ByteString { LexicalPath(host_theme).title() } : name;
+        // Say which theme this client settled on and where it heard about it: an
+        // empty theme name is what made Display Settings' Themes page show a theme
+        // other than the running one, and it was invisible from the outside.
+        dbgln("LibWM: system theme is '{}' (from {})", m_theme_name,
+            from_broker ? "the broker"sv : "the host settings"sv);
         async_update_system_theme(buffer.value());
     }
 }

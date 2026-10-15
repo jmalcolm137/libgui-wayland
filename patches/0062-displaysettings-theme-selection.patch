@@ -1,0 +1,25 @@
+--- a/Userland/Applications/DisplaySettings/ThemesSettingsWidget.cpp
++++ b/Userland/Applications/DisplaySettings/ThemesSettingsWidget.cpp
+@@ -36,7 +36,7 @@
+ {
+     m_themes = TRY(Gfx::list_installed_system_themes());
+ 
+-    size_t current_theme_index;
++    Optional<size_t> current_theme_index;
+     auto current_theme_name = GUI::ConnectionToWindowServer::the().get_system_theme();
+     TRY(m_theme_names.try_ensure_capacity(m_themes.size()));
+     for (auto& theme_meta : m_themes) {
+@@ -67,7 +67,12 @@
+         }
+         set_modified(true);
+     };
+-    m_themes_combo->set_selected_index(current_theme_index, GUI::AllowCallback::No);
++    // Only select when the running theme was actually found. `current_theme_index` used
++    // to be uninitialised, so a client that could not name the running theme picked an
++    // arbitrary entry rather than showing nothing -- which is how this was noticed:
++    // Themes displayed a theme other than the one in use.
++    if (current_theme_index.has_value())
++        m_themes_combo->set_selected_index(*current_theme_index, GUI::AllowCallback::No);
+ 
+     auto mouse_settings_icon = TRY(Gfx::Bitmap::load_from_uri("resource://icons/16x16/app-mouse.png"sv));
+ 

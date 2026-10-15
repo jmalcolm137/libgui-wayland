@@ -21,6 +21,7 @@
 #include <WindowServer/WindowClientEndpoint.h>
 #include <WindowServer/WindowServerEndpoint.h>
 
+#include "WaylandClient.h"
 #include "WindowServerDefaultStub.h"
 #include "MenuController.h"
 
@@ -51,6 +52,12 @@ private:
         : IPC::Connection<WindowServerEndpoint, WindowClientEndpoint>(*this, move(socket))
         , WindowClientEndpoint::Proxy<WindowServerEndpoint>(*this, {})
     {
+        // The current theme may be knowable only from the host settings -- there is no
+        // live broker file unless a theme was changed this session -- and the settings
+        // are delivered after this constructor runs. Recompute when they arrive.
+        WaylandClient::the().on_host_settings_updated = [this] {
+            apply_theme_from_broker();
+        };
         watch_theme();
         watch_fonts();
     }
