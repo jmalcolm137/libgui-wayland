@@ -1,0 +1,157 @@
+diff --git a/Userland/Libraries/LibGUI/ConnectionToWindowManagerServer.cpp b/Userland/Libraries/LibGUI/ConnectionToWindowManagerServer.cpp
+index 2e61875..8152064 100644
+--- a/Userland/Libraries/LibGUI/ConnectionToWindowManagerServer.cpp
++++ b/Userland/Libraries/LibGUI/ConnectionToWindowManagerServer.cpp
+@@ -22,10 +22,10 @@ ConnectionToWindowManagerServer& ConnectionToWindowManagerServer::the()
+ 
+ void ConnectionToWindowManagerServer::window_state_changed(i32 wm_id, i32 client_id, i32 window_id,
+     u32 workspace_row, u32 workspace_column, bool is_active, bool is_blocked, bool is_minimized, bool is_frameless,
+-    i32 window_type, ByteString const& title, Gfx::IntRect const& rect, Optional<i32> const& progress)
++    i32 window_type, ByteString const& title, Gfx::IntRect const& rect, Optional<i32> const& progress, ByteString const& app_id)
+ {
+     if (auto* window = Window::from_window_id(wm_id))
+-        Core::EventLoop::current().post_event(*window, make<WMWindowStateChangedEvent>(client_id, window_id, title, rect, workspace_row, workspace_column, is_active, is_blocked, static_cast<WindowType>(window_type), is_minimized, is_frameless, progress));
++        Core::EventLoop::current().post_event(*window, make<WMWindowStateChangedEvent>(client_id, window_id, title, rect, workspace_row, workspace_column, is_active, is_blocked, static_cast<WindowType>(window_type), is_minimized, is_frameless, progress, app_id));
+ }
+ 
+ void ConnectionToWindowManagerServer::applet_area_size_changed(i32 wm_id, Gfx::IntSize size)
+@@ -34,6 +34,12 @@ void ConnectionToWindowManagerServer::applet_area_size_changed(i32 wm_id, Gfx::I
+         Core::EventLoop::current().post_event(*window, make<WMAppletAreaSizeChangedEvent>(size));
+ }
+ 
++void ConnectionToWindowManagerServer::taskbar_group_windows(i32 wm_id, bool group_windows)
++{
++    if (auto* window = Window::from_window_id(wm_id))
++        Core::EventLoop::current().post_event(*window, make<WMTaskbarGroupWindowsChangedEvent>(group_windows));
++}
++
+ void ConnectionToWindowManagerServer::window_rect_changed(i32 wm_id, i32 client_id, i32 window_id, Gfx::IntRect const& rect)
+ {
+     if (auto* window = Window::from_window_id(wm_id))
+diff --git a/Userland/Libraries/LibGUI/ConnectionToWindowManagerServer.h b/Userland/Libraries/LibGUI/ConnectionToWindowManagerServer.h
+index 143a558..936fbea 100644
+--- a/Userland/Libraries/LibGUI/ConnectionToWindowManagerServer.h
++++ b/Userland/Libraries/LibGUI/ConnectionToWindowManagerServer.h
+@@ -29,7 +29,8 @@ private:
+     }
+ 
+     virtual void window_removed(i32, i32, i32) override;
+-    virtual void window_state_changed(i32, i32, i32, u32, u32, bool, bool, bool, bool, i32, ByteString const&, Gfx::IntRect const&, Optional<i32> const&) override;
++    virtual void window_state_changed(i32, i32, i32, u32, u32, bool, bool, bool, bool, i32, ByteString const&, Gfx::IntRect const&, Optional<i32> const&, ByteString const&) override;
++    virtual void taskbar_group_windows(i32, bool) override;
+     virtual void window_icon_bitmap_changed(i32, i32, i32, Gfx::ShareableBitmap const&) override;
+     virtual void window_rect_changed(i32, i32, i32, Gfx::IntRect const&) override;
+     virtual void applet_area_size_changed(i32, Gfx::IntSize) override;
+diff --git a/Userland/Libraries/LibGUI/Event.h b/Userland/Libraries/LibGUI/Event.h
+index 0b8167a..f3a059c 100644
+--- a/Userland/Libraries/LibGUI/Event.h
++++ b/Userland/Libraries/LibGUI/Event.h
+@@ -76,6 +76,7 @@ public:
+         WM_WorkspaceChanged,
+         WM_KeymapChanged,
+         WM_AddToQuickLaunch,
++        WM_TaskbarGroupWindowsChanged,
+         __End_WM_Events,
+     };
+ 
+@@ -167,9 +168,25 @@ public:
+     }
+ };
+ 
++class WMTaskbarGroupWindowsChangedEvent : public WMEvent {
++public:
++    explicit WMTaskbarGroupWindowsChangedEvent(bool group_windows)
++        : WMEvent(Event::Type::WM_TaskbarGroupWindowsChanged, 0, 0)
++        , m_group_windows(group_windows)
++    {
++    }
++
++    // Whether the Taskbar should group a window's button with the application's
++    // other windows (the compositor's [Taskbar] GroupWindows setting).
++    bool group_windows() const { return m_group_windows; }
++
++private:
++    bool m_group_windows { false };
++};
++
+ class WMWindowStateChangedEvent : public WMEvent {
+ public:
+-    WMWindowStateChangedEvent(int client_id, int window_id, StringView title, Gfx::IntRect const& rect, unsigned workspace_row, unsigned workspace_column, bool is_active, bool is_blocked, WindowType window_type, bool is_minimized, bool is_frameless, Optional<int> progress)
++    WMWindowStateChangedEvent(int client_id, int window_id, StringView title, Gfx::IntRect const& rect, unsigned workspace_row, unsigned workspace_column, bool is_active, bool is_blocked, WindowType window_type, bool is_minimized, bool is_frameless, Optional<int> progress, ByteString const& app_id)
+         : WMEvent(Event::Type::WM_WindowStateChanged, client_id, window_id)
+         , m_title(title)
+         , m_rect(rect)
+@@ -181,6 +198,7 @@ public:
+         , m_minimized(is_minimized)
+         , m_frameless(is_frameless)
+         , m_progress(progress)
++        , m_app_id(app_id)
+     {
+     }
+ 
+@@ -194,6 +212,9 @@ public:
+     Optional<int> progress() const { return m_progress; }
+     unsigned workspace_row() const { return m_workspace_row; }
+     unsigned workspace_column() const { return m_workspace_column; }
++    // The application id (xdg app_id, or the X11 WM_CLASS), so the Taskbar can
++    // group a window's button with the application's other windows.
++    ByteString const& app_id() const { return m_app_id; }
+ 
+ private:
+     ByteString m_title;
+@@ -206,6 +227,7 @@ private:
+     bool m_minimized;
+     bool m_frameless;
+     Optional<int> m_progress;
++    ByteString m_app_id;
+ };
+ 
+ class WMWindowRectChangedEvent : public WMEvent {
+diff --git a/Userland/Services/Taskbar/TaskbarWindow.cpp b/Userland/Services/Taskbar/TaskbarWindow.cpp
+index 82fc0b5..4775cc2 100644
+--- a/Userland/Services/Taskbar/TaskbarWindow.cpp
++++ b/Userland/Services/Taskbar/TaskbarWindow.cpp
+@@ -378,6 +378,13 @@ void TaskbarWindow::wm_event(GUI::WMEvent& event)
+         update_applet_area();
+         break;
+     }
++    case GUI::Event::WM_TaskbarGroupWindowsChanged: {
++        auto& group_event = static_cast<GUI::WMTaskbarGroupWindowsChangedEvent&>(event);
++        // The compositor's [Taskbar] GroupWindows setting. The buttons themselves
++        // are not grouped yet (docs/20 item 3); this is where that starts.
++        dbgln("WM_TaskbarGroupWindowsChanged: group_windows={}", group_event.group_windows());
++        break;
++    }
+     case GUI::Event::WM_SuperKeyPressed: {
+         if (!m_system_menu)
+             break;
+diff --git a/Userland/Services/WindowServer/WindowManager.cpp b/Userland/Services/WindowServer/WindowManager.cpp
+index e678c8c..0eaab77 100644
+--- a/Userland/Services/WindowServer/WindowManager.cpp
++++ b/Userland/Services/WindowServer/WindowManager.cpp
+@@ -464,7 +464,7 @@ void WindowManager::tell_wm_about_window(WMConnectionFromClient& conn, Window& w
+     });
+ 
+     auto& window_stack = is_stationary_window_type(modeless->type()) ? current_window_stack() : modeless->window_stack();
+-    conn.async_window_state_changed(conn.window_id(), modeless->client_id(), modeless->window_id(), window_stack.row(), window_stack.column(), is_active, is_blocked, modeless->is_minimized(), modeless->is_frameless(), (i32)modeless->type(), modeless->computed_title(), modeless->rect(), modeless->progress());
++    conn.async_window_state_changed(conn.window_id(), modeless->client_id(), modeless->window_id(), window_stack.row(), window_stack.column(), is_active, is_blocked, modeless->is_minimized(), modeless->is_frameless(), (i32)modeless->type(), modeless->computed_title(), modeless->rect(), modeless->progress(), ByteString {});
+ }
+ 
+ void WindowManager::tell_wm_about_window_rect(WMConnectionFromClient& conn, Window& window)
+diff --git a/Userland/Services/WindowServer/WindowManagerClient.ipc b/Userland/Services/WindowServer/WindowManagerClient.ipc
+index cd092d5..38969c0 100644
+--- a/Userland/Services/WindowServer/WindowManagerClient.ipc
++++ b/Userland/Services/WindowServer/WindowManagerClient.ipc
+@@ -3,10 +3,11 @@
+ endpoint WindowManagerClient
+ {
+     window_removed(i32 wm_id, i32 client_id, i32 window_id) =|
+-    window_state_changed(i32 wm_id, i32 client_id, i32 window_id, u32 workspace_row, u32 workspace_column, bool is_active, bool is_blocking, bool is_minimized, bool is_frameless, i32 window_type, [UTF8] ByteString title, Gfx::IntRect rect, Optional<i32> progress) =|
++    window_state_changed(i32 wm_id, i32 client_id, i32 window_id, u32 workspace_row, u32 workspace_column, bool is_active, bool is_blocking, bool is_minimized, bool is_frameless, i32 window_type, [UTF8] ByteString title, Gfx::IntRect rect, Optional<i32> progress, [UTF8] ByteString app_id) =|
+     window_icon_bitmap_changed(i32 wm_id, i32 client_id, i32 window_id, Gfx::ShareableBitmap bitmap) =|
+     window_rect_changed(i32 wm_id, i32 client_id, i32 window_id, Gfx::IntRect rect) =|
+     applet_area_size_changed(i32 wm_id, Gfx::IntSize size) =|
++    taskbar_group_windows(i32 wm_id, bool group_windows) =|
+     super_key_pressed(i32 wm_id) =|
+     super_space_key_pressed(i32 wm_id) =|
+     super_d_key_pressed(i32 wm_id) =|
