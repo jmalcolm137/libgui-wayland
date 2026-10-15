@@ -151,7 +151,14 @@ private:
     // directory: LIBWM_APP_BIN_DIR (generic) or SDE_APP_BIN_DIR (its older name).
     static ByteString port_binary_path(StringView executable)
     {
-        auto name = LexicalPath(executable).basename();
+        // LexicalPath::basename() returns a StringView *into* the LexicalPath, so the
+        // owner must outlive it: `auto name = LexicalPath(executable).basename();`
+        // leaves `name` pointing at a destroyed temporary and the path built from it
+        // is garbage. That is not theoretical — it made an executable file URL
+        // resolve to a nonsense path, fail stat(), and fall through to the TextEditor
+        // handler, so the desktop's "Display Settings" entry never launched.
+        LexicalPath const lexical_path { executable.to_byte_string() };
+        auto name = lexical_path.basename();
         ByteString app_bin_dir;
         for (auto const* var : { "LIBWM_APP_BIN_DIR", "SDE_APP_BIN_DIR" }) {
             if (auto const* dir = getenv(var); dir && *dir) {
@@ -172,7 +179,8 @@ private:
 
     static ByteString details_for(ByteString const& executable)
     {
-        auto name = LexicalPath(executable).basename();
+        LexicalPath const lexical_path { executable };
+        auto name = lexical_path.basename();
         // No "type" field: the client treats the default (non-Application) type
         // as "open this file with the program", passing the path as an argument.
         return ByteString::formatted(R"({{"executable":"{}","name":"{}","arguments":[]}})", executable, name);

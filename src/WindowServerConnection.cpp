@@ -848,7 +848,7 @@ void WindowServerConnection::watch_theme()
     };
     // Watch the runtime directory so creation of the file is seen too, and the
     // file itself (a write is IN_MODIFY, which a directory watch does not report).
-    if (auto directory = LexicalPath(theme_broker_path()).dirname(); !directory.is_empty())
+    if (auto directory = LexicalPath(theme_broker_path()).dirname().to_byte_string(); !directory.is_empty())
         (void)m_theme_watcher->add_watch(directory, Core::FileWatcherEvent::Type::ChildCreated);
     auto path = theme_broker_path();
     if (Core::File::open(path, Core::File::OpenMode::Read).is_error())
@@ -888,7 +888,7 @@ void WindowServerConnection::watch_fonts()
             return;
         apply_fonts_from_broker();
     };
-    if (auto directory = LexicalPath(fonts_broker_path()).dirname(); !directory.is_empty())
+    if (auto directory = LexicalPath(fonts_broker_path()).dirname().to_byte_string(); !directory.is_empty())
         (void)m_fonts_watcher->add_watch(directory, Core::FileWatcherEvent::Type::ChildCreated);
     auto path = fonts_broker_path();
     if (Core::File::open(path, Core::File::OpenMode::Read).is_error())

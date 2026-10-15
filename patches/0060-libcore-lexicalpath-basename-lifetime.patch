@@ -1,0 +1,15 @@
+--- a/Userland/Libraries/LibCore/Process.cpp
++++ b/Userland/Libraries/LibCore/Process.cpp
+@@ -153,7 +153,11 @@
+         return path.to_byte_string();
+ 
+     auto as_byte_string = path.to_byte_string();
+-    auto basename = LexicalPath(path).basename();
++    // LexicalPath::basename() returns a StringView into the LexicalPath, so keep the
++    // owner alive: a temporary leaves `basename` dangling and every path built from
++    // it garbage (the SDE_SESSION_BIN_DIR / SDE_APP_BIN_DIR lookups below then miss).
++    LexicalPath const lexical_path { as_byte_string };
++    auto basename = lexical_path.basename();
+ 
+     // A session may shadow /bin with its own helpers: SDE provides sde-power
+     // wrappers for /bin/shutdown, /bin/reboot and /bin/logout in
