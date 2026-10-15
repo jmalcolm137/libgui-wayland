@@ -1,15 +1,3 @@
-diff --git a/Meta/Lagom/CMakeLists.txt b/Meta/Lagom/CMakeLists.txt
---- a/Meta/Lagom/CMakeLists.txt
-+++ b/Meta/Lagom/CMakeLists.txt
-@@ -625,7 +625,10 @@
-         add_subdirectory("${SERENITY_PROJECT_ROOT}/../src" "${CMAKE_CURRENT_BINARY_DIR}/libwm")
- 
- 
-+        # libgui-wayland: EGLGPU (a Mesa/EGL-backed GPU::Device with a LibSoftGPU
-+        # fallback; loaded at runtime by LibGPU's driver).
-+        add_subdirectory("${SERENITY_PROJECT_ROOT}/../libeglgpu" "${CMAKE_CURRENT_BINARY_DIR}/libeglgpu")
-         # ------------------------------------------------------------------
-         # libgui-wayland: the SerenityOS applications we support on the host,
 diff --git a/Userland/Libraries/LibGPU/Driver.cpp b/Userland/Libraries/LibGPU/Driver.cpp
 --- a/Userland/Libraries/LibGPU/Driver.cpp
 +++ b/Userland/Libraries/LibGPU/Driver.cpp
