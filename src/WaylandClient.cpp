@@ -1211,6 +1211,16 @@ void WaylandClient::on_keyboard_key(u32 key, bool pressed)
     u32 code_point = xkb_state_key_get_utf32(m_xkb_state, code);
     u32 key_code = static_cast<u32>(serenity_key_code_from_evdev(key));
 
+    // Serenity's WindowServer turned Ctrl+<letter> into the control character
+    // itself, so a client sees Ctrl-C as code point 3 rather than 'c' with a ctrl
+    // flag; LibVT relies on that, and so does every terminal program that expects a
+    // SIGINT. A Wayland keysym gives the plain letter, so do the conversion here
+    // rather than depend on xkbcommon applying it (whether it does is a property of
+    // the keymap, not something to rely on). Already-control characters are left
+    // alone, so this cannot double-convert.
+    if ((current_modifiers() & Mod_Ctrl) && code_point >= '@' && code_point <= '_')
+        code_point &= 0x1f;
+
     if (u32 bit = modifier_bit_for_evdev(key); bit != 0) {
         if (pressed)
             m_modifiers |= bit;

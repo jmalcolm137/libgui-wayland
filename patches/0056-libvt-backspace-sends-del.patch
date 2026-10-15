@@ -1,0 +1,23 @@
+diff --git a/Userland/Libraries/LibVT/Terminal.cpp b/Userland/Libraries/LibVT/Terminal.cpp
+index 7836b0d..6a86560 100644
+--- a/Userland/Libraries/LibVT/Terminal.cpp
++++ b/Userland/Libraries/LibVT/Terminal.cpp
+@@ -1584,6 +1584,18 @@ void Terminal::handle_key_press(KeyCode key, u32 code_point, u8 flags)
+         emit_tilde_with_modifier(6);
+         return;
+     case KeyCode::Key_Backspace:
++        if (!ctrl) {
++            // A host line discipline expects ^? (DEL) for backspace: that is what
++            // `stty` reports as `erase` on the host this port runs on, and what
++            // full-screen programs that read bytes themselves (yay, htop in raw
++            // mode, vim) recognise. Emitting 0x08 instead makes backspace do
++            // nothing in all of them.
++            //
++            // Serenity's own line editor accepts both (LibLine/Editor.cpp registers
++            // 0x7f and '\b'), so nothing in-tree loses anything.
++            emit_string("\x7f"sv);
++            return;
++        }
+         if (ctrl) {
+             // This is an extension that allows Editor.cpp to delete whole words when
+             // Ctrl+Backspace is pressed. Ctrl cannot be transmitted without a CSI, and
