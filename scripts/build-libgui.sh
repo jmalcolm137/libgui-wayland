@@ -91,9 +91,19 @@ cmake -S "$SERENITY_SRC/Meta/Lagom" -B "$BUILD_DIR" -GNinja \
     -DCMAKE_BUILD_TYPE=Release
 
 echo "==> Building: ${TARGETS[*]}"
-if [[ "${TWO_PHASES:-0}" -eq 1 ]]; then
-    ninja -C "$BUILD_DIR" -j"$JOBS" LibGfx LibGUI "${GENERATED[@]}"
-    ninja -C "$BUILD_DIR" -j"$JOBS" windowserver eglgpu
+# The shim goes last, whatever was asked for: it is the one target whose headers
+# include generated endpoint headers without declaring they are inputs.
+PHASE_ONE=()
+PHASE_TWO=()
+for target in "${TARGETS[@]}"; do
+    case "$target" in
+        windowserver | eglgpu) PHASE_TWO+=("$target") ;;
+        *) PHASE_ONE+=("$target") ;;
+    esac
+done
+if [[ "${#PHASE_TWO[@]}" -gt 0 ]]; then
+    [[ "${#PHASE_ONE[@]}" -gt 0 ]] && ninja -C "$BUILD_DIR" -j"$JOBS" "${PHASE_ONE[@]}" "${GENERATED[@]}"
+    ninja -C "$BUILD_DIR" -j"$JOBS" "${PHASE_TWO[@]}"
 else
     ninja -C "$BUILD_DIR" -j"$JOBS" "${TARGETS[@]}"
 fi
