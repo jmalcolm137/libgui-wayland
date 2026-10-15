@@ -96,12 +96,24 @@ for patch in "$PROJECT_ROOT"/patches/*.patch; do
         unverified_names="$unverified_names $name"
     fi
 done
-echo "==> patches: $applied_count applied, $already_count already applied, $unverified_count assumed"
+echo "==> patches: $applied_count applied, $already_count already applied, $unverified_count unverifiable"
 if [[ -n "$unverified_names" ]]; then
-    # Naming them matters: a patch the loop cannot verify may simply not be in
-    # effect, and the failure it causes appears much later and elsewhere. Seeing the
-    # names in one build beats discovering them one 40-minute build at a time.
-    echo "    not verified (they may not be applied at all):$unverified_names"
+    # A patch the loop cannot verify may simply not be in effect, and the failure it
+    # causes appears much later and elsewhere -- as a test failure with no obvious
+    # cause. Naming them in one build beats discovering them one 40-minute build at a
+    # time, and *stopping* beats both: this branch is how three patches (0017, 0042,
+    # 0045) silently went missing from every CI image while the developer tree had
+    # them, so `/res//color-schemes` worked locally and not in CI. There is no
+    # "assume": refresh the patch against the current tree, or the build does not
+    # proceed.
+    echo "    unverifiable (they would not be applied):$unverified_names" >&2
+    echo "    A patch that neither applies nor reverse-applies no longer matches the tree." >&2
+    echo "    Refresh it (see docs/26-ci.md): regenerate the hunks against the current" >&2
+    echo "    revision, then the patch set and the tree agree again." >&2
+    if [[ "${ALLOW_UNVERIFIED_PATCHES:-0}" != 1 ]]; then
+        exit 1
+    fi
+    echo "    ALLOW_UNVERIFIED_PATCHES=1: continuing with them unapplied." >&2
 fi
 # Say more only when it is actionable: a checkout that differs from the pin is
 # the case where "unassumable" patches mean something.
