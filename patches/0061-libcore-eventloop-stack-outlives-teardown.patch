@@ -1,0 +1,37 @@
+--- a/Userland/Libraries/LibCore/EventLoop.cpp
++++ b/Userland/Libraries/LibCore/EventLoop.cpp
+@@ -17,17 +17,28 @@
+ namespace Core {
+ 
+ namespace {
+-OwnPtr<Vector<EventLoop&>>& event_loop_stack_uninitialized()
++// The stack of event loops, one per thread.
++//
++// Deliberately a leaked heap object behind a thread_local *pointer*. A thread_local
++// with a non-trivial destructor is destroyed during exit(), *before* the static
++// destructors run; a static destructor that destroys a window can defer work (see
++// EventLoop::current()), and that then found this stack already destroyed and
++// dereferenced a null pointer — the segfault that dumped core for a whole session
++// whenever the compositor restarted. A pointer's own destructor is trivial and what
++// it points at is never freed, so the stack is still there, empty, for the last
++// caller.
++thread_local Vector<EventLoop&>* s_event_loop_stack = nullptr;
++
++Vector<EventLoop&>*& event_loop_stack_uninitialized()
+ {
+-    thread_local OwnPtr<Vector<EventLoop&>> s_event_loop_stack = nullptr;
+     return s_event_loop_stack;
+ }
++
+ Vector<EventLoop&>& event_loop_stack()
+ {
+-    auto& the_stack = event_loop_stack_uninitialized();
+-    if (the_stack == nullptr)
+-        the_stack = make<Vector<EventLoop&>>();
+-    return *the_stack;
++    if (s_event_loop_stack == nullptr)
++        s_event_loop_stack = new Vector<EventLoop&>();
++    return *s_event_loop_stack;
+ }
+ }
+ 
