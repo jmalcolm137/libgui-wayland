@@ -20,6 +20,8 @@
 #include <LibGfx/ShareableBitmap.h>
 #include <LibGfx/Size.h>
 
+#include <pthread.h>
+
 struct wl_buffer;
 struct wl_callback;
 struct wl_compositor;
@@ -303,6 +305,23 @@ private:
     WaylandClient() = default;
 
     struct WindowSurface {
+        // The Wayland display is dispatched on the main thread, but the LibWM
+        // server thread also calls into this surface (a client's paint request and
+        // backing-store handover arrive over its WindowServer connection). Both
+        // sides mutate the same damage/pending/composed state, so every entry
+        // point that touches a surface holds this lock. Without it, heavy output
+        // (the Terminal) races append-against-move/clear and loses damage regions
+        // or corrupts the heap.
+        pthread_mutex_t mutex { };
+        WindowSurface()
+        {
+            pthread_mutexattr_t attributes;
+            pthread_mutexattr_init(&attributes);
+            pthread_mutexattr_settype(&attributes, PTHREAD_MUTEX_RECURSIVE);
+            pthread_mutex_init(&mutex, &attributes);
+            pthread_mutexattr_destroy(&attributes);
+        }
+        ~WindowSurface() { pthread_mutex_destroy(&mutex); }
         i32 window_id { -1 };
         wl_surface* surface { nullptr };
         xdg_surface* xdg_surface_object { nullptr };

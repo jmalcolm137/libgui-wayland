@@ -32,6 +32,27 @@
 
 namespace LibWM {
 
+// Serialize access to a WindowSurface. The main thread dispatches Wayland
+// (frame callbacks, configures) while the LibWM server thread handles the
+// client's paint requests and backing-store handovers; both touch the same
+// damage/pending/composed state. Every entry point that does so holds this lock
+// for the whole operation. It is recursive because a configure handler can call
+// back into the WindowServer (which sends a paint and records damage for the same
+// surface) while it is already holding the lock.
+namespace {
+struct SurfaceLocker {
+    explicit SurfaceLocker(pthread_mutex_t& mutex)
+        : m_mutex(mutex)
+    {
+        pthread_mutex_lock(&m_mutex);
+    }
+    ~SurfaceLocker() { pthread_mutex_unlock(&m_mutex); }
+
+private:
+    pthread_mutex_t& m_mutex;
+};
+}
+
 // The application id reported to the compositor (`xdg_toplevel.app_id`): the
 // executable's base name, like an X11 WM_CLASS. The compositor uses it to group a
 // window's Taskbar button with the other windows of the same application. It is
@@ -1359,6 +1380,7 @@ void WaylandClient::on_layer_configure(zwlr_layer_surface_v1* layer_surface, Gfx
         auto& w = *it.value;
         if (w.layer_surface != layer_surface)
             continue;
+        SurfaceLocker locker(w.mutex);
         dbgln("LibWM/Wayland: layer configure {}x{}", size.width(), size.height());
         // Always deliver the first configure: the client's Window may still be at
         // its requested size (the Desktop is created zero-sized and sized by the
@@ -1443,6 +1465,7 @@ void WaylandClient::on_toplevel_position(serenity_toplevel* resource, int32_t x,
 {
     for (auto const& it : m_windows) {
         if (it.value->chrome == resource) {
+            SurfaceLocker locker(it.value->mutex);
             // Layer surfaces (applets) are laid out by the compositor, so their
             // origin comes from here, not from their anchored corner.
             if (it.value->is_layer)
@@ -1862,6 +1885,7 @@ void WaylandClient::bind_bitmap(wl_surface* surface, Core::AnonymousBuffer const
 void WaylandClient::set_window_inset(i32 window_id, int inset, Function<void(Gfx::Bitmap&, Gfx::IntRect)> draw)
 {
     if (auto* window_surface = find(window_id)) {
+        SurfaceLocker locker(window_surface->mutex);
         window_surface->inset = inset;
         window_surface->draw_inset = move(draw);
         // The menubar strip must be redrawn (and re-damaged) on the next present.
@@ -1881,7 +1905,10 @@ void WaylandClient::set_window_inset(i32 window_id, int inset, Function<void(Gfx
 void WaylandClient::add_window_damage(i32 window_id, Vector<Gfx::IntRect> const& rects)
 {
     auto* window_surface = find(window_id);
-    if (!window_surface || window_surface->damage_full)
+    if (!window_surface)
+        return;
+    SurfaceLocker locker(window_surface->mutex);
+    if (window_surface->damage_full)
         return;
     // Coalesce: too many rects (or a window that never presents) collapses to a
     // full repaint rather than growing without bound.
@@ -2053,6 +2080,7 @@ void WaylandClient::on_surface_configured(xdg_surface* surface)
         auto& w = *it.value;
         if (w.xdg_surface_object != surface)
             continue;
+        SurfaceLocker locker(w.mutex);
         w.toplevel_configured = true;
         if (w.has_pending && w.pending_fd >= 0) {
             int fd = w.pending_fd;
@@ -2409,6 +2437,15 @@ void WaylandClient::destroy_window(i32 window_id)
     if (it == m_windows.end())
         return;
     auto& window_surface = *it->value;
+    SurfaceLocker locker(window_surface.mutex);
+    if (window_surface.frame_callback)
+        wl_callback_destroy(window_surface.frame_callback);
+    window_surface.frame_callback = nullptr;
+    window_surface.frame_in_flight = false;
+    if (window_surface.pending_fd >= 0)
+        ::close(window_surface.pending_fd);
+    window_surface.pending_fd = -1;
+    window_surface.has_pending = false;
     for (auto& record : window_surface.buffers) {
         if (record->buffer)
             wl_buffer_destroy(record->buffer);
@@ -2454,6 +2491,7 @@ void WaylandClient::set_window_rect(i32 window_id, Gfx::IntSize size)
     auto* window_surface = find(window_id);
     if (!window_surface || !window_surface->is_layer || !window_surface->layer_surface)
         return;
+    SurfaceLocker locker(window_surface->mutex);
 
     // Layer surfaces are positioned by the compositor; only the size is ours to
     // request. Panels stretch across their anchored edges, so only the height
@@ -2566,6 +2604,7 @@ void WaylandClient::attach_and_commit(i32 window_id, int client_fd, Gfx::IntSize
     auto* window_surface = find(window_id);
     if (!window_surface || !m_shm || size.is_empty())
         return;
+    SurfaceLocker locker(window_surface->mutex);
     if (visible_size.is_empty())
         visible_size = size;
 
@@ -2847,6 +2886,7 @@ void WaylandClient::on_frame_done(wl_callback* callback)
 {
     for (auto const& it : m_windows) {
         auto& window_surface = *it.value;
+        SurfaceLocker locker(window_surface.mutex);
         if (window_surface.frame_callback != callback)
             continue;
         wl_callback_destroy(callback);
