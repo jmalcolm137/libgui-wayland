@@ -624,6 +624,31 @@ Messages::WindowServer::GetColorUnderCursorResponse WindowServerConnection::get_
     return Messages::WindowServer::GetColorUnderCursorResponse { Optional<Gfx::Color> { } };
 }
 
+namespace {
+// R5 accessibility (docs/29): the Magnifier's capture. Ask for the region and answer
+// with the most recent one the compositor pushed; the first ask returns empty and
+// the next display-link tick paints it (one refresh interval of latency).
+Gfx::ShareableBitmap capture_around(Gfx::IntSize size, Gfx::IntPoint location)
+{
+    auto& wayland = WaylandClient::the();
+    Gfx::IntRect const region { { location.x() - size.width() / 2, location.y() - size.height() / 2 }, size };
+    wayland.request_capture(region);
+    if (auto* bitmap = wayland.captured_bitmap())
+        return bitmap->to_shareable_bitmap();
+    return Gfx::ShareableBitmap { };
+}
+}
+
+Messages::WindowServer::GetScreenBitmapAroundCursorResponse WindowServerConnection::get_screen_bitmap_around_cursor(Gfx::IntSize size)
+{
+    return capture_around(size, WaylandClient::the().global_pointer_position());
+}
+
+Messages::WindowServer::GetScreenBitmapAroundLocationResponse WindowServerConnection::get_screen_bitmap_around_location(Gfx::IntSize size, Gfx::IntPoint location)
+{
+    return capture_around(size, location);
+}
+
 Messages::WindowServer::GetWallpaperResponse WindowServerConnection::get_wallpaper()
 {
     if (m_wallpaper)

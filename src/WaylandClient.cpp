@@ -287,11 +287,17 @@ static void serenity_window_manager_dismiss_menus(void* data, serenity_window_ma
     static_cast<WaylandClient*>(data)->on_dismiss_menus();
 }
 
+static void serenity_window_manager_captured(void* data, serenity_window_manager*, uint32_t serial, int32_t width, int32_t height, int32_t pitch, uint32_t format, int32_t fd)
+{
+    static_cast<WaylandClient*>(data)->on_captured(serial, width, height, pitch, format, fd);
+}
+
 static serenity_window_manager_listener const s_serenity_window_manager_listener = {
     .host_settings = serenity_window_manager_host_settings,
     .wallpaper = serenity_window_manager_wallpaper,
     .dismiss_menus = serenity_window_manager_dismiss_menus,
     .host_config = serenity_window_manager_host_config,
+    .captured = serenity_window_manager_captured,
 };
 
 void WaylandClient::set_serenity_window_manager(serenity_window_manager* manager)
@@ -334,6 +340,36 @@ void WaylandClient::on_host_wallpaper(i32 width, i32 height, i32 pitch, u32 form
     }
     close(fd);
     dbgln("LibWM: host wallpaper {}x{}", width, height);
+}
+
+void WaylandClient::on_captured(u32, i32 width, i32 height, i32 pitch, u32 format, i32 fd)
+{
+    if (fd >= 0 && width > 0 && height > 0 && pitch > 0) {
+        auto const size = static_cast<size_t>(pitch) * static_cast<size_t>(height);
+        auto* mapped = mmap(nullptr, size, PROT_READ, MAP_SHARED, fd, 0);
+        if (mapped != MAP_FAILED) {
+            if (auto bitmap = Gfx::Bitmap::create(static_cast<Gfx::BitmapFormat>(format), { width, height }); !bitmap.is_error()) {
+                auto& created = *bitmap.value();
+                auto const row_bytes = min(static_cast<size_t>(pitch), static_cast<size_t>(created.pitch()));
+                for (int y = 0; y < height; ++y)
+                    memcpy(created.scanline(y), static_cast<u8 const*>(mapped) + static_cast<size_t>(y) * static_cast<size_t>(pitch), row_bytes);
+                m_captured = bitmap.release_value();
+            }
+            munmap(mapped, size);
+        }
+    }
+    if (fd >= 0)
+        close(fd);
+}
+
+void WaylandClient::request_capture(Gfx::IntRect const& region)
+{
+    if (!m_serenity_window_manager || region.is_empty())
+        return;
+    m_capture_region = region;
+    serenity_window_manager_request_capture(m_serenity_window_manager, ++m_capture_serial,
+        region.x(), region.y(), region.width(), region.height());
+    wl_display_flush(m_display);
 }
 
 void WaylandClient::set_host_wallpaper(Gfx::Bitmap* bitmap)
@@ -2568,6 +2604,10 @@ void WaylandClient::attach_and_commit(i32 window_id, int client_fd, Gfx::IntSize
 
 void WaylandClient::commit_window_content(WindowSurface& window_surface, int client_fd, Gfx::IntSize size, Gfx::IntSize visible_size, i32 pitch, bool has_alpha)
 {
+    // A display link enabled before the first present starts ticking once there is a
+    // surface to pace it from.
+    if (m_display_link_enabled)
+        request_display_link_frame();
     auto request_frame = [&] {
         window_surface.frame_callback = wl_surface_frame(window_surface.surface);
         wl_callback_add_listener(window_surface.frame_callback, &s_frame_listener, this);
@@ -2729,6 +2769,62 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
     window_surface.buffers.append(move(record));
 
     dbgln("LibWM/Wayland: presented window {} ({}x{})", window_surface.window_id, visible_size.width(), visible_size.height());
+}
+
+static void display_link_frame_done(void* data, wl_callback* callback, uint32_t)
+{
+    static_cast<WaylandClient*>(data)->on_display_link_frame_done(callback);
+}
+
+static wl_callback_listener const s_display_link_listener = {
+    .done = display_link_frame_done,
+};
+
+void WaylandClient::enable_display_link()
+{
+    m_display_link_enabled = true;
+    request_display_link_frame();
+}
+
+void WaylandClient::disable_display_link()
+{
+    m_display_link_enabled = false;
+    if (m_display_link_callback) {
+        wl_callback_destroy(m_display_link_callback);
+        m_display_link_callback = nullptr;
+    }
+}
+
+void WaylandClient::request_display_link_frame()
+{
+    if (!m_display_link_enabled || m_display_link_callback)
+        return;
+    // A mapped window surface fires frame_done once per refresh it is rendered in.
+    // The most recently presented window is the one most likely to be animating.
+    wl_surface* surface = nullptr;
+    for (auto const& it : m_windows) {
+        if (it.value->surface)
+            surface = it.value->surface;
+    }
+    if (!surface)
+        return;
+    m_display_link_callback = wl_surface_frame(surface);
+    wl_callback_add_listener(m_display_link_callback, &s_display_link_listener, this);
+}
+
+void WaylandClient::on_display_link_frame_done(wl_callback* callback)
+{
+    if (callback != m_display_link_callback) {
+        wl_callback_destroy(callback);
+        return;
+    }
+    wl_callback_destroy(callback);
+    m_display_link_callback = nullptr;
+    if (on_display_link)
+        on_display_link();
+    // Re-arm for the next refresh; the app's repaint in response is the damage
+    // that makes the compositor render this surface again.
+    request_display_link_frame();
 }
 
 void WaylandClient::on_frame_done(wl_callback* callback)

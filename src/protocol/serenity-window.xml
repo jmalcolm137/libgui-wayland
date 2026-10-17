@@ -123,6 +123,35 @@
       <arg name="double_click_min" type="int"/>
       <arg name="double_click_max" type="int"/>
     </event>
+
+    <request name="request_capture">
+      <description summary="ask for one capture of a screen region">
+        The application is magnifying part of the screen (the SerenityOS
+        Magnifier asks through get_screen_bitmap_around_cursor/_around_location).
+        Ask for that rectangle once; the compositor answers with `captured`. It is
+        a push, not a reply: the client keeps the last capture it was sent, so a
+        capture never blocks its UI thread on a round trip.
+      </description>
+      <arg name="serial" type="uint"/>
+      <arg name="x" type="int"/>
+      <arg name="y" type="int"/>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+    </request>
+
+    <event name="captured">
+      <description summary="the pixels of a requested region">
+        Raw pixels of the most recent request_capture, in the same encoding as
+        `wallpaper`: format is a wl_shm value and fd carries width*height pixels.
+        width/height are 0 (and fd -1) when the region could not be captured.
+      </description>
+      <arg name="serial" type="uint"/>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+      <arg name="pitch" type="int"/>
+      <arg name="format" type="uint"/>
+      <arg name="fd" type="fd"/>
+    </event>
   </interface>
 
   <interface name="serenity_toplevel" version="1">

@@ -70,6 +70,14 @@ private:
         }
         watch_theme();
         watch_fonts();
+
+        // R5: display links. Previewed like the host-settings hook: it captures
+        // `this`, so the first connection owns it and the destructor clears it.
+        auto& display = WaylandClient::the();
+        if (!display.on_display_link) {
+            display.on_display_link = [this] { async_display_link_notification(); };
+            display.on_display_link_owner = this;
+        }
     }
 
     ~WindowServerConnection()
@@ -80,6 +88,10 @@ private:
         if (host.on_host_settings_updated_owner == this) {
             host.on_host_settings_updated = nullptr;
             host.on_host_settings_updated_owner = nullptr;
+        }
+        if (host.on_display_link_owner == this) {
+            host.on_display_link = nullptr;
+            host.on_display_link_owner = nullptr;
         }
     }
 
@@ -140,6 +152,10 @@ private:
     Messages::WindowServer::GetGlobalCursorPositionResponse get_global_cursor_position() override;
     Messages::WindowServer::GetColorUnderCursorResponse get_color_under_cursor() override;
     Messages::WindowServer::GetWallpaperResponse get_wallpaper() override;
+    void enable_display_link() override { WaylandClient::the().enable_display_link(); }
+    void disable_display_link() override { WaylandClient::the().disable_display_link(); }
+    Messages::WindowServer::GetScreenBitmapAroundCursorResponse get_screen_bitmap_around_cursor(Gfx::IntSize) override;
+    Messages::WindowServer::GetScreenBitmapAroundLocationResponse get_screen_bitmap_around_location(Gfx::IntSize, Gfx::IntPoint) override;
     Messages::WindowServer::SetWallpaperResponse set_wallpaper(Gfx::ShareableBitmap const& wallpaper_bitmap) override;
     void set_wallpaper_mode(ByteString const& mode) override;
     void set_background_color(ByteString const& background_color) override;

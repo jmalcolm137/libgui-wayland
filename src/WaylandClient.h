@@ -213,12 +213,25 @@ public:
     // began -- and the settings are delivered over IPC, i.e. after the constructor
     // that reads them has already run. Anything derived from a host setting has to
     // be recomputed here, or it keeps the value it read when there was nothing yet.
+    // R5: the app's GUI::DisplayLink. SerenityOS drives it from the window
+    // server's frame loop; here it is paced by the window surface's frame
+    // callbacks. The Magnifier captures on every callback.
+    void enable_display_link();
+    void disable_display_link();
+    Function<void()> on_display_link;
+    void* on_display_link_owner { nullptr };
     Function<void()> on_host_settings_updated;
     // Which WindowServerConnection owns that hook, so it can be cleared when that
     // object dies instead of being called through a dangling capture.
     void* on_host_settings_updated_owner { nullptr };
     // The desktop's wallpaper, sent as raw pixels over serenity-window.
     Gfx::Bitmap* host_wallpaper() { return m_host_wallpaper.ptr(); }
+
+    // R5 accessibility (docs/29): the Magnifier asks for a region of the screen.
+    // The compositor pushes it back as `captured`; this returns the most recent one,
+    // so a capture never blocks the caller. request_capture() asks for another.
+    Gfx::Bitmap* captured_bitmap() { return m_captured.ptr(); }
+    void request_capture(Gfx::IntRect const&);
     void set_host_wallpaper(Gfx::Bitmap* bitmap);
     // The compositor asks the client to show/hide a window's menu bar.
     void set_menubar_visibility_callback(Function<void(i32 window_id, bool visible)> callback) { m_menubar_visibility_changed = move(callback); }
@@ -258,6 +271,7 @@ public:
     void on_host_config(u32 workspace_rows, u32 workspace_columns, double accel_min, double accel_max, u32 scroll_step_min, int double_click_min, int double_click_max);
     void on_host_settings(StringView blob);
     void on_host_wallpaper(i32 width, i32 height, i32 pitch, u32 format, i32 fd);
+    void on_captured(u32 serial, i32 width, i32 height, i32 pitch, u32 format, i32 fd);
 
     void on_data_offer(wl_data_offer*);
     void on_data_offer_mime(wl_data_offer*, char const* mime_type);
@@ -282,6 +296,7 @@ public:
     void on_popup_done(xdg_popup*);
     void on_surface_configured(xdg_surface*);
     void on_frame_done(wl_callback*);
+    void on_display_link_frame_done(wl_callback*);
     void note_input_serial(u32 serial) { m_last_input_serial = serial; }
 
 private:
@@ -436,6 +451,12 @@ private:
     Function<void()> m_dismiss_menus;
     HostConfig m_host_config;
     HashMap<ByteString, ByteString> m_host_settings;
+    bool m_display_link_enabled { false };
+    wl_callback* m_display_link_callback { nullptr };
+    void request_display_link_frame();
+    RefPtr<Gfx::Bitmap> m_captured;
+    Gfx::IntRect m_capture_region;
+    u32 m_capture_serial { 0 };
     RefPtr<Gfx::Bitmap> m_host_wallpaper;
 
     InputCallbacks m_input;
