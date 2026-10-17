@@ -1,0 +1,65 @@
+diff --git a/Userland/Libraries/LibGUI/ConnectionToWindowServer.cpp b/Userland/Libraries/LibGUI/ConnectionToWindowServer.cpp
+index 1cda0e70..683e8d48 100644
+--- a/Userland/Libraries/LibGUI/ConnectionToWindowServer.cpp
++++ b/Userland/Libraries/LibGUI/ConnectionToWindowServer.cpp
+@@ -28,14 +28,25 @@
+ 
+ namespace GUI {
+ 
++static RefPtr<ConnectionToWindowServer>& connection_slot()
++{
++    static RefPtr<ConnectionToWindowServer> s_connection;
++    return s_connection;
++}
++
+ ConnectionToWindowServer& ConnectionToWindowServer::the()
+ {
+-    static RefPtr<ConnectionToWindowServer> s_connection = nullptr;
++    auto& s_connection = connection_slot();
+     if (!s_connection)
+         s_connection = ConnectionToWindowServer::try_create().release_value_but_fixme_should_propagate_errors();
+     return *s_connection;
+ }
+ 
++ConnectionToWindowServer* ConnectionToWindowServer::existing()
++{
++    return connection_slot().ptr();
++}
++
+ static void set_system_theme_from_anonymous_buffer(Core::AnonymousBuffer buffer)
+ {
+     Gfx::set_system_theme(buffer);
+diff --git a/Userland/Libraries/LibGUI/ConnectionToWindowServer.h b/Userland/Libraries/LibGUI/ConnectionToWindowServer.h
+index 9c550856..32d6398a 100644
+--- a/Userland/Libraries/LibGUI/ConnectionToWindowServer.h
++++ b/Userland/Libraries/LibGUI/ConnectionToWindowServer.h
+@@ -19,6 +19,11 @@ class ConnectionToWindowServer final
+     IPC_CLIENT_CONNECTION(ConnectionToWindowServer, "/tmp/portal/window"sv)
+ public:
+     static ConnectionToWindowServer& the();
++    // The connection the process already has, or null if it was never created or
++    // has been torn down. Unlike the(), this never tries to connect: teardown
++    // code (menu destructors at exit) must not resurrect a connection after the
++    // compositor has gone away.
++    static ConnectionToWindowServer* existing();
+     i32 expose_client_id() { return m_client_id; }
+ 
+ private:
+diff --git a/Userland/Libraries/LibGUI/Menu.cpp b/Userland/Libraries/LibGUI/Menu.cpp
+index d333011e..2a66b07c 100644
+--- a/Userland/Libraries/LibGUI/Menu.cpp
++++ b/Userland/Libraries/LibGUI/Menu.cpp
+@@ -169,7 +169,12 @@ void Menu::unrealize_menu()
+     if (m_menu_id == -1)
+         return;
+     all_menus().remove(m_menu_id);
+-    ConnectionToWindowServer::the().async_destroy_menu(m_menu_id);
++    // At process exit the connection may already be gone (the compositor
++    // disconnected first). Do not try to create a new one from a destructor:
++    // the old code called the(), which release_value_but_fixme'd on failure and
++    // aborted the Taskbar while its menus were being destroyed.
++    if (auto* connection = ConnectionToWindowServer::existing())
++        connection->async_destroy_menu(m_menu_id);
+     m_menu_id = -1;
+ }
+ 
