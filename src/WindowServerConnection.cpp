@@ -386,6 +386,11 @@ void WindowServerConnection::create_window(i32 window_id, i32, Gfx::IntRect cons
     window->title = title;
     window->window_mode = window_mode;
     window->parent_window_id = parent_window_id;
+    window->client_positioned = window_type == static_cast<i32>(WindowServer::WindowType::Popup)
+        || window_type == static_cast<i32>(WindowServer::WindowType::Autocomplete)
+        || window_type == static_cast<i32>(WindowServer::WindowType::Tooltip)
+        || window_type == static_cast<i32>(WindowServer::WindowType::Menu)
+        || window_type == static_cast<i32>(WindowServer::WindowType::Notification);
 
     // A window created fullscreen starts at the output size; the compositor
     // confirms it with a configure. Serenity's WindowServer sizes such windows
@@ -448,7 +453,13 @@ Messages::WindowServer::SetWindowRectResponse WindowServerConnection::set_window
 {
     if (auto* w = window(window_id)) {
         w->rect.set_size(rect.size());
-        w->rect.set_location(rect.location());
+        // The compositor owns a toplevel's/layer surface's placement. Serenity's
+        // client still calls set_rect() (and reports its own idea of the origin),
+        // but adopting that here would undo the position the compositor reported
+        // and make screen-relative coordinates (ComboBox popups, menus, tooltips)
+        // fall back to window-local ones. Only client-positioned popups follow it.
+        if (w->client_positioned)
+            w->rect.set_location(rect.location());
     }
     // Layer-surface windows (the panel) derive their size from this.
     WaylandClient::the().set_window_rect(window_id, rect.size());

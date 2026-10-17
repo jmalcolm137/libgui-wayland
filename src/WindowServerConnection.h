@@ -105,6 +105,11 @@ private:
         // id (for a transient/modal dialog), from create_window.
         i32 window_mode { 0 };
         i32 parent_window_id { -1 };
+        // True for popup-style windows (ComboBox lists, menus, tooltips), whose
+        // position is chosen by the client. Normal toplevels and layer surfaces
+        // are placed by the compositor, so a later client set_rect() must not
+        // overwrite their real origin.
+        bool client_positioned { false };
         RefPtr<Gfx::Bitmap> bitmap;
         i32 last_serial { -1 };
         // Coalesce configure-driven repaints: at most one resize+paint is in
