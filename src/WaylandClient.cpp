@@ -366,7 +366,6 @@ void WaylandClient::request_capture(Gfx::IntRect const& region)
 {
     if (!m_serenity_window_manager || region.is_empty())
         return;
-    m_capture_region = region;
     serenity_window_manager_request_capture(m_serenity_window_manager, ++m_capture_serial,
         region.x(), region.y(), region.width(), region.height());
     wl_display_flush(m_display);

@@ -456,7 +456,6 @@ private:
     wl_surface* m_display_link_surface { nullptr };
     void request_display_link_frame();
     RefPtr<Gfx::Bitmap> m_captured;
-    Gfx::IntRect m_capture_region;
     u32 m_capture_serial { 0 };
     RefPtr<Gfx::Bitmap> m_host_wallpaper;
 
