@@ -453,6 +453,7 @@ private:
     HashMap<ByteString, ByteString> m_host_settings;
     bool m_display_link_enabled { false };
     wl_callback* m_display_link_callback { nullptr };
+    wl_surface* m_display_link_surface { nullptr };
     void request_display_link_frame();
     RefPtr<Gfx::Bitmap> m_captured;
     Gfx::IntRect m_capture_region;

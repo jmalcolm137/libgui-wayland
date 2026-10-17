@@ -2428,9 +2428,16 @@ void WaylandClient::destroy_window(i32 window_id)
         wp_viewport_destroy(window_surface.viewport);
     if (window_surface.xdg_surface_object)
         xdg_surface_destroy(window_surface.xdg_surface_object);
+    if (m_display_link_surface == window_surface.surface) {
+        if (m_display_link_callback)
+            wl_callback_destroy(m_display_link_callback);
+        m_display_link_callback = nullptr;
+        m_display_link_surface = nullptr;
+    }
     if (window_surface.surface)
         wl_surface_destroy(window_surface.surface);
     m_windows.remove(it);
+    request_display_link_frame();
 }
 
 void WaylandClient::set_title(i32 window_id, ByteString const& title)
@@ -2792,12 +2799,13 @@ void WaylandClient::disable_display_link()
     if (m_display_link_callback) {
         wl_callback_destroy(m_display_link_callback);
         m_display_link_callback = nullptr;
+        m_display_link_surface = nullptr;
     }
 }
 
 void WaylandClient::request_display_link_frame()
 {
-    if (!m_display_link_enabled || m_display_link_callback)
+    if (!m_display_link_enabled)
         return;
     // A mapped window surface fires frame_done once per refresh it is rendered in.
     // The most recently presented window is the one most likely to be animating.
@@ -2808,6 +2816,14 @@ void WaylandClient::request_display_link_frame()
     }
     if (!surface)
         return;
+    if (m_display_link_callback) {
+        if (m_display_link_surface == surface)
+            return;
+        // That surface is gone or another is animating now: pace from the new one.
+        wl_callback_destroy(m_display_link_callback);
+        m_display_link_callback = nullptr;
+    }
+    m_display_link_surface = surface;
     m_display_link_callback = wl_surface_frame(surface);
     wl_callback_add_listener(m_display_link_callback, &s_display_link_listener, this);
 }
@@ -2820,6 +2836,7 @@ void WaylandClient::on_display_link_frame_done(wl_callback* callback)
     }
     wl_callback_destroy(callback);
     m_display_link_callback = nullptr;
+    m_display_link_surface = nullptr;
     if (on_display_link)
         on_display_link();
     // Re-arm for the next refresh; the app's repaint in response is the damage
