@@ -325,6 +325,19 @@ static void spawn_audio_server()
 // wl_data_device.set_selection requires a serial from a recent input event.
 static void start_server_thread()
 {
+    // Establish the Wayland connection *here*, on the main thread, before the server
+    // thread exists. WaylandClient::the() is a function-local static and
+    // ensure_connected() binds its event-loop notifier to the calling thread, while
+    // the server thread's WindowServerConnection also calls send_fast_greet() -- so
+    // whichever thread got there first owned the connection for the life of the
+    // process. When the server thread won, the Wayland connection was dispatched
+    // there while the main thread used the same client (set_host_setting() writes
+    // m_host_settings and flushes the display), which is a data race: coredumps of
+    // libwm-setting-test showed a use-after-free in a Wayland callback running on
+    // the server thread's dispatch. Own it deterministically instead of racing.
+    if (auto result = WaylandClient::the().ensure_connected(); result.is_error())
+        dbgln("LibWM: no Wayland connection on the main thread: {}", result.error());
+
     // The file picker runs on the main thread; the server thread needs a way to
     // hand GUI work over to it. install_main() captures the main thread here.
     MainThreadInvoker::install_main();

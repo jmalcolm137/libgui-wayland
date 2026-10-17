@@ -55,11 +55,32 @@ private:
         // The current theme may be knowable only from the host settings -- there is no
         // live broker file unless a theme was changed this session -- and the settings
         // are delivered after this constructor runs. Recompute when they arrive.
-        WaylandClient::the().on_host_settings_updated = [this] {
-            apply_theme_from_broker();
-        };
+        //
+        // The *first* connection owns the hook: it is the app-facing one
+        // (Application::create() creates it before LibWM's server thread exists). The
+        // server-side connection is created later, on that thread, and used to take
+        // the hook over -- which both aimed the recompute at an object belonging to
+        // another thread and could leave this capture dangling once that object died.
+        auto& host = WaylandClient::the();
+        if (!host.on_host_settings_updated) {
+            host.on_host_settings_updated = [this] {
+                apply_theme_from_broker();
+            };
+            host.on_host_settings_updated_owner = this;
+        }
         watch_theme();
         watch_fonts();
+    }
+
+    ~WindowServerConnection()
+    {
+        // Drop the host-settings hook if it is ours: it captures `this`, and settings
+        // keep arriving after a connection is torn down.
+        auto& host = WaylandClient::the();
+        if (host.on_host_settings_updated_owner == this) {
+            host.on_host_settings_updated = nullptr;
+            host.on_host_settings_updated_owner = nullptr;
+        }
     }
 
     struct Window {

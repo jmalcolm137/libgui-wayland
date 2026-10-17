@@ -214,6 +214,9 @@ public:
     // that reads them has already run. Anything derived from a host setting has to
     // be recomputed here, or it keeps the value it read when there was nothing yet.
     Function<void()> on_host_settings_updated;
+    // Which WindowServerConnection owns that hook, so it can be cleared when that
+    // object dies instead of being called through a dangling capture.
+    void* on_host_settings_updated_owner { nullptr };
     // The desktop's wallpaper, sent as raw pixels over serenity-window.
     Gfx::Bitmap* host_wallpaper() { return m_host_wallpaper.ptr(); }
     void set_host_wallpaper(Gfx::Bitmap* bitmap);
