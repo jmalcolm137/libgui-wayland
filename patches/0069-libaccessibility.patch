@@ -1,0 +1,761 @@
+diff --git a/Userland/Libraries/LibAccessibility/CMakeLists.txt b/Userland/Libraries/LibAccessibility/CMakeLists.txt
+new file mode 100644
+index 00000000..5ad37c1f
+--- /dev/null
++++ b/Userland/Libraries/LibAccessibility/CMakeLists.txt
+@@ -0,0 +1,20 @@
++set(SOURCES
++    Server.cpp
++)
++
++# The AT-SPI transport is Linux-only. LibGUI itself stays portable: it talks to
++# the platform-neutral Accessibility::Server API.
++if (BUILD_LAGOM)
++    find_package(PkgConfig REQUIRED)
++    pkg_check_modules(SDBUS REQUIRED libsystemd)
++    list(APPEND SOURCES Linux/DBusServer.cpp)
++endif()
++
++serenity_lib(LibAccessibility accessibility)
++target_link_libraries(LibAccessibility PRIVATE LibCore LibGfx)
++
++if (BUILD_LAGOM)
++    target_include_directories(LibAccessibility PRIVATE ${SDBUS_INCLUDE_DIRS})
++    target_link_libraries(LibAccessibility PRIVATE ${SDBUS_LIBRARIES})
++    target_compile_definitions(LibAccessibility PRIVATE HAVE_SDBUS=1)
++endif()
+diff --git a/Userland/Libraries/LibAccessibility/Linux/DBusServer.cpp b/Userland/Libraries/LibAccessibility/Linux/DBusServer.cpp
+new file mode 100644
+index 00000000..344a1135
+--- /dev/null
++++ b/Userland/Libraries/LibAccessibility/Linux/DBusServer.cpp
+@@ -0,0 +1,290 @@
++/*
++ * Copyright (c) 2026, Serenity Desktop Environment contributors
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#include "DBusServer.h"
++
++#include <AK/ByteString.h>
++#include <LibCore/EventLoop.h>
++#include <errno.h>
++#include <string.h>
++#include <systemd/sd-bus-vtable.h>
++#include <unistd.h>
++
++namespace Accessibility::Linux {
++
++static constexpr char const* accessible_prefix = "/org/a11y/atspi/accessible";
++static constexpr char const* root_path = "/org/a11y/atspi/accessible/root";
++
++static char const* introspection_xml = R"XML(
++<node>
++  <interface name="org.a11y.atspi.Accessible">
++    <method name="GetRole"><arg direction="out" type="i"/></method>
++    <method name="GetName"><arg direction="out" type="s"/></method>
++    <method name="GetDescription"><arg direction="out" type="s"/></method>
++    <method name="GetChildCount"><arg direction="out" type="i"/></method>
++    <method name="GetChildren"><arg direction="out" type="a(so)"/></method>
++    <method name="GetState"><arg direction="out" type="au"/></method>
++    <method name="GetParent"><arg direction="out" type="(so)"/></method>
++    <method name="GetApplication"><arg direction="out" type="(so)"/></method>
++    <method name="GetInterfaces"><arg direction="out" type="as"/></method>
++  </interface>
++  <interface name="org.freedesktop.DBus.Introspectable">
++    <method name="Introspect"><arg direction="out" type="s"/></method>
++  </interface>
++</node>
++)XML";
++
++DBusServer::DBusServer(Snapshot snapshot)
++    : m_snapshot(move(snapshot))
++{
++    char const* address = getenv("AT_SPI_BUS_ADDRESS");
++    if (!address || !*address)
++        address = getenv("DBUS_SESSION_BUS_ADDRESS");
++    if (!address || !*address) {
++        dbgln("Accessibility: no bus address");
++        return;
++    }
++
++    if (sd_bus_new(&m_bus) < 0) {
++        dbgln("Accessibility: sd_bus_new failed");
++        return;
++    }
++    if (sd_bus_set_address(m_bus, address) < 0) {
++        dbgln("Accessibility: sd_bus_set_address failed: {} ({})", address, strerror(errno));
++        sd_bus_unref(m_bus);
++        m_bus = nullptr;
++        return;
++    }
++    if (sd_bus_set_bus_client(m_bus, 1) < 0 || sd_bus_start(m_bus) < 0) {
++        dbgln("Accessibility: sd_bus_start failed: {}", strerror(errno));
++        sd_bus_unref(m_bus);
++        m_bus = nullptr;
++        return;
++    }
++
++    m_bus_name = ByteString::formatted("org.a11y.atspi.App_{}", getpid());
++    int request_result = sd_bus_request_name(m_bus, m_bus_name.characters(), 0);
++    if (request_result < 0) {
++        dbgln("Accessibility: request_name failed: {} ({})", request_result, strerror(-request_result));
++        sd_bus_unref(m_bus);
++        m_bus = nullptr;
++        return;
++    }
++
++    static sd_bus_vtable const vtable[] = {
++        SD_BUS_VTABLE_START(0),
++        SD_BUS_METHOD("GetRole", "", "i", handle_get_role, 0),
++        SD_BUS_METHOD("GetName", "", "s", handle_get_name, 0),
++        SD_BUS_METHOD("GetDescription", "", "s", handle_get_description, 0),
++        SD_BUS_METHOD("GetChildCount", "", "i", handle_get_child_count, 0),
++        SD_BUS_METHOD("GetChildren", "", "a(so)", handle_get_children, 0),
++        SD_BUS_METHOD("GetState", "", "au", handle_get_state, 0),
++        SD_BUS_METHOD("GetParent", "", "(so)", handle_get_parent, 0),
++        SD_BUS_METHOD("GetApplication", "", "(so)", handle_get_application, 0),
++        SD_BUS_METHOD("GetInterfaces", "", "as", handle_get_interfaces, 0),
++        SD_BUS_METHOD("Introspect", "", "s", handle_introspect, 0),
++        SD_BUS_VTABLE_END,
++    };
++    (void)sd_bus_add_object_vtable(m_bus, nullptr, root_path, "org.a11y.atspi.Accessible", vtable, this);
++    (void)sd_bus_add_fallback_vtable(m_bus, nullptr, accessible_prefix, "org.a11y.atspi.Accessible", vtable, nullptr, this);
++
++    dbgln("Accessibility: serving as {}", m_bus_name);
++    m_notifier = Core::Notifier::construct(sd_bus_get_fd(m_bus), Core::Notifier::Type::Read);
++    m_notifier->on_activation = [this] {
++        while (m_bus && sd_bus_process(m_bus, nullptr) > 0) { }
++        if (m_bus)
++            (void)sd_bus_flush(m_bus);
++    };
++}
++
++DBusServer::~DBusServer()
++{
++    if (m_notifier)
++        m_notifier->set_enabled(false);
++    if (m_bus)
++        sd_bus_flush_close_unref(m_bus);
++}
++
++int DBusServer::index_for_path(char const* path)
++{
++    if (!path)
++        return -1;
++    if (!strcmp(path, root_path))
++        return 0;
++    auto const prefix_length = strlen(accessible_prefix);
++    if (strncmp(path, accessible_prefix, prefix_length) != 0)
++        return -1;
++    auto suffix = StringView { path + prefix_length, strlen(path + prefix_length) };
++    if (suffix.starts_with('/'))
++        suffix = suffix.substring_view(1);
++    return suffix.to_number<int>().value_or(-1);
++}
++
++Vector<DBusServer::FlatNode> DBusServer::flatten()
++{
++    Vector<FlatNode> nodes;
++    auto root = m_snapshot();
++
++    Function<void(Node const&, int)> add = [&](Node const& node, int parent) {
++        int const index = nodes.size();
++        FlatNode flat;
++        flat.path = index == 0 ? ByteString { root_path } : ByteString::formatted("{}/{}", accessible_prefix, index);
++        flat.name = node.name;
++        flat.role = node.role;
++        flat.rect = node.rect;
++        flat.states = node.states;
++        flat.parent = parent;
++        nodes.append(move(flat));
++        if (parent >= 0)
++            nodes[parent].children.append(index);
++        for (auto const& child : node.children)
++            add(child, index);
++    };
++
++    add(root, -1);
++    return nodes;
++}
++
++static DBusServer::FlatNode const* node_at(Vector<DBusServer::FlatNode> const& nodes, char const* path)
++{
++    int const index = DBusServer::index_for_path(path);
++    if (index < 0 || index >= static_cast<int>(nodes.size()))
++        return nullptr;
++    return &nodes[index];
++}
++
++static int reply_node_error(sd_bus_message* message)
++{
++    return sd_bus_reply_method_errorf(message, "org.a11y.atspi.Error.Invalid", "No such accessible");
++}
++
++int DBusServer::handle_get_role(sd_bus_message* message, void* data, sd_bus_error*)
++{
++    auto& server = *static_cast<DBusServer*>(data);
++    auto nodes = server.flatten();
++    auto* node = node_at(nodes, sd_bus_message_get_path(message));
++    if (!node)
++        return reply_node_error(message);
++    return sd_bus_reply_method_return(message, "i", static_cast<int>(node->role));
++}
++
++int DBusServer::handle_get_name(sd_bus_message* message, void* data, sd_bus_error*)
++{
++    auto& server = *static_cast<DBusServer*>(data);
++    auto nodes = server.flatten();
++    auto* node = node_at(nodes, sd_bus_message_get_path(message));
++    if (!node)
++        return reply_node_error(message);
++    return sd_bus_reply_method_return(message, "s", node->name.to_byte_string().characters());
++}
++
++int DBusServer::handle_get_description(sd_bus_message* message, void*, sd_bus_error*)
++{
++    return sd_bus_reply_method_return(message, "s", "");
++}
++
++int DBusServer::handle_get_child_count(sd_bus_message* message, void* data, sd_bus_error*)
++{
++    auto& server = *static_cast<DBusServer*>(data);
++    auto nodes = server.flatten();
++    auto* node = node_at(nodes, sd_bus_message_get_path(message));
++    if (!node)
++        return reply_node_error(message);
++    return sd_bus_reply_method_return(message, "i", static_cast<int>(node->children.size()));
++}
++
++int DBusServer::handle_get_children(sd_bus_message* message, void* data, sd_bus_error*)
++{
++    auto& server = *static_cast<DBusServer*>(data);
++    auto nodes = server.flatten();
++    auto* node = node_at(nodes, sd_bus_message_get_path(message));
++    if (!node)
++        return reply_node_error(message);
++
++    sd_bus_message* reply = nullptr;
++    int result = sd_bus_message_new_method_return(message, &reply);
++    if (result < 0)
++        return result;
++    result = sd_bus_message_open_container(reply, 'a', "(so)");
++    if (result >= 0) {
++        for (int child : node->children) {
++            result = sd_bus_message_append(reply, "(so)", server.m_bus_name.characters(), nodes[child].path.characters());
++            if (result < 0)
++                break;
++        }
++    }
++    if (result >= 0)
++        result = sd_bus_message_close_container(reply);
++    if (result >= 0)
++        result = sd_bus_send(nullptr, reply, nullptr);
++    sd_bus_message_unref(reply);
++    return result;
++}
++
++int DBusServer::handle_get_state(sd_bus_message* message, void* data, sd_bus_error*)
++{
++    auto& server = *static_cast<DBusServer*>(data);
++    auto nodes = server.flatten();
++    auto* node = node_at(nodes, sd_bus_message_get_path(message));
++    if (!node)
++        return reply_node_error(message);
++
++    sd_bus_message* reply = nullptr;
++    int result = sd_bus_message_new_method_return(message, &reply);
++    if (result < 0)
++        return result;
++    result = sd_bus_message_open_container(reply, 'a', "u");
++    if (result >= 0) {
++        result = sd_bus_message_append(reply, "u", node->states);
++        if (result >= 0)
++            result = sd_bus_message_close_container(reply);
++    }
++    if (result >= 0)
++        result = sd_bus_send(nullptr, reply, nullptr);
++    sd_bus_message_unref(reply);
++    return result;
++}
++
++int DBusServer::handle_get_parent(sd_bus_message* message, void* data, sd_bus_error*)
++{
++    auto& server = *static_cast<DBusServer*>(data);
++    auto nodes = server.flatten();
++    auto* node = node_at(nodes, sd_bus_message_get_path(message));
++    if (!node)
++        return reply_node_error(message);
++    int const parent = node->parent < 0 ? 0 : node->parent;
++    return sd_bus_reply_method_return(message, "(so)", server.m_bus_name.characters(), nodes[parent].path.characters());
++}
++
++int DBusServer::handle_get_application(sd_bus_message* message, void* data, sd_bus_error*)
++{
++    auto& server = *static_cast<DBusServer*>(data);
++    return sd_bus_reply_method_return(message, "(so)", server.m_bus_name.characters(), root_path);
++}
++
++int DBusServer::handle_get_interfaces(sd_bus_message* message, void*, sd_bus_error*)
++{
++    sd_bus_message* reply = nullptr;
++    int result = sd_bus_message_new_method_return(message, &reply);
++    if (result < 0)
++        return result;
++    result = sd_bus_message_open_container(reply, 'a', "s");
++    if (result >= 0)
++        result = sd_bus_message_append(reply, "s", "org.a11y.atspi.Accessible");
++    if (result >= 0)
++        result = sd_bus_message_close_container(reply);
++    if (result >= 0)
++        result = sd_bus_send(nullptr, reply, nullptr);
++    sd_bus_message_unref(reply);
++    return result;
++}
++
++int DBusServer::handle_introspect(sd_bus_message* message, void*, sd_bus_error*)
++{
++    return sd_bus_reply_method_return(message, "s", introspection_xml);
++}
++
++}
+diff --git a/Userland/Libraries/LibAccessibility/Linux/DBusServer.h b/Userland/Libraries/LibAccessibility/Linux/DBusServer.h
+new file mode 100644
+index 00000000..ff2d554a
+--- /dev/null
++++ b/Userland/Libraries/LibAccessibility/Linux/DBusServer.h
+@@ -0,0 +1,52 @@
++/*
++ * Copyright (c) 2026, Serenity Desktop Environment contributors
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#pragma once
++
++#include <LibAccessibility/Server.h>
++#include <LibCore/Notifier.h>
++#include <systemd/sd-bus.h>
++
++namespace Accessibility::Linux {
++
++class DBusServer final : public Server {
++public:
++    explicit DBusServer(Snapshot);
++    virtual ~DBusServer() override;
++
++    struct FlatNode {
++        ByteString path;
++        String name;
++        Role role { Role::Invalid };
++        Gfx::IntRect rect;
++        u32 states { 0 };
++        int parent { -1 };
++        Vector<int> children;
++    };
++
++    static int index_for_path(char const*);
++
++private:
++    static int handle_get_role(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_get_name(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_get_description(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_get_child_count(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_get_children(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_get_state(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_get_parent(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_get_application(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_get_interfaces(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_introspect(sd_bus_message*, void*, sd_bus_error*);
++
++    Vector<FlatNode> flatten();
++
++    Snapshot m_snapshot;
++    sd_bus* m_bus { nullptr };
++    ByteString m_bus_name;
++    RefPtr<Core::Notifier> m_notifier;
++};
++
++}
+diff --git a/Userland/Libraries/LibAccessibility/Server.cpp b/Userland/Libraries/LibAccessibility/Server.cpp
+new file mode 100644
+index 00000000..f1fc2ed5
+--- /dev/null
++++ b/Userland/Libraries/LibAccessibility/Server.cpp
+@@ -0,0 +1,25 @@
++/*
++ * Copyright (c) 2026, Serenity Desktop Environment contributors
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#include "Server.h"
++
++#if defined(__linux__) && defined(HAVE_SDBUS)
++#    include "Linux/DBusServer.h"
++#endif
++
++namespace Accessibility {
++
++OwnPtr<Server> Server::create(Snapshot snapshot)
++{
++#if defined(__linux__) && defined(HAVE_SDBUS)
++    return make<Linux::DBusServer>(move(snapshot));
++#else
++    (void)snapshot;
++    return nullptr;
++#endif
++}
++
++}
+diff --git a/Userland/Libraries/LibAccessibility/Server.h b/Userland/Libraries/LibAccessibility/Server.h
+new file mode 100644
+index 00000000..d2aa7f45
+--- /dev/null
++++ b/Userland/Libraries/LibAccessibility/Server.h
+@@ -0,0 +1,87 @@
++/*
++ * Copyright (c) 2026, Serenity Desktop Environment contributors
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#pragma once
++
++#include <AK/Function.h>
++#include <AK/OwnPtr.h>
++#include <AK/String.h>
++#include <AK/Vector.h>
++#include <LibGfx/Rect.h>
++
++// A platform-neutral accessibility snapshot. The Linux backend publishes it on
++// the AT-SPI bus; LibGUI is the only producer and has no D-Bus types in its API.
++namespace Accessibility {
++
++// AtspiRole values from at-spi2-core's atspi-constants.h. Keep the numbers
++// stable: consumers compare them directly.
++enum class Role : int {
++    Invalid = 0,
++    CheckBox = 7,
++    ComboBox = 11,
++    Dialog = 16,
++    Frame = 23,
++    Label = 29,
++    List = 31,
++    Menu = 33,
++    MenuBar = 34,
++    MenuItem = 35,
++    PageTabList = 38,
++    Panel = 39,
++    ProgressBar = 42,
++    PushButton = 43,
++    RadioButton = 44,
++    ScrollBar = 48,
++    Slider = 51,
++    Table = 55,
++    Terminal = 60,
++    Text = 61,
++    ToggleButton = 62,
++    ToolBar = 63,
++    Tree = 65,
++    Window = 69,
++    Application = 75,
++    Entry = 79,
++    ListBox = 98,
++    Grouping = 99,
++    Static = 116,
++};
++
++// AtspiStateType: a bit index in the state set.
++enum State : u32 {
++    StateActive = 1u << 0,
++    StateChecked = 1u << 3,
++    StateEditable = 1u << 6,
++    StateEnabled = 1u << 8,
++    StateFocusable = 1u << 11,
++    StateFocused = 1u << 12,
++    StateSensitive = 1u << 23,
++    StateShowing = 1u << 25,
++    StateVisible = 1u << 30,
++};
++
++struct Node {
++    String name;
++    Role role { Role::Invalid };
++    Gfx::IntRect rect;
++    u32 states { 0 };
++    Vector<Node> children;
++};
++
++// A live view of the application's widget tree. It is called on the D-Bus
++// thread/loop and must be cheap and non-blocking.
++using Snapshot = Function<Node()>;
++
++class Server {
++public:
++    virtual ~Server() = default;
++
++    // Returns nullptr when there is no accessibility bus (the normal case for a
++    // session without a screen reader) or when this platform has no backend.
++    static OwnPtr<Server> create(Snapshot);
++};
++
++}
+diff --git a/Userland/Libraries/LibGUI/AccessibilityServer.cpp b/Userland/Libraries/LibGUI/AccessibilityServer.cpp
+new file mode 100644
+index 00000000..0f2179ee
+--- /dev/null
++++ b/Userland/Libraries/LibGUI/AccessibilityServer.cpp
+@@ -0,0 +1,136 @@
++/*
++ * Copyright (c) 2026, Serenity Desktop Environment contributors
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#include "AccessibilityServer.h"
++
++#include <LibAccessibility/Server.h>
++#include <LibGUI/AbstractButton.h>
++#include <LibGUI/Application.h>
++#include <LibGUI/Label.h>
++#include <LibGUI/Window.h>
++#include <LibGUI/Widget.h>
++
++namespace GUI {
++
++static OwnPtr<Accessibility::Server> s_server;
++
++static Accessibility::Role role_for(Widget const& widget)
++{
++    auto const& name = widget.class_name();
++    if (name == "GUI::Button")
++        return Accessibility::Role::PushButton;
++    if (name == "GUI::CheckBox")
++        return Accessibility::Role::CheckBox;
++    if (name == "GUI::RadioButton")
++        return Accessibility::Role::RadioButton;
++    if (name == "GUI::Label")
++        return Accessibility::Role::Label;
++    if (name == "GUI::TextEditor")
++        return Accessibility::Role::Text;
++    if (name == "GUI::TextBox" || name == "GUI::PasswordBox")
++        return Accessibility::Role::Entry;
++    if (name == "GUI::ComboBox")
++        return Accessibility::Role::ComboBox;
++    if (name == "GUI::Slider")
++        return Accessibility::Role::Slider;
++    if (name == "GUI::ScrollBar")
++        return Accessibility::Role::ScrollBar;
++    if (name == "GUI::ListView")
++        return Accessibility::Role::List;
++    if (name == "GUI::TreeView")
++        return Accessibility::Role::Tree;
++    if (name == "GUI::TableView")
++        return Accessibility::Role::Table;
++    if (name == "GUI::TabWidget")
++        return Accessibility::Role::PageTabList;
++    if (name == "GUI::GroupBox" || name == "GUI::Frame")
++        return Accessibility::Role::Panel;
++    if (name == "GUI::ProgressBar")
++        return Accessibility::Role::ProgressBar;
++    return Accessibility::Role::Panel;
++}
++
++static String name_for(Widget const& widget)
++{
++    if (widget.has_tooltip())
++        return widget.tooltip();
++    if (is<Label>(widget))
++        return static_cast<Label const&>(widget).text();
++    if (is<AbstractButton>(widget))
++        return static_cast<AbstractButton const&>(widget).text();
++    return {};
++}
++
++static Accessibility::Node snapshot_widget(Widget& widget)
++{
++    Accessibility::Node node;
++    node.role = role_for(widget);
++    node.name = name_for(widget);
++    node.rect = widget.screen_relative_rect();
++    if (widget.is_enabled()) {
++        node.states |= Accessibility::StateEnabled | Accessibility::StateSensitive;
++    }
++    if (widget.is_visible()) {
++        node.states |= Accessibility::StateVisible | Accessibility::StateShowing;
++    }
++    if (widget.is_auto_focusable())
++        node.states |= Accessibility::StateFocusable;
++    if (widget.is_focused())
++        node.states |= Accessibility::StateFocused;
++
++    for (auto& child : widget.child_widgets()) {
++        if (child.is_visible())
++            node.children.append(snapshot_widget(child));
++    }
++    return node;
++}
++
++static Accessibility::Node snapshot()
++{
++    Accessibility::Node root;
++    root.role = Accessibility::Role::Application;
++    if (auto* app = Application::the())
++        root.name = MUST(String::from_byte_string(app->invoked_as()));
++
++    for (auto* window_ptr : Window::windows_for_accessibility()) {
++        auto& window = *window_ptr;
++        if (!window.is_visible())
++            continue;
++        Accessibility::Node frame;
++        frame.role = Accessibility::Role::Frame;
++        frame.name = MUST(String::from_byte_string(window.title()));
++        frame.rect = window.rect();
++        if (window.is_active())
++            frame.states |= Accessibility::StateFocused | Accessibility::StateActive;
++        if (window.main_widget()) {
++            auto& main = *window.main_widget();
++            frame.children.append(snapshot_widget(main));
++            // The window is the AT-SPI frame; expose the main widget's children
++            // directly rather than an uninteresting root panel. Move them out
++            // first: assigning frame.children from one of its own elements would
++            // destroy the source while the vector is being replaced.
++            auto main_children = move(frame.children[0].children);
++            frame.children = move(main_children);
++        }
++        root.children.append(move(frame));
++    }
++
++    return root;
++}
++
++void AccessibilityServer::initialize()
++{
++    if (s_server)
++        return;
++    s_server = Accessibility::Server::create(snapshot);
++}
++
++void AccessibilityServer::shutdown()
++{
++    s_server = nullptr;
++}
++
++}
+diff --git a/Userland/Libraries/LibGUI/AccessibilityServer.h b/Userland/Libraries/LibGUI/AccessibilityServer.h
+new file mode 100644
+index 00000000..c8f03d60
+--- /dev/null
++++ b/Userland/Libraries/LibGUI/AccessibilityServer.h
+@@ -0,0 +1,20 @@
++/*
++ * Copyright (c) 2026, Serenity Desktop Environment contributors
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#pragma once
++
++namespace GUI {
++
++// Publishes the widget tree over the platform accessibility service, if one is
++// available. LibGUI only builds the snapshot; the D-Bus/AT-SPI transport lives
++// in LibAccessibility (Linux) or is absent on other platforms.
++class AccessibilityServer {
++public:
++    static void initialize();
++    static void shutdown();
++};
++
++}
+diff --git a/Userland/Libraries/LibGUI/Application.cpp b/Userland/Libraries/LibGUI/Application.cpp
+index 092c2f3e..c4a5c661 100644
+--- a/Userland/Libraries/LibGUI/Application.cpp
++++ b/Userland/Libraries/LibGUI/Application.cpp
+@@ -8,6 +8,7 @@
+ #include <LibConfig/Client.h>
+ #include <LibCore/EventLoop.h>
+ #include <LibGUI/Action.h>
++#include <LibGUI/AccessibilityServer.h>
+ #include <LibGUI/Application.h>
+ #include <LibGUI/Clipboard.h>
+ #include <LibGUI/ConnectionToWindowServer.h>
+@@ -106,6 +107,8 @@ ErrorOr<NonnullRefPtr<Application>> Application::create(Main::Arguments const& a
+         weak_application->tooltip_hide_timer_did_fire();
+     });
+ 
++    AccessibilityServer::initialize();
++
+     return application;
+ }
+ 
+@@ -119,6 +122,7 @@ bool Application::in_teardown()
+ Application::~Application()
+ {
+     s_in_teardown = true;
++    AccessibilityServer::shutdown();
+     revoke_weak_ptrs();
+ }
+ 
+diff --git a/Userland/Libraries/LibGUI/CMakeLists.txt b/Userland/Libraries/LibGUI/CMakeLists.txt
+index d20bbc80..a33ec7f4 100644
+--- a/Userland/Libraries/LibGUI/CMakeLists.txt
++++ b/Userland/Libraries/LibGUI/CMakeLists.txt
+@@ -18,6 +18,7 @@ set(SOURCES
+     AbstractThemePreview.cpp
+     AbstractView.cpp
+     AbstractZoomPanWidget.cpp
++    AccessibilityServer.cpp
+     Action.cpp
+     ActionGroup.cpp
+     Application.cpp
+@@ -156,5 +157,5 @@ set(GENERATED_SOURCES
+ )
+ 
+ serenity_lib(LibGUI gui)
+-target_link_libraries(LibGUI PRIVATE LibCore LibELF LibFileSystem LibGfx LibImageDecoderClient LibIPC LibThreading LibRegex LibConfig LibUnicode LibURL)
++target_link_libraries(LibGUI PRIVATE LibCore LibELF LibFileSystem LibGfx LibImageDecoderClient LibIPC LibThreading LibRegex LibConfig LibUnicode LibURL LibAccessibility)
+ target_link_libraries(LibGUI PUBLIC LibSyntax)
+diff --git a/Userland/Libraries/LibGUI/Window.cpp b/Userland/Libraries/LibGUI/Window.cpp
+--- a/Userland/Libraries/LibGUI/Window.cpp
++++ b/Userland/Libraries/LibGUI/Window.cpp
+@@ -1288,6 +1298,14 @@ void Window::for_each_window(Badge<ConnectionToWindowServer>, Function<void(Wind
+     }
+ }
+ 
++Vector<Window*> Window::windows_for_accessibility()
++{
++    Vector<Window*> windows;
++    for (auto* window : *all_windows)
++        windows.append(window);
++    return windows;
++}
++
+ void Window::update_all_windows(Badge<ConnectionToWindowServer>)
+ {
+     for (auto& e : *reified_windows) {
+diff --git a/Userland/Libraries/LibGUI/Window.h b/Userland/Libraries/LibGUI/Window.h
+--- a/Userland/Libraries/LibGUI/Window.h
++++ b/Userland/Libraries/LibGUI/Window.h
+@@ -203,6 +208,9 @@ public:
+ 
+     static void for_each_window(Badge<ConnectionToWindowServer>, Function<void(Window&)>);
+     static void update_all_windows(Badge<ConnectionToWindowServer>);
++    // Accessibility is a separate library without access to the WindowServer
++    // badge; it only needs the current set, never to mutate it.
++    static Vector<Window*> windows_for_accessibility();
+     void notify_state_changed(Badge<ConnectionToWindowServer>, bool minimized, bool maximized, bool occluded);
+ 
+     virtual bool is_visible_for_timer_purposes() const override { return m_visible_for_timer_purposes; }
+diff --git a/Meta/Lagom/CMakeLists.txt b/Meta/Lagom/CMakeLists.txt
+--- a/Meta/Lagom/CMakeLists.txt
++++ b/Meta/Lagom/CMakeLists.txt
+@@ -469,6 +469,7 @@ if (BUILD_LAGOM)
+     set(lagom_standard_libraries
+         AccelGfx
++        Accessibility
+         Archive
+         Audio
+         Compress
