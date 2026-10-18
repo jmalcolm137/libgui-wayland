@@ -26,10 +26,10 @@ index 00000000..5ad37c1f
 +endif()
 diff --git a/Userland/Libraries/LibAccessibility/Linux/DBusServer.cpp b/Userland/Libraries/LibAccessibility/Linux/DBusServer.cpp
 new file mode 100644
-index 00000000..344a1135
+index 00000000..6f06ac4a
 --- /dev/null
 +++ b/Userland/Libraries/LibAccessibility/Linux/DBusServer.cpp
-@@ -0,0 +1,290 @@
+@@ -0,0 +1,291 @@
 +/*
 + * Copyright (c) 2026, Serenity Desktop Environment contributors
 + *
@@ -72,9 +72,10 @@ index 00000000..344a1135
 +DBusServer::DBusServer(Snapshot snapshot)
 +    : m_snapshot(move(snapshot))
 +{
++    // Only start on the dedicated accessibility bus. The session bus normally
++    // has no AT-SPI registry; registering an application name there makes every
++    // app a bogus accessibility service.
 +    char const* address = getenv("AT_SPI_BUS_ADDRESS");
-+    if (!address || !*address)
-+        address = getenv("DBUS_SESSION_BUS_ADDRESS");
 +    if (!address || !*address) {
 +        dbgln("Accessibility: no bus address");
 +        return;
