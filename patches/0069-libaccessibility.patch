@@ -26,10 +26,10 @@ index 00000000..5ad37c1f
 +endif()
 diff --git a/Userland/Libraries/LibAccessibility/Linux/DBusServer.cpp b/Userland/Libraries/LibAccessibility/Linux/DBusServer.cpp
 new file mode 100644
-index 00000000..0559e228
+index 00000000..7236f152
 --- /dev/null
 +++ b/Userland/Libraries/LibAccessibility/Linux/DBusServer.cpp
-@@ -0,0 +1,1151 @@
+@@ -0,0 +1,1149 @@
 +/*
 + * Copyright (c) 2026, Serenity Desktop Environment contributors
 + *
@@ -268,10 +268,8 @@ index 00000000..0559e228
 +    // has no AT-SPI registry; registering an application name there makes every
 +    // app a bogus accessibility service.
 +    char const* address = getenv("AT_SPI_BUS_ADDRESS");
-+    if (!address || !*address) {
-+        dbgln("Accessibility: no bus address");
++    if (!address || !*address)
 +        return;
-+    }
 +
 +    if (sd_bus_new(&m_bus) < 0) {
 +        dbgln("Accessibility: sd_bus_new failed");
