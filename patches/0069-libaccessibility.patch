@@ -26,10 +26,10 @@ index 00000000..5ad37c1f
 +endif()
 diff --git a/Userland/Libraries/LibAccessibility/Linux/DBusServer.cpp b/Userland/Libraries/LibAccessibility/Linux/DBusServer.cpp
 new file mode 100644
-index 00000000..959491f8
+index 00000000..0559e228
 --- /dev/null
 +++ b/Userland/Libraries/LibAccessibility/Linux/DBusServer.cpp
-@@ -0,0 +1,533 @@
+@@ -0,0 +1,1151 @@
 +/*
 + * Copyright (c) 2026, Serenity Desktop Environment contributors
 + *
@@ -106,6 +106,153 @@ index 00000000..959491f8
 +    <method name="GetKeyBinding">
 +      <arg direction="in" name="index" type="i"/>
 +      <arg direction="out" type="s"/>
++    </method>
++  </interface>
++  <interface name="org.a11y.atspi.Event.Object">
++    <signal name="StateChanged">
++      <arg name="state" type="s"/>
++      <arg name="enabled" type="i"/>
++      <arg type="i"/>
++      <arg type="v"/>
++      <arg name="properties" type="a{sv}"/>
++    </signal>
++    <signal name="TextChanged">
++      <arg name="detail" type="s"/>
++      <arg name="start_pos" type="i"/>
++      <arg name="length" type="i"/>
++      <arg name="text" type="v"/>
++      <arg name="properties" type="a{sv}"/>
++    </signal>
++  </interface>
++  <interface name="org.a11y.atspi.Text">
++    <method name="GetText">
++      <arg direction="in" name="startOffset" type="i"/>
++      <arg direction="in" name="endOffset" type="i"/>
++      <arg direction="out" type="s"/>
++    </method>
++    <method name="GetStringAtOffset">
++      <arg direction="in" name="offset" type="i"/>
++      <arg direction="in" name="granularity" type="u"/>
++      <arg direction="out" type="s"/>
++      <arg direction="out" type="i"/>
++      <arg direction="out" type="i"/>
++    </method>
++    <method name="GetCharacterCount"><arg direction="out" type="i"/></method>
++    <method name="GetCharacterAtOffset">
++      <arg direction="in" name="offset" type="i"/>
++      <arg direction="out" type="i"/>
++    </method>
++    <method name="GetTextAtOffset">
++      <arg direction="in" name="offset" type="i"/>
++      <arg direction="in" name="type" type="u"/>
++      <arg direction="out" type="s"/>
++      <arg direction="out" type="i"/>
++      <arg direction="out" type="i"/>
++    </method>
++    <method name="GetAttributeValue">
++      <arg direction="in" name="offset" type="i"/>
++      <arg direction="in" name="attributeName" type="s"/>
++      <arg direction="out" type="s"/>
++    </method>
++    <method name="GetAttributes">
++      <arg direction="in" name="offset" type="i"/>
++      <arg direction="out" type="a{ss}"/>
++      <arg direction="out" type="i"/>
++      <arg direction="out" type="i"/>
++    </method>
++    <method name="GetDefaultAttributes"><arg direction="out" type="a{ss}"/></method>
++    <method name="GetCharacterExtents">
++      <arg direction="in" name="offset" type="i"/>
++      <arg direction="in" name="coordType" type="u"/>
++      <arg direction="out" type="i"/>
++      <arg direction="out" type="i"/>
++      <arg direction="out" type="i"/>
++      <arg direction="out" type="i"/>
++    </method>
++    <method name="GetRangeExtents">
++      <arg direction="in" name="startOffset" type="i"/>
++      <arg direction="in" name="endOffset" type="i"/>
++      <arg direction="in" name="coordType" type="u"/>
++      <arg direction="out" type="i"/>
++      <arg direction="out" type="i"/>
++      <arg direction="out" type="i"/>
++      <arg direction="out" type="i"/>
++    </method>
++    <method name="GetOffsetAtPoint">
++      <arg direction="in" name="x" type="i"/>
++      <arg direction="in" name="y" type="i"/>
++      <arg direction="in" name="coordType" type="u"/>
++      <arg direction="out" type="i"/>
++    </method>
++    <method name="GetNSelections"><arg direction="out" type="i"/></method>
++    <method name="GetSelection">
++      <arg direction="in" name="selectionNum" type="i"/>
++      <arg direction="out" type="i"/>
++      <arg direction="out" type="i"/>
++    </method>
++    <method name="AddSelection">
++      <arg direction="in" name="startOffset" type="i"/>
++      <arg direction="in" name="endOffset" type="i"/>
++      <arg direction="out" type="b"/>
++    </method>
++    <method name="RemoveSelection">
++      <arg direction="in" name="selectionNum" type="i"/>
++      <arg direction="out" type="b"/>
++    </method>
++    <method name="SetSelection">
++      <arg direction="in" name="selectionNum" type="i"/>
++      <arg direction="in" name="startOffset" type="i"/>
++      <arg direction="in" name="endOffset" type="i"/>
++      <arg direction="out" type="b"/>
++    </method>
++    <method name="SetCaretOffset">
++      <arg direction="in" name="offset" type="i"/>
++      <arg direction="out" type="b"/>
++    </method>
++    <method name="ScrollSubstringTo">
++      <arg direction="in" name="startOffset" type="i"/>
++      <arg direction="in" name="endOffset" type="i"/>
++      <arg direction="in" name="type" type="u"/>
++      <arg direction="out" type="b"/>
++    </method>
++    <method name="ScrollSubstringToPoint">
++      <arg direction="in" name="startOffset" type="i"/>
++      <arg direction="in" name="endOffset" type="i"/>
++      <arg direction="in" name="coordType" type="u"/>
++      <arg direction="in" name="x" type="i"/>
++      <arg direction="in" name="y" type="i"/>
++      <arg direction="out" type="b"/>
++    </method>
++  </interface>
++  <interface name="org.a11y.atspi.EditableText">
++    <method name="SetTextContents">
++      <arg direction="in" name="text" type="s"/>
++      <arg direction="out" type="b"/>
++    </method>
++    <method name="InsertText">
++      <arg direction="in" name="offset" type="i"/>
++      <arg direction="in" name="text" type="s"/>
++      <arg direction="in" name="length" type="i"/>
++      <arg direction="out" type="b"/>
++    </method>
++    <method name="DeleteText">
++      <arg direction="in" name="startOffset" type="i"/>
++      <arg direction="in" name="endOffset" type="i"/>
++      <arg direction="out" type="b"/>
++    </method>
++    <method name="CopyText">
++      <arg direction="in" name="startOffset" type="i"/>
++      <arg direction="in" name="endOffset" type="i"/>
++      <arg direction="out" type="b"/>
++    </method>
++    <method name="CutText">
++      <arg direction="in" name="startOffset" type="i"/>
++      <arg direction="in" name="endOffset" type="i"/>
++      <arg direction="out" type="b"/>
++    </method>
++    <method name="PasteText">
++      <arg direction="in" name="offset" type="i"/>
++      <arg direction="out" type="b"/>
 +    </method>
 +  </interface>
 +  <interface name="org.freedesktop.DBus.Introspectable">
@@ -194,6 +341,45 @@ index 00000000..959491f8
 +    (void)sd_bus_add_object_vtable(m_bus, nullptr, root_path, "org.a11y.atspi.Action", action_vtable, this);
 +    (void)sd_bus_add_fallback_vtable(m_bus, nullptr, accessible_prefix, "org.a11y.atspi.Action", action_vtable, nullptr, this);
 +
++    static sd_bus_vtable const text_vtable[] = {
++        SD_BUS_VTABLE_START(0),
++        SD_BUS_METHOD("GetText", "ii", "s", handle_text_get_text, 0),
++        SD_BUS_METHOD("GetStringAtOffset", "iu", "(sii)", handle_text_get_string_at_offset, 0),
++        SD_BUS_METHOD("GetCharacterCount", "", "i", handle_text_get_character_count, 0),
++        SD_BUS_METHOD("GetCharacterAtOffset", "i", "i", handle_text_get_character_at_offset, 0),
++        SD_BUS_METHOD("GetTextAtOffset", "iu", "(sii)", handle_text_get_text_at_offset, 0),
++        SD_BUS_METHOD("GetAttributeValue", "is", "s", handle_text_get_attribute_value, 0),
++        SD_BUS_METHOD("GetAttributes", "i", "(a{ss}ii)", handle_text_get_attributes, 0),
++        SD_BUS_METHOD("GetDefaultAttributes", "", "a{ss}", handle_text_get_default_attributes, 0),
++        SD_BUS_METHOD("GetCharacterExtents", "iu", "(iiii)", handle_text_get_character_extents, 0),
++        SD_BUS_METHOD("GetRangeExtents", "iiu", "(iiii)", handle_text_get_range_extents, 0),
++        SD_BUS_METHOD("GetOffsetAtPoint", "iiu", "i", handle_text_get_offset_at_point, 0),
++        SD_BUS_METHOD("GetNSelections", "", "i", handle_text_get_n_selections, 0),
++        SD_BUS_METHOD("GetSelection", "i", "(ii)", handle_text_get_selection, 0),
++        SD_BUS_METHOD("AddSelection", "ii", "b", handle_text_add_selection, 0),
++        SD_BUS_METHOD("RemoveSelection", "i", "b", handle_text_remove_selection, 0),
++        SD_BUS_METHOD("SetSelection", "iii", "b", handle_text_set_selection, 0),
++        SD_BUS_METHOD("SetCaretOffset", "i", "b", handle_text_set_caret_offset, 0),
++        SD_BUS_METHOD("ScrollSubstringTo", "iiu", "b", handle_text_scroll_substring_to, 0),
++        SD_BUS_METHOD("ScrollSubstringToPoint", "iiuii", "b", handle_text_scroll_substring_to_point, 0),
++        SD_BUS_VTABLE_END,
++    };
++    (void)sd_bus_add_object_vtable(m_bus, nullptr, root_path, "org.a11y.atspi.Text", text_vtable, this);
++    (void)sd_bus_add_fallback_vtable(m_bus, nullptr, accessible_prefix, "org.a11y.atspi.Text", text_vtable, nullptr, this);
++
++    static sd_bus_vtable const editable_vtable[] = {
++        SD_BUS_VTABLE_START(0),
++        SD_BUS_METHOD("SetTextContents", "s", "b", handle_editable_set_text_contents, 0),
++        SD_BUS_METHOD("InsertText", "isi", "b", handle_editable_insert_text, 0),
++        SD_BUS_METHOD("DeleteText", "ii", "b", handle_editable_delete_text, 0),
++        SD_BUS_METHOD("CopyText", "ii", "b", handle_editable_copy_text, 0),
++        SD_BUS_METHOD("CutText", "ii", "b", handle_editable_cut_text, 0),
++        SD_BUS_METHOD("PasteText", "i", "b", handle_editable_paste_text, 0),
++        SD_BUS_VTABLE_END,
++    };
++    (void)sd_bus_add_object_vtable(m_bus, nullptr, root_path, "org.a11y.atspi.EditableText", editable_vtable, this);
++    (void)sd_bus_add_fallback_vtable(m_bus, nullptr, accessible_prefix, "org.a11y.atspi.EditableText", editable_vtable, nullptr, this);
++
 +    dbgln("Accessibility: serving as {}", m_bus_name);
 +    m_notifier = Core::Notifier::construct(sd_bus_get_fd(m_bus), Core::Notifier::Type::Read);
 +    m_notifier->on_activation = [this] {
@@ -226,10 +412,10 @@ index 00000000..959491f8
 +    return suffix.to_number<int>().value_or(-1);
 +}
 +
-+Vector<DBusServer::FlatNode> DBusServer::flatten()
++DBusServer::FlattenedSnapshot DBusServer::flatten()
 +{
++    Node root = m_snapshot();
 +    Vector<FlatNode> nodes;
-+    auto root = m_snapshot();
 +
 +    Function<void(Node const&, int)> add = [&](Node const& node, int parent) {
 +        int const index = nodes.size();
@@ -249,7 +435,77 @@ index 00000000..959491f8
 +    };
 +
 +    add(root, -1);
-+    return nodes;
++    return { move(root), move(nodes) };
++}
++
++ByteString DBusServer::path_for_tag(void* tag)
++{
++    if (!tag)
++        return {};
++    auto snapshot = flatten();
++    for (auto const& node : snapshot.nodes) {
++        if (node.source && node.source->tag == tag)
++            return node.path;
++    }
++    return {};
++}
++
++void DBusServer::notify_state_changed(void* tag, StringView state, bool enabled)
++{
++    if (!m_bus)
++        return;
++    auto path = path_for_tag(tag);
++    if (path.is_empty())
++        return;
++    auto state_string = MUST(String::from_utf8(state));
++    auto state_bytes = state_string.to_byte_string();
++
++    sd_bus_message* message = nullptr;
++    if (sd_bus_message_new_signal(m_bus, &message, path.characters(), "org.a11y.atspi.Event.Object", "StateChanged") < 0)
++        return;
++    int result = sd_bus_message_append(message, "s", state_bytes.characters());
++    if (result >= 0)
++        result = sd_bus_message_append(message, "i", enabled ? 1 : 0);
++    if (result >= 0)
++        result = sd_bus_message_append(message, "i", 0);
++    if (result >= 0)
++        result = sd_bus_message_append(message, "v", "s", "");
++    if (result >= 0)
++        result = sd_bus_message_open_container(message, 'a', "{sv}");
++    if (result >= 0)
++        result = sd_bus_message_close_container(message);
++    if (result >= 0)
++        (void)sd_bus_send(nullptr, message, nullptr);
++    sd_bus_message_unref(message);
++}
++
++void DBusServer::notify_text_changed(void* tag, StringView text)
++{
++    if (!m_bus)
++        return;
++    auto path = path_for_tag(tag);
++    if (path.is_empty())
++        return;
++    auto text_string = MUST(String::from_utf8(text));
++    auto text_bytes = text_string.to_byte_string();
++
++    sd_bus_message* message = nullptr;
++    if (sd_bus_message_new_signal(m_bus, &message, path.characters(), "org.a11y.atspi.Event.Object", "TextChanged") < 0)
++        return;
++    int result = sd_bus_message_append(message, "s", "update");
++    if (result >= 0)
++        result = sd_bus_message_append(message, "i", 0);
++    if (result >= 0)
++        result = sd_bus_message_append(message, "i", static_cast<int>(text.length()));
++    if (result >= 0)
++        result = sd_bus_message_append(message, "v", "s", text_bytes.characters());
++    if (result >= 0)
++        result = sd_bus_message_open_container(message, 'a', "{sv}");
++    if (result >= 0)
++        result = sd_bus_message_close_container(message);
++    if (result >= 0)
++        (void)sd_bus_send(nullptr, message, nullptr);
++    sd_bus_message_unref(message);
 +}
 +
 +static DBusServer::FlatNode const* node_at(Vector<DBusServer::FlatNode> const& nodes, char const* path)
@@ -268,7 +524,8 @@ index 00000000..959491f8
 +int DBusServer::handle_get_role(sd_bus_message* message, void* data, sd_bus_error*)
 +{
 +    auto& server = *static_cast<DBusServer*>(data);
-+    auto nodes = server.flatten();
++    auto snapshot = server.flatten();
++    auto& nodes = snapshot.nodes;
 +    auto* node = node_at(nodes, sd_bus_message_get_path(message));
 +    if (!node)
 +        return reply_node_error(message);
@@ -278,7 +535,8 @@ index 00000000..959491f8
 +int DBusServer::handle_get_name(sd_bus_message* message, void* data, sd_bus_error*)
 +{
 +    auto& server = *static_cast<DBusServer*>(data);
-+    auto nodes = server.flatten();
++    auto snapshot = server.flatten();
++    auto& nodes = snapshot.nodes;
 +    auto* node = node_at(nodes, sd_bus_message_get_path(message));
 +    if (!node)
 +        return reply_node_error(message);
@@ -293,7 +551,8 @@ index 00000000..959491f8
 +int DBusServer::handle_get_child_count(sd_bus_message* message, void* data, sd_bus_error*)
 +{
 +    auto& server = *static_cast<DBusServer*>(data);
-+    auto nodes = server.flatten();
++    auto snapshot = server.flatten();
++    auto& nodes = snapshot.nodes;
 +    auto* node = node_at(nodes, sd_bus_message_get_path(message));
 +    if (!node)
 +        return reply_node_error(message);
@@ -303,7 +562,8 @@ index 00000000..959491f8
 +int DBusServer::handle_get_children(sd_bus_message* message, void* data, sd_bus_error*)
 +{
 +    auto& server = *static_cast<DBusServer*>(data);
-+    auto nodes = server.flatten();
++    auto snapshot = server.flatten();
++    auto& nodes = snapshot.nodes;
 +    auto* node = node_at(nodes, sd_bus_message_get_path(message));
 +    if (!node)
 +        return reply_node_error(message);
@@ -331,7 +591,8 @@ index 00000000..959491f8
 +int DBusServer::handle_get_state(sd_bus_message* message, void* data, sd_bus_error*)
 +{
 +    auto& server = *static_cast<DBusServer*>(data);
-+    auto nodes = server.flatten();
++    auto snapshot = server.flatten();
++    auto& nodes = snapshot.nodes;
 +    auto* node = node_at(nodes, sd_bus_message_get_path(message));
 +    if (!node)
 +        return reply_node_error(message);
@@ -355,7 +616,8 @@ index 00000000..959491f8
 +int DBusServer::handle_get_parent(sd_bus_message* message, void* data, sd_bus_error*)
 +{
 +    auto& server = *static_cast<DBusServer*>(data);
-+    auto nodes = server.flatten();
++    auto snapshot = server.flatten();
++    auto& nodes = snapshot.nodes;
 +    auto* node = node_at(nodes, sd_bus_message_get_path(message));
 +    if (!node)
 +        return reply_node_error(message);
@@ -372,7 +634,8 @@ index 00000000..959491f8
 +int DBusServer::handle_get_interfaces(sd_bus_message* message, void* data, sd_bus_error*)
 +{
 +    auto& server = *static_cast<DBusServer*>(data);
-+    auto nodes = server.flatten();
++    auto snapshot = server.flatten();
++    auto& nodes = snapshot.nodes;
 +    auto* node = node_at(nodes, sd_bus_message_get_path(message));
 +    if (!node)
 +        return reply_node_error(message);
@@ -388,6 +651,10 @@ index 00000000..959491f8
 +        result = sd_bus_message_append(reply, "s", "org.a11y.atspi.Component");
 +    if (result >= 0 && node->source && !node->source->action_name.is_empty())
 +        result = sd_bus_message_append(reply, "s", "org.a11y.atspi.Action");
++    if (result >= 0 && node->source && node->source->is_text)
++        result = sd_bus_message_append(reply, "s", "org.a11y.atspi.Text");
++    if (result >= 0 && node->source && node->source->editable)
++        result = sd_bus_message_append(reply, "s", "org.a11y.atspi.EditableText");
 +    if (result >= 0)
 +        result = sd_bus_message_close_container(reply);
 +    if (result >= 0)
@@ -403,7 +670,8 @@ index 00000000..959491f8
 +
 +int DBusServer::handle_component_contains(sd_bus_message* message, void* data, sd_bus_error*)
 +{
-+    auto nodes = static_cast<DBusServer*>(data)->flatten();
++    auto snapshot = static_cast<DBusServer*>(data)->flatten();
++    auto& nodes = snapshot.nodes;
 +    auto* node = node_at(nodes, sd_bus_message_get_path(message));
 +    int x = 0;
 +    int y = 0;
@@ -419,7 +687,8 @@ index 00000000..959491f8
 +int DBusServer::handle_component_get_accessible_at_point(sd_bus_message* message, void* data, sd_bus_error*)
 +{
 +    auto& server = *static_cast<DBusServer*>(data);
-+    auto nodes = server.flatten();
++    auto snapshot = server.flatten();
++    auto& nodes = snapshot.nodes;
 +    int x = 0;
 +    int y = 0;
 +    unsigned coord_type = 0;
@@ -446,7 +715,8 @@ index 00000000..959491f8
 +
 +int DBusServer::handle_component_get_extents(sd_bus_message* message, void* data, sd_bus_error*)
 +{
-+    auto nodes = static_cast<DBusServer*>(data)->flatten();
++    auto snapshot = static_cast<DBusServer*>(data)->flatten();
++    auto& nodes = snapshot.nodes;
 +    auto* node = node_at(nodes, sd_bus_message_get_path(message));
 +    unsigned coord_type = 0;
 +    if (sd_bus_message_read(message, "u", &coord_type) < 0)
@@ -459,7 +729,8 @@ index 00000000..959491f8
 +
 +int DBusServer::handle_component_get_position(sd_bus_message* message, void* data, sd_bus_error*)
 +{
-+    auto nodes = static_cast<DBusServer*>(data)->flatten();
++    auto snapshot = static_cast<DBusServer*>(data)->flatten();
++    auto& nodes = snapshot.nodes;
 +    auto* node = node_at(nodes, sd_bus_message_get_path(message));
 +    unsigned coord_type = 0;
 +    if (sd_bus_message_read(message, "u", &coord_type) < 0)
@@ -472,7 +743,8 @@ index 00000000..959491f8
 +
 +int DBusServer::handle_component_get_size(sd_bus_message* message, void* data, sd_bus_error*)
 +{
-+    auto nodes = static_cast<DBusServer*>(data)->flatten();
++    auto snapshot = static_cast<DBusServer*>(data)->flatten();
++    auto& nodes = snapshot.nodes;
 +    auto* node = node_at(nodes, sd_bus_message_get_path(message));
 +    if (!node)
 +        return reply_node_error(message);
@@ -481,7 +753,8 @@ index 00000000..959491f8
 +
 +int DBusServer::handle_component_get_layer(sd_bus_message* message, void* data, sd_bus_error*)
 +{
-+    auto nodes = static_cast<DBusServer*>(data)->flatten();
++    auto snapshot = static_cast<DBusServer*>(data)->flatten();
++    auto& nodes = snapshot.nodes;
 +    auto* node = node_at(nodes, sd_bus_message_get_path(message));
 +    if (!node)
 +        return reply_node_error(message);
@@ -501,7 +774,8 @@ index 00000000..959491f8
 +
 +int DBusServer::handle_action_get_actions(sd_bus_message* message, void* data, sd_bus_error*)
 +{
-+    auto nodes = static_cast<DBusServer*>(data)->flatten();
++    auto snapshot = static_cast<DBusServer*>(data)->flatten();
++    auto& nodes = snapshot.nodes;
 +    auto* node = node_at(nodes, sd_bus_message_get_path(message));
 +    if (!node)
 +        return reply_node_error(message);
@@ -523,7 +797,8 @@ index 00000000..959491f8
 +
 +int DBusServer::handle_action_do_action(sd_bus_message* message, void* data, sd_bus_error*)
 +{
-+    auto nodes = static_cast<DBusServer*>(data)->flatten();
++    auto snapshot = static_cast<DBusServer*>(data)->flatten();
++    auto& nodes = snapshot.nodes;
 +    auto* node = node_at(nodes, sd_bus_message_get_path(message));
 +    if (!node)
 +        return reply_node_error(message);
@@ -538,7 +813,8 @@ index 00000000..959491f8
 +
 +int DBusServer::handle_action_get_action_name(sd_bus_message* message, void* data, sd_bus_error*)
 +{
-+    auto nodes = static_cast<DBusServer*>(data)->flatten();
++    auto snapshot = static_cast<DBusServer*>(data)->flatten();
++    auto& nodes = snapshot.nodes;
 +    auto* node = node_at(nodes, sd_bus_message_get_path(message));
 +    if (!node)
 +        return reply_node_error(message);
@@ -557,6 +833,348 @@ index 00000000..959491f8
 +    return sd_bus_reply_method_return(message, "s", "");
 +}
 +
++static StringView node_text(DBusServer::FlatNode const* node)
++{
++    if (!node || !node->source)
++        return {};
++    return node->source->text.bytes_as_string_view();
++}
++
++static StringView clamp_slice(StringView text, int start, int end)
++{
++    if (start < 0)
++        start = 0;
++    if (end < 0 || end > static_cast<int>(text.length()))
++        end = text.length();
++    if (end <= start)
++        return {};
++    return text.substring_view(start, end - start);
++}
++
++static int reply_text(sd_bus_message* message, StringView text)
++{
++    auto copy = MUST(String::from_utf8(text));
++    auto bytes = copy.to_byte_string();
++    return sd_bus_reply_method_return(message, "s", bytes.characters());
++}
++
++static int reply_text_with_bounds(sd_bus_message* message, StringView text)
++{
++    auto copy = MUST(String::from_utf8(text));
++    auto bytes = copy.to_byte_string();
++    return sd_bus_reply_method_return(message, "(sii)", bytes.characters(), 0, static_cast<int>(text.length()));
++}
++
++int DBusServer::handle_text_get_text(sd_bus_message* message, void* data, sd_bus_error*)
++{
++    auto snapshot = static_cast<DBusServer*>(data)->flatten();
++    auto& nodes = snapshot.nodes;
++    auto* node = node_at(nodes, sd_bus_message_get_path(message));
++    if (!node || !node->source || !node->source->is_text)
++        return reply_node_error(message);
++    int start = 0;
++    int end = 0;
++    if (sd_bus_message_read(message, "ii", &start, &end) < 0)
++        return -EINVAL;
++    return reply_text(message, clamp_slice(node_text(node), start, end));
++}
++
++int DBusServer::handle_text_get_string_at_offset(sd_bus_message* message, void* data, sd_bus_error*)
++{
++    auto snapshot = static_cast<DBusServer*>(data)->flatten();
++    auto& nodes = snapshot.nodes;
++    auto* node = node_at(nodes, sd_bus_message_get_path(message));
++    if (!node || !node->source || !node->source->is_text)
++        return reply_node_error(message);
++    int offset = 0;
++    unsigned granularity = 0;
++    if (sd_bus_message_read(message, "iu", &offset, &granularity) < 0)
++        return -EINVAL;
++    (void)granularity;
++    auto text = node_text(node);
++    if (offset < 0 || offset >= static_cast<int>(text.length()))
++        return sd_bus_reply_method_return(message, "(sii)", "", 0, 0);
++    return reply_text_with_bounds(message, text);
++}
++
++int DBusServer::handle_text_get_character_count(sd_bus_message* message, void* data, sd_bus_error*)
++{
++    auto snapshot = static_cast<DBusServer*>(data)->flatten();
++    auto& nodes = snapshot.nodes;
++    auto* node = node_at(nodes, sd_bus_message_get_path(message));
++    if (!node || !node->source || !node->source->is_text)
++        return reply_node_error(message);
++    return sd_bus_reply_method_return(message, "i", static_cast<int>(node_text(node).length()));
++}
++
++int DBusServer::handle_text_get_character_at_offset(sd_bus_message* message, void* data, sd_bus_error*)
++{
++    auto snapshot = static_cast<DBusServer*>(data)->flatten();
++    auto& nodes = snapshot.nodes;
++    auto* node = node_at(nodes, sd_bus_message_get_path(message));
++    if (!node || !node->source || !node->source->is_text)
++        return reply_node_error(message);
++    int offset = 0;
++    if (sd_bus_message_read(message, "i", &offset) < 0)
++        return -EINVAL;
++    auto text = node_text(node);
++    if (offset < 0 || offset >= static_cast<int>(text.length()))
++        return sd_bus_reply_method_return(message, "i", 0);
++    return sd_bus_reply_method_return(message, "i", static_cast<int>(static_cast<unsigned char>(text[offset])));
++}
++
++int DBusServer::handle_text_get_text_at_offset(sd_bus_message* message, void* data, sd_bus_error*)
++{
++    auto snapshot = static_cast<DBusServer*>(data)->flatten();
++    auto& nodes = snapshot.nodes;
++    auto* node = node_at(nodes, sd_bus_message_get_path(message));
++    if (!node || !node->source || !node->source->is_text)
++        return reply_node_error(message);
++    int offset = 0;
++    unsigned type = 0;
++    if (sd_bus_message_read(message, "iu", &offset, &type) < 0)
++        return -EINVAL;
++    (void)offset;
++    (void)type;
++    return reply_text_with_bounds(message, node_text(node));
++}
++
++int DBusServer::handle_text_get_attribute_value(sd_bus_message* message, void*, sd_bus_error*)
++{
++    int offset = 0;
++    char const* name = nullptr;
++    if (sd_bus_message_read(message, "is", &offset, &name) < 0)
++        return -EINVAL;
++    (void)offset;
++    (void)name;
++    return sd_bus_reply_method_return(message, "s", "");
++}
++
++int DBusServer::handle_text_get_attributes(sd_bus_message* message, void* data, sd_bus_error*)
++{
++    auto snapshot = static_cast<DBusServer*>(data)->flatten();
++    auto& nodes = snapshot.nodes;
++    auto* node = node_at(nodes, sd_bus_message_get_path(message));
++    if (!node || !node->source || !node->source->is_text)
++        return reply_node_error(message);
++    int offset = 0;
++    if (sd_bus_message_read(message, "i", &offset) < 0)
++        return -EINVAL;
++    (void)offset;
++
++    sd_bus_message* reply = nullptr;
++    int result = sd_bus_message_new_method_return(message, &reply);
++    if (result < 0)
++        return result;
++    result = sd_bus_message_open_container(reply, 'a', "{ss}");
++    if (result >= 0)
++        result = sd_bus_message_close_container(reply);
++    if (result >= 0)
++        result = sd_bus_message_append(reply, "ii", 0, static_cast<int>(node_text(node).length()));
++    if (result >= 0)
++        result = sd_bus_send(nullptr, reply, nullptr);
++    sd_bus_message_unref(reply);
++    return result;
++}
++
++int DBusServer::handle_text_get_default_attributes(sd_bus_message* message, void*, sd_bus_error*)
++{
++    sd_bus_message* reply = nullptr;
++    int result = sd_bus_message_new_method_return(message, &reply);
++    if (result < 0)
++        return result;
++    result = sd_bus_message_open_container(reply, 'a', "{ss}");
++    if (result >= 0)
++        result = sd_bus_message_close_container(reply);
++    if (result >= 0)
++        result = sd_bus_send(nullptr, reply, nullptr);
++    sd_bus_message_unref(reply);
++    return result;
++}
++
++int DBusServer::handle_text_get_character_extents(sd_bus_message* message, void* data, sd_bus_error*)
++{
++    auto snapshot = static_cast<DBusServer*>(data)->flatten();
++    auto& nodes = snapshot.nodes;
++    auto* node = node_at(nodes, sd_bus_message_get_path(message));
++    if (!node || !node->source || !node->source->is_text)
++        return reply_node_error(message);
++    int offset = 0;
++    unsigned coord_type = 0;
++    if (sd_bus_message_read(message, "iu", &offset, &coord_type) < 0)
++        return -EINVAL;
++    (void)offset;
++    (void)coord_type;
++    return sd_bus_reply_method_return(message, "(iiii)", node->rect.x(), node->rect.y(), node->rect.width(), node->rect.height());
++}
++
++int DBusServer::handle_text_get_range_extents(sd_bus_message* message, void* data, sd_bus_error*)
++{
++    auto snapshot = static_cast<DBusServer*>(data)->flatten();
++    auto& nodes = snapshot.nodes;
++    auto* node = node_at(nodes, sd_bus_message_get_path(message));
++    if (!node || !node->source || !node->source->is_text)
++        return reply_node_error(message);
++    int start = 0;
++    int end = 0;
++    unsigned coord_type = 0;
++    if (sd_bus_message_read(message, "iiu", &start, &end, &coord_type) < 0)
++        return -EINVAL;
++    (void)start;
++    (void)end;
++    (void)coord_type;
++    return sd_bus_reply_method_return(message, "(iiii)", node->rect.x(), node->rect.y(), node->rect.width(), node->rect.height());
++}
++
++int DBusServer::handle_text_get_offset_at_point(sd_bus_message* message, void* data, sd_bus_error*)
++{
++    auto snapshot = static_cast<DBusServer*>(data)->flatten();
++    auto& nodes = snapshot.nodes;
++    auto* node = node_at(nodes, sd_bus_message_get_path(message));
++    if (!node || !node->source || !node->source->is_text)
++        return reply_node_error(message);
++    int x = 0;
++    int y = 0;
++    unsigned coord_type = 0;
++    if (sd_bus_message_read(message, "iiu", &x, &y, &coord_type) < 0)
++        return -EINVAL;
++    (void)x;
++    (void)y;
++    (void)coord_type;
++    return sd_bus_reply_method_return(message, "i", 0);
++}
++
++int DBusServer::handle_text_get_n_selections(sd_bus_message* message, void* data, sd_bus_error*)
++{
++    auto snapshot = static_cast<DBusServer*>(data)->flatten();
++    auto& nodes = snapshot.nodes;
++    auto* node = node_at(nodes, sd_bus_message_get_path(message));
++    if (!node || !node->source || !node->source->is_text)
++        return reply_node_error(message);
++    return sd_bus_reply_method_return(message, "i", 0);
++}
++
++int DBusServer::handle_text_get_selection(sd_bus_message* message, void* data, sd_bus_error*)
++{
++    auto snapshot = static_cast<DBusServer*>(data)->flatten();
++    auto& nodes = snapshot.nodes;
++    auto* node = node_at(nodes, sd_bus_message_get_path(message));
++    if (!node || !node->source || !node->source->is_text)
++        return reply_node_error(message);
++    int selection = 0;
++    if (sd_bus_message_read(message, "i", &selection) < 0)
++        return -EINVAL;
++    (void)selection;
++    return sd_bus_reply_method_return(message, "(ii)", 0, 0);
++}
++
++int DBusServer::handle_text_add_selection(sd_bus_message* message, void*, sd_bus_error*)
++{
++    return sd_bus_reply_method_return(message, "b", 0);
++}
++
++int DBusServer::handle_text_remove_selection(sd_bus_message* message, void*, sd_bus_error*)
++{
++    return sd_bus_reply_method_return(message, "b", 0);
++}
++
++int DBusServer::handle_text_set_selection(sd_bus_message* message, void*, sd_bus_error*)
++{
++    return sd_bus_reply_method_return(message, "b", 0);
++}
++
++int DBusServer::handle_text_set_caret_offset(sd_bus_message* message, void*, sd_bus_error*)
++{
++    return sd_bus_reply_method_return(message, "b", 0);
++}
++
++int DBusServer::handle_text_scroll_substring_to(sd_bus_message* message, void*, sd_bus_error*)
++{
++    return sd_bus_reply_method_return(message, "b", 0);
++}
++
++int DBusServer::handle_text_scroll_substring_to_point(sd_bus_message* message, void*, sd_bus_error*)
++{
++    return sd_bus_reply_method_return(message, "b", 0);
++}
++
++int DBusServer::handle_editable_set_text_contents(sd_bus_message* message, void* data, sd_bus_error*)
++{
++    auto snapshot = static_cast<DBusServer*>(data)->flatten();
++    auto& nodes = snapshot.nodes;
++    auto* node = node_at(nodes, sd_bus_message_get_path(message));
++    if (!node || !node->source || !node->source->editable || !node->source->set_text)
++        return sd_bus_reply_method_return(message, "b", 0);
++    char const* text = nullptr;
++    if (sd_bus_message_read(message, "s", &text) < 0)
++        return -EINVAL;
++    node->source->set_text(MUST(String::from_utf8(StringView { text, strlen(text) })));
++    return sd_bus_reply_method_return(message, "b", 1);
++}
++
++int DBusServer::handle_editable_insert_text(sd_bus_message* message, void* data, sd_bus_error*)
++{
++    auto snapshot = static_cast<DBusServer*>(data)->flatten();
++    auto& nodes = snapshot.nodes;
++    auto* node = node_at(nodes, sd_bus_message_get_path(message));
++    if (!node || !node->source || !node->source->editable || !node->source->set_text)
++        return sd_bus_reply_method_return(message, "b", 0);
++    int offset = 0;
++    char const* text = nullptr;
++    int length = 0;
++    if (sd_bus_message_read(message, "isi", &offset, &text, &length) < 0)
++        return -EINVAL;
++    (void)length;
++    auto current = node_text(node);
++    if (offset < 0)
++        offset = 0;
++    if (offset > static_cast<int>(current.length()))
++        offset = current.length();
++    auto updated = MUST(String::formatted("{}{}{}", current.substring_view(0, offset), text, current.substring_view(offset)));
++    node->source->set_text(move(updated));
++    return sd_bus_reply_method_return(message, "b", 1);
++}
++
++int DBusServer::handle_editable_delete_text(sd_bus_message* message, void* data, sd_bus_error*)
++{
++    auto snapshot = static_cast<DBusServer*>(data)->flatten();
++    auto& nodes = snapshot.nodes;
++    auto* node = node_at(nodes, sd_bus_message_get_path(message));
++    if (!node || !node->source || !node->source->editable || !node->source->set_text)
++        return sd_bus_reply_method_return(message, "b", 0);
++    int start = 0;
++    int end = 0;
++    if (sd_bus_message_read(message, "ii", &start, &end) < 0)
++        return -EINVAL;
++    auto current = node_text(node);
++    if (start < 0)
++        start = 0;
++    if (end < start)
++        end = start;
++    if (start > static_cast<int>(current.length()))
++        start = current.length();
++    if (end > static_cast<int>(current.length()))
++        end = current.length();
++    auto updated = MUST(String::formatted("{}{}", current.substring_view(0, start), current.substring_view(end)));
++    node->source->set_text(move(updated));
++    return sd_bus_reply_method_return(message, "b", 1);
++}
++
++int DBusServer::handle_editable_copy_text(sd_bus_message* message, void*, sd_bus_error*)
++{
++    return sd_bus_reply_method_return(message, "b", 0);
++}
++
++int DBusServer::handle_editable_cut_text(sd_bus_message* message, void*, sd_bus_error*)
++{
++    return sd_bus_reply_method_return(message, "b", 0);
++}
++
++int DBusServer::handle_editable_paste_text(sd_bus_message* message, void*, sd_bus_error*)
++{
++    return sd_bus_reply_method_return(message, "b", 0);
++}
++
 +int DBusServer::handle_introspect(sd_bus_message* message, void*, sd_bus_error*)
 +{
 +    return sd_bus_reply_method_return(message, "s", introspection_xml);
@@ -565,10 +1183,10 @@ index 00000000..959491f8
 +}
 diff --git a/Userland/Libraries/LibAccessibility/Linux/DBusServer.h b/Userland/Libraries/LibAccessibility/Linux/DBusServer.h
 new file mode 100644
-index 00000000..1ee532b0
+index 00000000..0975a07c
 --- /dev/null
 +++ b/Userland/Libraries/LibAccessibility/Linux/DBusServer.h
-@@ -0,0 +1,68 @@
+@@ -0,0 +1,104 @@
 +/*
 + * Copyright (c) 2026, Serenity Desktop Environment contributors
 + *
@@ -588,6 +1206,9 @@ index 00000000..1ee532b0
 +    explicit DBusServer(Snapshot);
 +    virtual ~DBusServer() override;
 +
++    virtual void notify_state_changed(void*, StringView, bool) override;
++    virtual void notify_text_changed(void*, StringView) override;
++
 +    struct FlatNode {
 +        ByteString path;
 +        String name;
@@ -597,6 +1218,11 @@ index 00000000..1ee532b0
 +        int parent { -1 };
 +        Node const* source { nullptr };
 +        Vector<int> children;
++    };
++
++    struct FlattenedSnapshot {
++        Node root;
++        Vector<FlatNode> nodes;
 +    };
 +
 +    static int index_for_path(char const*);
@@ -628,7 +1254,35 @@ index 00000000..1ee532b0
 +    static int handle_action_get_action_description(sd_bus_message*, void*, sd_bus_error*);
 +    static int handle_action_get_key_binding(sd_bus_message*, void*, sd_bus_error*);
 +
-+    Vector<FlatNode> flatten();
++    static int handle_text_get_text(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_text_get_string_at_offset(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_text_get_character_count(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_text_get_character_at_offset(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_text_get_text_at_offset(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_text_get_attribute_value(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_text_get_attributes(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_text_get_default_attributes(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_text_get_character_extents(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_text_get_range_extents(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_text_get_offset_at_point(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_text_get_n_selections(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_text_get_selection(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_text_add_selection(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_text_remove_selection(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_text_set_selection(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_text_set_caret_offset(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_text_scroll_substring_to(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_text_scroll_substring_to_point(sd_bus_message*, void*, sd_bus_error*);
++
++    static int handle_editable_set_text_contents(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_editable_insert_text(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_editable_delete_text(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_editable_copy_text(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_editable_cut_text(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_editable_paste_text(sd_bus_message*, void*, sd_bus_error*);
++
++    FlattenedSnapshot flatten();
++    ByteString path_for_tag(void*);
 +
 +    Snapshot m_snapshot;
 +    sd_bus* m_bus { nullptr };
@@ -670,10 +1324,10 @@ index 00000000..f1fc2ed5
 +}
 diff --git a/Userland/Libraries/LibAccessibility/Server.h b/Userland/Libraries/LibAccessibility/Server.h
 new file mode 100644
-index 00000000..d3c3bc71
+index 00000000..3e8e62b8
 --- /dev/null
 +++ b/Userland/Libraries/LibAccessibility/Server.h
-@@ -0,0 +1,91 @@
+@@ -0,0 +1,104 @@
 +/*
 + * Copyright (c) 2026, Serenity Desktop Environment contributors
 + *
@@ -748,6 +1402,15 @@ index 00000000..d3c3bc71
 +    // server's event-loop thread, which is the application's GUI thread.
 +    String action_name;
 +    Function<void()> action;
++    // Text/EditableText. `is_text` is separate from a non-empty string so an
++    // empty text editor still exposes the interface.
++    bool is_text { false };
++    bool editable { false };
++    String text;
++    Function<void(String)> set_text;
++    // Opaque producer tag (LibGUI stores a Widget*). The backend uses it to map
++    // an event from a live widget back to its current AT-SPI object path.
++    void* tag { nullptr };
 +    Vector<Node> children;
 +};
 +
@@ -762,15 +1425,19 @@ index 00000000..d3c3bc71
 +    // Returns nullptr when there is no accessibility bus (the normal case for a
 +    // session without a screen reader) or when this platform has no backend.
 +    static OwnPtr<Server> create(Snapshot);
++
++    // Optional event notifications. Backends without a transport ignore them.
++    virtual void notify_state_changed(void*, StringView, bool) { }
++    virtual void notify_text_changed(void*, StringView) { }
 +};
 +
 +}
 diff --git a/Userland/Libraries/LibGUI/AccessibilityServer.cpp b/Userland/Libraries/LibGUI/AccessibilityServer.cpp
 new file mode 100644
-index 00000000..6dea89aa
+index 00000000..1cb026f1
 --- /dev/null
 +++ b/Userland/Libraries/LibGUI/AccessibilityServer.cpp
-@@ -0,0 +1,146 @@
+@@ -0,0 +1,179 @@
 +/*
 + * Copyright (c) 2026, Serenity Desktop Environment contributors
 + *
@@ -784,6 +1451,7 @@ index 00000000..6dea89aa
 +#include <LibGUI/Application.h>
 +#include <LibGUI/Button.h>
 +#include <LibGUI/Label.h>
++#include <LibGUI/TextEditor.h>
 +#include <LibGUI/Window.h>
 +#include <LibGUI/Widget.h>
 +
@@ -844,6 +1512,7 @@ index 00000000..6dea89aa
 +    node.role = role_for(widget);
 +    node.name = name_for(widget);
 +    node.rect = widget.screen_relative_rect();
++    node.tag = &widget;
 +    if (widget.is_enabled()) {
 +        node.states |= Accessibility::StateEnabled | Accessibility::StateSensitive;
 +    }
@@ -861,6 +1530,22 @@ index 00000000..6dea89aa
 +        node.action = [&button] {
 +            if (button.on_click)
 +                button.on_click(0);
++        };
++    }
++
++    if (is<Label>(widget)) {
++        node.is_text = true;
++        node.text = static_cast<Label const&>(widget).text();
++    } else if (is<AbstractButton>(widget)) {
++        node.is_text = true;
++        node.text = static_cast<AbstractButton const&>(widget).text();
++    } else if (is<TextEditor>(widget)) {
++        auto& editor = static_cast<TextEditor&>(widget);
++        node.is_text = true;
++        node.editable = editor.is_editable();
++        node.text = MUST(String::from_byte_string(editor.text()));
++        node.set_text = [&editor](String text) {
++            editor.set_text(text);
 +        };
 +    }
 +
@@ -886,6 +1571,7 @@ index 00000000..6dea89aa
 +        frame.role = Accessibility::Role::Frame;
 +        frame.name = MUST(String::from_byte_string(window.title()));
 +        frame.rect = window.rect();
++        frame.tag = &window;
 +        if (window.is_active())
 +            frame.states |= Accessibility::StateFocused | Accessibility::StateActive;
 +        if (window.main_widget()) {
@@ -916,13 +1602,27 @@ index 00000000..6dea89aa
 +    s_server = nullptr;
 +}
 +
++void AccessibilityServer::notify_state_changed(Widget& widget, StringView state, bool enabled)
++{
++    if (s_server)
++        s_server->notify_state_changed(&widget, state, enabled);
++}
++
++void AccessibilityServer::notify_text_changed(TextEditor& editor)
++{
++    if (!s_server)
++        return;
++    auto text = editor.text();
++    s_server->notify_text_changed(&editor, StringView { text.characters(), text.length() });
++}
++
 +}
 diff --git a/Userland/Libraries/LibGUI/AccessibilityServer.h b/Userland/Libraries/LibGUI/AccessibilityServer.h
 new file mode 100644
-index 00000000..c8f03d60
+index 00000000..12d03588
 --- /dev/null
 +++ b/Userland/Libraries/LibGUI/AccessibilityServer.h
-@@ -0,0 +1,20 @@
+@@ -0,0 +1,28 @@
 +/*
 + * Copyright (c) 2026, Serenity Desktop Environment contributors
 + *
@@ -931,7 +1631,12 @@ index 00000000..c8f03d60
 +
 +#pragma once
 +
++#include <AK/StringView.h>
++
 +namespace GUI {
++
++class TextEditor;
++class Widget;
 +
 +// Publishes the widget tree over the platform accessibility service, if one is
 +// available. LibGUI only builds the snapshot; the D-Bus/AT-SPI transport lives
@@ -940,6 +1645,9 @@ index 00000000..c8f03d60
 +public:
 +    static void initialize();
 +    static void shutdown();
++
++    static void notify_state_changed(Widget&, StringView state, bool enabled);
++    static void notify_text_changed(TextEditor&);
 +};
 +
 +}
@@ -991,10 +1699,51 @@ index d20bbc80..a33ec7f4 100644
 -target_link_libraries(LibGUI PRIVATE LibCore LibELF LibFileSystem LibGfx LibImageDecoderClient LibIPC LibThreading LibRegex LibConfig LibUnicode LibURL)
 +target_link_libraries(LibGUI PRIVATE LibCore LibELF LibFileSystem LibGfx LibImageDecoderClient LibIPC LibThreading LibRegex LibConfig LibUnicode LibURL LibAccessibility)
  target_link_libraries(LibGUI PUBLIC LibSyntax)
+diff --git a/Userland/Libraries/LibGUI/TextEditor.cpp b/Userland/Libraries/LibGUI/TextEditor.cpp
+index 922f4e20..cddfd328 100644
+--- a/Userland/Libraries/LibGUI/TextEditor.cpp
++++ b/Userland/Libraries/LibGUI/TextEditor.cpp
+@@ -13,6 +13,7 @@
+ #include <AK/StringBuilder.h>
+ #include <AK/TemporaryChange.h>
+ #include <LibCore/Timer.h>
++#include <LibGUI/AccessibilityServer.h>
+ #include <LibGUI/Action.h>
+ #include <LibGUI/AutocompleteProvider.h>
+ #include <LibGUI/Clipboard.h>
+@@ -2281,6 +2282,7 @@ void TextEditor::document_did_change(AllowCallback allow_callback)
+ {
+     did_change(allow_callback);
+     update();
++    AccessibilityServer::notify_text_changed(*this);
+ }
+ 
+ void TextEditor::document_did_update_undo_stack()
 diff --git a/Userland/Libraries/LibGUI/Window.cpp b/Userland/Libraries/LibGUI/Window.cpp
+index cf9453f3..e21d6410 100644
 --- a/Userland/Libraries/LibGUI/Window.cpp
 +++ b/Userland/Libraries/LibGUI/Window.cpp
-@@ -1288,6 +1298,14 @@ void Window::for_each_window(Badge<ConnectionToWindowServer>, Function<void(Wind
+@@ -14,6 +14,7 @@
+ #include <LibCore/EventLoop.h>
+ #include <LibCore/MimeData.h>
+ #include <LibGUI/Action.h>
++#include <LibGUI/AccessibilityServer.h>
+ #include <LibGUI/Application.h>
+ #include <LibGUI/ConnectionToWindowManagerServer.h>
+ #include <LibGUI/ConnectionToWindowServer.h>
+@@ -962,6 +970,11 @@ void Window::set_focused_widget(Widget* widget, FocusSource source)
+         if (m_focused_widget && m_focused_widget->on_focus_change)
+             m_focused_widget->on_focus_change(m_focused_widget->is_focused(), source);
+     }
++
++    if (previously_focused_widget)
++        AccessibilityServer::notify_state_changed(*previously_focused_widget, "focused"sv, false);
++    if (m_focused_widget)
++        AccessibilityServer::notify_state_changed(*m_focused_widget, "focused"sv, true);
+ }
+ 
+ void Window::set_automatic_cursor_tracking_widget(Widget* widget)
+@@ -1288,6 +1304,14 @@ void Window::for_each_window(Badge<ConnectionToWindowServer>, Function<void(Wind
      }
  }
  
@@ -1010,6 +1759,7 @@ diff --git a/Userland/Libraries/LibGUI/Window.cpp b/Userland/Libraries/LibGUI/Wi
  {
      for (auto& e : *reified_windows) {
 diff --git a/Userland/Libraries/LibGUI/Window.h b/Userland/Libraries/LibGUI/Window.h
+index 41d47574..6b784a3f 100644
 --- a/Userland/Libraries/LibGUI/Window.h
 +++ b/Userland/Libraries/LibGUI/Window.h
 @@ -203,6 +208,9 @@ public:
