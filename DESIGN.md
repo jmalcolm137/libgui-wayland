@@ -490,6 +490,20 @@ The change is a single build-system patch, `patches/0001-lagom-build-full-libgui
 `scripts/build-libgui.sh`. No `LibGUI`/`LibGfx` source is edited. Preferred long-term:
 contribute the full `LibGUI` target to Lagom upstream (it already builds the GML subset).
 
+### 4.1.1 SerenityOS fixes
+
+`scripts/fetch-serenity.sh` fetches the checkout from our public fork,
+[`jmalcolm137/serenity`](https://github.com/jmalcolm137/serenity), branch `fixes`:
+the pinned upstream revision (`SERENITY_UPSTREAM_BASE`) plus fixes that make sense
+for SerenityOS **on its own**, each an ordinary commit and a candidate for an
+upstream PR. A change that only exists because of how this port, or the Serenity
+Desktop Environment, uses SerenityOS does not belong there, however small: the
+port's host changes stay in `patches/`, and the SDE's in its own `patches/` (whose
+`README.md` tracks every change and its upstream status).
+
+Moving the base forward means rebasing `fixes` onto a newer upstream (real commits,
+so `git rebase` does the work) and pointing `SERENITY_REVISION` at the new tip.
+
 ### 4.2 M2 result — the shim is live
 
 The first vertical slice is implemented and verified on a real KDE Plasma Wayland session:

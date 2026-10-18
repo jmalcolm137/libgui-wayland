@@ -6,7 +6,12 @@
 # headers that userspace libraries legitimately include.
 set -euo pipefail
 
-SERENITY_REMOTE="${SERENITY_REMOTE:-https://github.com/SerenityOS/serenity.git}"
+# The checkout comes from our public fork's `fixes` branch: SerenityOS at the
+# pinned upstream revision (see below), plus fixes that make sense for SerenityOS
+# on its own, each one a candidate for an upstream PR (DESIGN.md
+# §4.1.1). A change that only exists because of how this port or the SDE uses
+# SerenityOS does not belong there: it stays in patches/.
+SERENITY_REMOTE="${SERENITY_REMOTE:-https://github.com/jmalcolm137/serenity.git}"
 # Pinned so the audit and patch in this repo are reproducible. See DESIGN.md.
 #
 # Advanced 2026-10-15: the previous pin (80baeb29) predates upstream work the port
@@ -15,7 +20,12 @@ SERENITY_REMOTE="${SERENITY_REMOTE:-https://github.com/SerenityOS/serenity.git}"
 # ("add_subdirectory given source .../Userland/Games/Sudoku which is not an
 # existing directory"). The development checkouts had drifted ahead of the pin,
 # which is why nothing noticed.
-SERENITY_REVISION="${SERENITY_REVISION:-a43d652b44066ab4d2605e4be4dc0bc9aa8c116e}"
+#
+# The fork's `fixes` branch sits on upstream a43d652b44066ab4d2605e4be4dc0bc9aa8c116e
+# (SERENITY_UPSTREAM_BASE below); rebasing it onto a newer upstream is a `git
+# rebase` of real commits, and the pin moves to the rebased tip.
+SERENITY_UPSTREAM_BASE="a43d652b44066ab4d2605e4be4dc0bc9aa8c116e"
+SERENITY_REVISION="${SERENITY_REVISION:-054963e8116a3b13797318c5251313c1b8fa4caf}"
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERENITY_SRC="${SERENITY_SRC:-$PROJECT_ROOT/serenity}"
@@ -37,11 +47,11 @@ if [[ -d "$SERENITY_SRC/.git" ]]; then
     if [[ -n "$previous" && "$previous" != "$SERENITY_REVISION" ]]; then
         echo "    (it was at ${previous:0:12}, moving to the pinned ${SERENITY_REVISION:0:12})"
     fi
-    git -C "$SERENITY_SRC" fetch --depth 1 origin "$SERENITY_REVISION"
+    git -C "$SERENITY_SRC" fetch --depth 1 "$SERENITY_REMOTE" "$SERENITY_REVISION"
 else
     echo "==> Cloning SerenityOS (blobless) into $SERENITY_SRC"
     git clone --filter=blob:none --no-checkout "$SERENITY_REMOTE" "$SERENITY_SRC"
-    git -C "$SERENITY_SRC" fetch --depth 1 origin "$SERENITY_REVISION"
+    git -C "$SERENITY_SRC" fetch --depth 1 "$SERENITY_REMOTE" "$SERENITY_REVISION"
 fi
 
 git -C "$SERENITY_SRC" checkout --quiet "$SERENITY_REVISION"
