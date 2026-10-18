@@ -26,10 +26,10 @@ index 00000000..5ad37c1f
 +endif()
 diff --git a/Userland/Libraries/LibAccessibility/Linux/DBusServer.cpp b/Userland/Libraries/LibAccessibility/Linux/DBusServer.cpp
 new file mode 100644
-index 00000000..6f06ac4a
+index 00000000..959491f8
 --- /dev/null
 +++ b/Userland/Libraries/LibAccessibility/Linux/DBusServer.cpp
-@@ -0,0 +1,291 @@
+@@ -0,0 +1,533 @@
 +/*
 + * Copyright (c) 2026, Serenity Desktop Environment contributors
 + *
@@ -62,6 +62,51 @@ index 00000000..6f06ac4a
 +    <method name="GetParent"><arg direction="out" type="(so)"/></method>
 +    <method name="GetApplication"><arg direction="out" type="(so)"/></method>
 +    <method name="GetInterfaces"><arg direction="out" type="as"/></method>
++  </interface>
++  <interface name="org.a11y.atspi.Component">
++    <method name="Contains">
++      <arg direction="in" name="x" type="i"/>
++      <arg direction="in" name="y" type="i"/>
++      <arg direction="in" name="coord_type" type="u"/>
++      <arg direction="out" type="b"/>
++    </method>
++    <method name="GetAccessibleAtPoint">
++      <arg direction="in" name="x" type="i"/>
++      <arg direction="in" name="y" type="i"/>
++      <arg direction="in" name="coord_type" type="u"/>
++      <arg direction="out" type="(so)"/>
++    </method>
++    <method name="GetExtents">
++      <arg direction="in" name="coord_type" type="u"/>
++      <arg direction="out" type="(iiii)"/>
++    </method>
++    <method name="GetPosition">
++      <arg direction="in" name="coord_type" type="u"/>
++      <arg direction="out" type="(ii)"/>
++    </method>
++    <method name="GetSize"><arg direction="out" type="(ii)"/></method>
++    <method name="GetLayer"><arg direction="out" type="u"/></method>
++    <method name="GetMDIZOrder"><arg direction="out" type="i"/></method>
++    <method name="GrabFocus"><arg direction="out" type="b"/></method>
++  </interface>
++  <interface name="org.a11y.atspi.Action">
++    <method name="GetActions"><arg direction="out" type="a(sss)"/></method>
++    <method name="DoAction">
++      <arg direction="in" name="index" type="i"/>
++      <arg direction="out" type="b"/>
++    </method>
++    <method name="GetActionName">
++      <arg direction="in" name="index" type="i"/>
++      <arg direction="out" type="s"/>
++    </method>
++    <method name="GetActionDescription">
++      <arg direction="in" name="index" type="i"/>
++      <arg direction="out" type="s"/>
++    </method>
++    <method name="GetKeyBinding">
++      <arg direction="in" name="index" type="i"/>
++      <arg direction="out" type="s"/>
++    </method>
 +  </interface>
 +  <interface name="org.freedesktop.DBus.Introspectable">
 +    <method name="Introspect"><arg direction="out" type="s"/></method>
@@ -121,8 +166,33 @@ index 00000000..6f06ac4a
 +        SD_BUS_METHOD("Introspect", "", "s", handle_introspect, 0),
 +        SD_BUS_VTABLE_END,
 +    };
++    static sd_bus_vtable const component_vtable[] = {
++        SD_BUS_VTABLE_START(0),
++        SD_BUS_METHOD("Contains", "iiu", "b", handle_component_contains, 0),
++        SD_BUS_METHOD("GetAccessibleAtPoint", "iiu", "(so)", handle_component_get_accessible_at_point, 0),
++        SD_BUS_METHOD("GetExtents", "u", "(iiii)", handle_component_get_extents, 0),
++        SD_BUS_METHOD("GetPosition", "u", "(ii)", handle_component_get_position, 0),
++        SD_BUS_METHOD("GetSize", "", "(ii)", handle_component_get_size, 0),
++        SD_BUS_METHOD("GetLayer", "", "u", handle_component_get_layer, 0),
++        SD_BUS_METHOD("GetMDIZOrder", "", "i", handle_component_get_mdi_z_order, 0),
++        SD_BUS_METHOD("GrabFocus", "", "b", handle_component_grab_focus, 0),
++        SD_BUS_VTABLE_END,
++    };
 +    (void)sd_bus_add_object_vtable(m_bus, nullptr, root_path, "org.a11y.atspi.Accessible", vtable, this);
 +    (void)sd_bus_add_fallback_vtable(m_bus, nullptr, accessible_prefix, "org.a11y.atspi.Accessible", vtable, nullptr, this);
++    static sd_bus_vtable const action_vtable[] = {
++        SD_BUS_VTABLE_START(0),
++        SD_BUS_METHOD("GetActions", "", "a(sss)", handle_action_get_actions, 0),
++        SD_BUS_METHOD("DoAction", "i", "b", handle_action_do_action, 0),
++        SD_BUS_METHOD("GetActionName", "i", "s", handle_action_get_action_name, 0),
++        SD_BUS_METHOD("GetActionDescription", "i", "s", handle_action_get_action_description, 0),
++        SD_BUS_METHOD("GetKeyBinding", "i", "s", handle_action_get_key_binding, 0),
++        SD_BUS_VTABLE_END,
++    };
++    (void)sd_bus_add_object_vtable(m_bus, nullptr, root_path, "org.a11y.atspi.Component", component_vtable, this);
++    (void)sd_bus_add_fallback_vtable(m_bus, nullptr, accessible_prefix, "org.a11y.atspi.Component", component_vtable, nullptr, this);
++    (void)sd_bus_add_object_vtable(m_bus, nullptr, root_path, "org.a11y.atspi.Action", action_vtable, this);
++    (void)sd_bus_add_fallback_vtable(m_bus, nullptr, accessible_prefix, "org.a11y.atspi.Action", action_vtable, nullptr, this);
 +
 +    dbgln("Accessibility: serving as {}", m_bus_name);
 +    m_notifier = Core::Notifier::construct(sd_bus_get_fd(m_bus), Core::Notifier::Type::Read);
@@ -170,6 +240,7 @@ index 00000000..6f06ac4a
 +        flat.rect = node.rect;
 +        flat.states = node.states;
 +        flat.parent = parent;
++        flat.source = &node;
 +        nodes.append(move(flat));
 +        if (parent >= 0)
 +            nodes[parent].children.append(index);
@@ -298,8 +369,14 @@ index 00000000..6f06ac4a
 +    return sd_bus_reply_method_return(message, "(so)", server.m_bus_name.characters(), root_path);
 +}
 +
-+int DBusServer::handle_get_interfaces(sd_bus_message* message, void*, sd_bus_error*)
++int DBusServer::handle_get_interfaces(sd_bus_message* message, void* data, sd_bus_error*)
 +{
++    auto& server = *static_cast<DBusServer*>(data);
++    auto nodes = server.flatten();
++    auto* node = node_at(nodes, sd_bus_message_get_path(message));
++    if (!node)
++        return reply_node_error(message);
++
 +    sd_bus_message* reply = nullptr;
 +    int result = sd_bus_message_new_method_return(message, &reply);
 +    if (result < 0)
@@ -308,11 +385,176 @@ index 00000000..6f06ac4a
 +    if (result >= 0)
 +        result = sd_bus_message_append(reply, "s", "org.a11y.atspi.Accessible");
 +    if (result >= 0)
++        result = sd_bus_message_append(reply, "s", "org.a11y.atspi.Component");
++    if (result >= 0 && node->source && !node->source->action_name.is_empty())
++        result = sd_bus_message_append(reply, "s", "org.a11y.atspi.Action");
++    if (result >= 0)
 +        result = sd_bus_message_close_container(reply);
 +    if (result >= 0)
 +        result = sd_bus_send(nullptr, reply, nullptr);
 +    sd_bus_message_unref(reply);
 +    return result;
++}
++
++static bool rect_contains(Gfx::IntRect const& rect, int x, int y)
++{
++    return !rect.is_empty() && x >= rect.x() && x < rect.x() + rect.width() && y >= rect.y() && y < rect.y() + rect.height();
++}
++
++int DBusServer::handle_component_contains(sd_bus_message* message, void* data, sd_bus_error*)
++{
++    auto nodes = static_cast<DBusServer*>(data)->flatten();
++    auto* node = node_at(nodes, sd_bus_message_get_path(message));
++    int x = 0;
++    int y = 0;
++    unsigned coord_type = 0;
++    if (sd_bus_message_read(message, "iiu", &x, &y, &coord_type) < 0)
++        return -EINVAL;
++    (void)coord_type;
++    if (!node)
++        return reply_node_error(message);
++    return sd_bus_reply_method_return(message, "b", rect_contains(node->rect, x, y) ? 1 : 0);
++}
++
++int DBusServer::handle_component_get_accessible_at_point(sd_bus_message* message, void* data, sd_bus_error*)
++{
++    auto& server = *static_cast<DBusServer*>(data);
++    auto nodes = server.flatten();
++    int x = 0;
++    int y = 0;
++    unsigned coord_type = 0;
++    if (sd_bus_message_read(message, "iiu", &x, &y, &coord_type) < 0)
++        return -EINVAL;
++    (void)coord_type;
++
++    int best = -1;
++    int best_area = 0;
++    for (int i = 0; i < static_cast<int>(nodes.size()); ++i) {
++        auto const& rect = nodes[i].rect;
++        if (!rect_contains(rect, x, y))
++            continue;
++        int const area = rect.width() * rect.height();
++        if (best < 0 || area < best_area) {
++            best = i;
++            best_area = area;
++        }
++    }
++    if (best < 0)
++        return sd_bus_reply_method_return(message, "(so)", "", "/");
++    return sd_bus_reply_method_return(message, "(so)", server.m_bus_name.characters(), nodes[best].path.characters());
++}
++
++int DBusServer::handle_component_get_extents(sd_bus_message* message, void* data, sd_bus_error*)
++{
++    auto nodes = static_cast<DBusServer*>(data)->flatten();
++    auto* node = node_at(nodes, sd_bus_message_get_path(message));
++    unsigned coord_type = 0;
++    if (sd_bus_message_read(message, "u", &coord_type) < 0)
++        return -EINVAL;
++    (void)coord_type;
++    if (!node)
++        return reply_node_error(message);
++    return sd_bus_reply_method_return(message, "(iiii)", node->rect.x(), node->rect.y(), node->rect.width(), node->rect.height());
++}
++
++int DBusServer::handle_component_get_position(sd_bus_message* message, void* data, sd_bus_error*)
++{
++    auto nodes = static_cast<DBusServer*>(data)->flatten();
++    auto* node = node_at(nodes, sd_bus_message_get_path(message));
++    unsigned coord_type = 0;
++    if (sd_bus_message_read(message, "u", &coord_type) < 0)
++        return -EINVAL;
++    (void)coord_type;
++    if (!node)
++        return reply_node_error(message);
++    return sd_bus_reply_method_return(message, "(ii)", node->rect.x(), node->rect.y());
++}
++
++int DBusServer::handle_component_get_size(sd_bus_message* message, void* data, sd_bus_error*)
++{
++    auto nodes = static_cast<DBusServer*>(data)->flatten();
++    auto* node = node_at(nodes, sd_bus_message_get_path(message));
++    if (!node)
++        return reply_node_error(message);
++    return sd_bus_reply_method_return(message, "(ii)", node->rect.width(), node->rect.height());
++}
++
++int DBusServer::handle_component_get_layer(sd_bus_message* message, void* data, sd_bus_error*)
++{
++    auto nodes = static_cast<DBusServer*>(data)->flatten();
++    auto* node = node_at(nodes, sd_bus_message_get_path(message));
++    if (!node)
++        return reply_node_error(message);
++    unsigned layer = (node->role == Role::Application || node->role == Role::Frame) ? 8u : 3u;
++    return sd_bus_reply_method_return(message, "u", layer);
++}
++
++int DBusServer::handle_component_get_mdi_z_order(sd_bus_message* message, void*, sd_bus_error*)
++{
++    return sd_bus_reply_method_return(message, "i", 0);
++}
++
++int DBusServer::handle_component_grab_focus(sd_bus_message* message, void*, sd_bus_error*)
++{
++    return sd_bus_reply_method_return(message, "b", 0);
++}
++
++int DBusServer::handle_action_get_actions(sd_bus_message* message, void* data, sd_bus_error*)
++{
++    auto nodes = static_cast<DBusServer*>(data)->flatten();
++    auto* node = node_at(nodes, sd_bus_message_get_path(message));
++    if (!node)
++        return reply_node_error(message);
++
++    sd_bus_message* reply = nullptr;
++    int result = sd_bus_message_new_method_return(message, &reply);
++    if (result < 0)
++        return result;
++    result = sd_bus_message_open_container(reply, 'a', "(sss)");
++    if (result >= 0 && node->source && !node->source->action_name.is_empty())
++        result = sd_bus_message_append(reply, "(sss)", node->source->action_name.to_byte_string().characters(), "", "");
++    if (result >= 0)
++        result = sd_bus_message_close_container(reply);
++    if (result >= 0)
++        result = sd_bus_send(nullptr, reply, nullptr);
++    sd_bus_message_unref(reply);
++    return result;
++}
++
++int DBusServer::handle_action_do_action(sd_bus_message* message, void* data, sd_bus_error*)
++{
++    auto nodes = static_cast<DBusServer*>(data)->flatten();
++    auto* node = node_at(nodes, sd_bus_message_get_path(message));
++    if (!node)
++        return reply_node_error(message);
++    int index = -1;
++    if (sd_bus_message_read(message, "i", &index) < 0)
++        return -EINVAL;
++    if (index != 0 || !node->source || !node->source->action)
++        return sd_bus_reply_method_return(message, "b", 0);
++    node->source->action();
++    return sd_bus_reply_method_return(message, "b", 1);
++}
++
++int DBusServer::handle_action_get_action_name(sd_bus_message* message, void* data, sd_bus_error*)
++{
++    auto nodes = static_cast<DBusServer*>(data)->flatten();
++    auto* node = node_at(nodes, sd_bus_message_get_path(message));
++    if (!node)
++        return reply_node_error(message);
++    if (!node->source || node->source->action_name.is_empty())
++        return sd_bus_reply_method_return(message, "s", "");
++    return sd_bus_reply_method_return(message, "s", node->source->action_name.to_byte_string().characters());
++}
++
++int DBusServer::handle_action_get_action_description(sd_bus_message* message, void*, sd_bus_error*)
++{
++    return sd_bus_reply_method_return(message, "s", "");
++}
++
++int DBusServer::handle_action_get_key_binding(sd_bus_message* message, void*, sd_bus_error*)
++{
++    return sd_bus_reply_method_return(message, "s", "");
 +}
 +
 +int DBusServer::handle_introspect(sd_bus_message* message, void*, sd_bus_error*)
@@ -323,10 +565,10 @@ index 00000000..6f06ac4a
 +}
 diff --git a/Userland/Libraries/LibAccessibility/Linux/DBusServer.h b/Userland/Libraries/LibAccessibility/Linux/DBusServer.h
 new file mode 100644
-index 00000000..ff2d554a
+index 00000000..1ee532b0
 --- /dev/null
 +++ b/Userland/Libraries/LibAccessibility/Linux/DBusServer.h
-@@ -0,0 +1,52 @@
+@@ -0,0 +1,68 @@
 +/*
 + * Copyright (c) 2026, Serenity Desktop Environment contributors
 + *
@@ -353,6 +595,7 @@ index 00000000..ff2d554a
 +        Gfx::IntRect rect;
 +        u32 states { 0 };
 +        int parent { -1 };
++        Node const* source { nullptr };
 +        Vector<int> children;
 +    };
 +
@@ -369,6 +612,21 @@ index 00000000..ff2d554a
 +    static int handle_get_application(sd_bus_message*, void*, sd_bus_error*);
 +    static int handle_get_interfaces(sd_bus_message*, void*, sd_bus_error*);
 +    static int handle_introspect(sd_bus_message*, void*, sd_bus_error*);
++
++    static int handle_component_contains(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_component_get_accessible_at_point(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_component_get_extents(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_component_get_position(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_component_get_size(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_component_get_layer(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_component_get_mdi_z_order(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_component_grab_focus(sd_bus_message*, void*, sd_bus_error*);
++
++    static int handle_action_get_actions(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_action_do_action(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_action_get_action_name(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_action_get_action_description(sd_bus_message*, void*, sd_bus_error*);
++    static int handle_action_get_key_binding(sd_bus_message*, void*, sd_bus_error*);
 +
 +    Vector<FlatNode> flatten();
 +
@@ -412,10 +670,10 @@ index 00000000..f1fc2ed5
 +}
 diff --git a/Userland/Libraries/LibAccessibility/Server.h b/Userland/Libraries/LibAccessibility/Server.h
 new file mode 100644
-index 00000000..d2aa7f45
+index 00000000..d3c3bc71
 --- /dev/null
 +++ b/Userland/Libraries/LibAccessibility/Server.h
-@@ -0,0 +1,87 @@
+@@ -0,0 +1,91 @@
 +/*
 + * Copyright (c) 2026, Serenity Desktop Environment contributors
 + *
@@ -486,6 +744,10 @@ index 00000000..d2aa7f45
 +    Role role { Role::Invalid };
 +    Gfx::IntRect rect;
 +    u32 states { 0 };
++    // AT-SPI actions are optional. The callback runs on the accessibility
++    // server's event-loop thread, which is the application's GUI thread.
++    String action_name;
++    Function<void()> action;
 +    Vector<Node> children;
 +};
 +
@@ -505,10 +767,10 @@ index 00000000..d2aa7f45
 +}
 diff --git a/Userland/Libraries/LibGUI/AccessibilityServer.cpp b/Userland/Libraries/LibGUI/AccessibilityServer.cpp
 new file mode 100644
-index 00000000..0f2179ee
+index 00000000..6dea89aa
 --- /dev/null
 +++ b/Userland/Libraries/LibGUI/AccessibilityServer.cpp
-@@ -0,0 +1,136 @@
+@@ -0,0 +1,146 @@
 +/*
 + * Copyright (c) 2026, Serenity Desktop Environment contributors
 + *
@@ -520,6 +782,7 @@ index 00000000..0f2179ee
 +#include <LibAccessibility/Server.h>
 +#include <LibGUI/AbstractButton.h>
 +#include <LibGUI/Application.h>
++#include <LibGUI/Button.h>
 +#include <LibGUI/Label.h>
 +#include <LibGUI/Window.h>
 +#include <LibGUI/Widget.h>
@@ -591,6 +854,15 @@ index 00000000..0f2179ee
 +        node.states |= Accessibility::StateFocusable;
 +    if (widget.is_focused())
 +        node.states |= Accessibility::StateFocused;
++
++    if (is<Button>(widget)) {
++        auto& button = static_cast<Button&>(widget);
++        node.action_name = MUST(String::from_utf8("click"sv));
++        node.action = [&button] {
++            if (button.on_click)
++                button.on_click(0);
++        };
++    }
 +
 +    for (auto& child : widget.child_widgets()) {
 +        if (child.is_visible())
