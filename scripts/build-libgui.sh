@@ -86,7 +86,12 @@ fi
 patch_set_fingerprint() {
     {
         git -C "$SERENITY_SRC" rev-parse HEAD
-        sha256sum "$PROJECT_ROOT"/patches/*.patch
+        # Names and contents only: absolute paths differ between the development
+        # checkout and an AUR makepkg $srcdir, but the applied set is the same.
+        for patch in "$PROJECT_ROOT"/patches/*.patch; do
+            printf '%s ' "$(basename "$patch")"
+            sha256sum "$patch" | cut -d' ' -f1
+        done
     } | sha256sum | cut -d' ' -f1
 }
 PATCH_MARKER="$(git -C "$SERENITY_SRC" rev-parse --absolute-git-dir)/sde-patch-set-applied"
