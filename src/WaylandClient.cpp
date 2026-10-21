@@ -1037,6 +1037,23 @@ void WaylandClient::on_output_done()
 
 void WaylandClient::on_seat_capabilities(u32 capabilities)
 {
+    // A capability that goes away takes the device object with it: the
+    // compositor makes it inert, and it never delivers another event. Drop it, so
+    // that the capability coming back (a keyboard plugged in again) gets a fresh
+    // one, with its keymap and enter. Keeping the dead one meant a client never
+    // received a key again after the last keyboard was unplugged.
+    if (!(capabilities & WL_SEAT_CAPABILITY_POINTER) && m_pointer) {
+        wl_pointer_destroy(m_pointer);
+        m_pointer = nullptr;
+        m_pointer_popup = -1;
+        m_pointer_window = -1;
+    }
+    if (!(capabilities & WL_SEAT_CAPABILITY_KEYBOARD) && m_keyboard) {
+        wl_keyboard_destroy(m_keyboard);
+        m_keyboard = nullptr;
+        m_focused_window = -1;
+    }
+
     if ((capabilities & WL_SEAT_CAPABILITY_POINTER) && !m_pointer) {
         m_pointer = wl_seat_get_pointer(m_seat);
         wl_pointer_add_listener(m_pointer, &s_pointer_listener, this);
