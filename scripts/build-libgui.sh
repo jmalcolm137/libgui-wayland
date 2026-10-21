@@ -58,7 +58,7 @@ if [[ ${#TARGETS[@]} -eq 0 ]]; then
     )
 fi
 
-if [[ ! -d "$SERENITY_SRC/.git" ]]; then
+if ! git -C "$SERENITY_SRC" rev-parse --git-dir >/dev/null 2>&1; then
     echo "error: SerenityOS checkout not found at $SERENITY_SRC" >&2
     echo "       run scripts/fetch-serenity.sh first" >&2
     exit 1
@@ -77,26 +77,44 @@ fi
 # one line that makes a *later* failure legible. A stale SerenityOS pin once made
 # every SDE patch unverifiable and the build failed much later, in CMake, with no
 # hint of the cause.
+# A patch set applied to this checkout is recorded in the git dir. The framework
+# build runs this script twice (generated endpoint headers, then the full library
+# list); without the marker the second run re-checks its own already-applied
+# patches, and the ones whose hunks overlap later patches can neither apply nor
+# reverse-apply. They are not stale -- the tree is exactly the result the patch
+# set produces -- so do not turn an idempotency detail into a rebuild failure.
+patch_set_fingerprint() {
+    {
+        git -C "$SERENITY_SRC" rev-parse HEAD
+        sha256sum "$PROJECT_ROOT"/patches/*.patch
+    } | sha256sum | cut -d' ' -f1
+}
+PATCH_MARKER="$(git -C "$SERENITY_SRC" rev-parse --absolute-git-dir)/sde-patch-set-applied"
+PATCH_FINGERPRINT="$(patch_set_fingerprint)"
 applied_count=0
 already_count=0
 unverified_count=0
 unverified_names=""
-for patch in "$PROJECT_ROOT"/patches/*.patch; do
-    name="$(basename "$patch")"
-    if git -C "$SERENITY_SRC" apply --recount -C1 --reverse --check "$patch" >/dev/null 2>&1; then
-        echo "==> $name already applied"
-        already_count=$((already_count + 1))
-    elif git -C "$SERENITY_SRC" apply --recount -C1 --check "$patch" >/dev/null 2>&1; then
-        echo "==> Applying $name"
-        git -C "$SERENITY_SRC" apply --recount -C1 "$patch"
-        applied_count=$((applied_count + 1))
-    else
-        echo "==> $name assumed applied (overlapping context; unverifiable)"
-        unverified_count=$((unverified_count + 1))
-        unverified_names="$unverified_names $name"
-    fi
-done
-echo "==> patches: $applied_count applied, $already_count already applied, $unverified_count unverifiable"
+if [[ -f "$PATCH_MARKER" && "$(cat "$PATCH_MARKER")" == "$PATCH_FINGERPRINT" ]]; then
+    echo "==> patch set already applied for $(git -C "$SERENITY_SRC" rev-parse --short HEAD)"
+else
+    for patch in "$PROJECT_ROOT"/patches/*.patch; do
+        name="$(basename "$patch")"
+        if git -C "$SERENITY_SRC" apply --recount -C1 --reverse --check "$patch" >/dev/null 2>&1; then
+            echo "==> $name already applied"
+            already_count=$((already_count + 1))
+        elif git -C "$SERENITY_SRC" apply --recount -C1 --check "$patch" >/dev/null 2>&1; then
+            echo "==> Applying $name"
+            git -C "$SERENITY_SRC" apply --recount -C1 "$patch"
+            applied_count=$((applied_count + 1))
+        else
+            echo "==> $name assumed applied (overlapping context; unverifiable)"
+            unverified_count=$((unverified_count + 1))
+            unverified_names="$unverified_names $name"
+        fi
+    done
+    echo "==> patches: $applied_count applied, $already_count already applied, $unverified_count unverifiable"
+fi
 if [[ -n "$unverified_names" ]]; then
     # A patch the loop cannot verify may simply not be in effect, and the failure it
     # causes appears much later and elsewhere -- as a test failure with no obvious
@@ -128,6 +146,9 @@ if [[ "$unverified_count" -gt 0 ]]; then
         echo "             build step below fails unexpectedly, that is the likely reason." >&2
         echo "             scripts/fetch-serenity.sh pins it." >&2
     fi
+fi
+if [[ "$unverified_count" -eq 0 ]]; then
+    printf '%s\n' "$PATCH_FINGERPRINT" > "$PATCH_MARKER"
 fi
 
 echo "==> Configuring Lagom"

@@ -38,7 +38,7 @@ SERENITY_SRC="${SERENITY_SRC:-$PROJECT_ROOT/serenity}"
 #   Kernel/Memory                            -> header-only VirtualAddress/PhysicalAddress (LibELF)
 SPARSE_DIRS=(AK Userland Meta Base/res Base/home Base/etc Base/usr/share/man Tests Kernel/API Kernel/Memory)
 
-if [[ -d "$SERENITY_SRC/.git" ]]; then
+if git -C "$SERENITY_SRC" rev-parse --git-dir >/dev/null 2>&1; then
     # A checkout that has drifted ahead of the pin is the state that hides a stale
     # pin: every patch still "applies" to the newer tree, so nothing complains, and
     # a later build fails somewhere unrelated. Say it out loud.
