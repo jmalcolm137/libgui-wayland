@@ -1,0 +1,58 @@
+diff --git a/Userland/Applications/DisplaySettings/MonitorSettingsWidget.cpp b/Userland/Applications/DisplaySettings/MonitorSettingsWidget.cpp
+--- a/Userland/Applications/DisplaySettings/MonitorSettingsWidget.cpp
++++ b/Userland/Applications/DisplaySettings/MonitorSettingsWidget.cpp
+@@ -8,6 +8,7 @@
+ #include "MonitorSettingsWidget.h"
+ #include <AK/Math.h>
+ #include <Applications/DisplaySettings/MonitorSettingsGML.h>
++#include <LibCore/File.h>
+ #include <LibGUI/BoxLayout.h>
+ #include <LibGUI/Button.h>
+ #include <LibGUI/ComboBox.h>
+@@ -77,6 +78,46 @@
+         dbgln("EDID unavailable; Adding resolutions manually");
+     }
+ 
++#if defined(__linux__)
++    // The port has no Serenity graphics-connector device for LibEDID, so the
++    // list above is generic and may omit the panel's native mode (e.g.
++    // 2560x1600). The kernel exposes the connector's real modes under sysfs;
++    // add them so the native resolution is always selectable, whatever mode is
++    // current.
++    if (m_selected_screen_index < m_screen_layout.screens.size()) {
++        auto const& device = m_screen_layout.screens[m_selected_screen_index].device;
++        if (device.has_value() && !device->is_empty()) {
++            for (int card = 0; card < 10; ++card) {
++                auto file = Core::File::open(ByteString::formatted("/sys/class/drm/card{}-{}/modes", card, *device), Core::File::OpenMode::Read);
++                if (file.is_error())
++                    continue;
++                auto contents = file.value()->read_until_eof();
++                if (contents.is_error())
++                    break;
++                Vector<Gfx::IntSize> kernel_modes;
++                for (auto line : StringView { contents.value().bytes() }.split_view('\n')) {
++                    auto parts = line.split_view('x');
++                    if (parts.size() != 2)
++                        continue;
++                    auto width = parts[0].to_number<int>();
++                    auto height = parts[1].to_number<int>();
++                    if (!width.has_value() || !height.has_value() || *width <= 0 || *height <= 0)
++                        continue;
++                    TRY(kernel_modes.try_append(Gfx::IntSize { *width, *height }));
++                }
++                if (!kernel_modes.is_empty()) {
++                    dbgln("Adding {} kernel modes for {}", kernel_modes.size(), *device);
++                    for (auto mode : kernel_modes) {
++                        if (!m_resolutions.contains_slow(mode))
++                            TRY(m_resolutions.try_append(mode));
++                    }
++                }
++                break;
++            }
++        }
++    }
++#endif
++
+     // The current mode must be selectable even when the EDID is unavailable: the
+     // fallback list is generic and need not contain a panel's native resolution
+     // (e.g. 2560x1600). Without this the combo falls back to its first entry and
