@@ -12,6 +12,15 @@ The shim is called **LibWM**. It sits between `LibGUI`'s WindowServer IPC protoc
 * **Build:** SerenityOS's Lagom host build, extended to compile the **full** LibGUI (not the
   six-file Lagom stub).
 
+## Guide
+
+[**Building GUI Applications for Wayland**](docs/guide/LibGUI-Wayland-Guide.pdf) is a
+hands-on, application-focused guide to writing LibGUI applications that run as native
+Wayland clients on any compositor. It includes four complete example applications
+(`examples/`), does not rely on the Serenity Desktop Environment, and treats the platform
+layer as an in-process implementation detail rather than part of the application
+programming model.
+
 ## Principles
 
 1. **The compositor is the source of truth.** Query the real Wayland compositor for outputs,
