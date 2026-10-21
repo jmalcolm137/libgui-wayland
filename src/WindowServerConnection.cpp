@@ -19,6 +19,7 @@
 #include <LibGUI/Window.h>
 #include <WindowServer/SystemEffects.h>
 #include <WindowServer/WindowType.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
@@ -363,7 +364,9 @@ void WindowServerConnection::present(Window& window)
             auto bytes = encoded.release_value();
             int fd = ::open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
             if (fd >= 0) {
-                (void)::write(fd, bytes.data(), bytes.size());
+                auto const written = ::write(fd, bytes.data(), bytes.size());
+                if (written < 0)
+                    dbgln("LibWM: failed to write dump {}: {}", path, strerror(errno));
                 ::close(fd);
             }
             dbgln("LibWM: dumped window {} ({}x{}) to {}", window.id, window.bitmap->width(), window.bitmap->height(), path);
