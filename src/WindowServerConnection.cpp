@@ -60,7 +60,47 @@ struct WallpaperHeader {
 };
 constexpr u32 wallpaper_magic = 0x53445750; // "SDWP"
 
+// Must match Config::state_directory() in the compositor. The wallpaper is
+// persisted there as raw pixels so a client can load it on demand instead of
+// every client receiving (and copying) its own wallpaper bitmap over Wayland.
+ByteString wallpaper_state_directory()
+{
+    if (auto const* dir = getenv("SDE_STATE_DIR"); dir && *dir)
+        return ByteString(dir);
+    if (auto const* config = getenv("XDG_CONFIG_HOME"); config && *config)
+        return ByteString::formatted("{}/sde", config);
+    if (auto const* home = getenv("HOME"); home && *home)
+        return ByteString::formatted("{}/.config/sde", home);
+    return ByteString { "/tmp/sde" };
+}
 
+RefPtr<Gfx::Bitmap> read_wallpaper_state()
+{
+    auto path = ByteString::formatted("{}/wallpaper.raw", wallpaper_state_directory());
+    auto file = Core::File::open(path, Core::File::OpenMode::Read);
+    if (file.is_error())
+        return nullptr;
+    auto raw = file.value()->read_until_eof();
+    if (raw.is_error() || raw.value().size() <= sizeof(WallpaperHeader))
+        return nullptr;
+
+    WallpaperHeader header {};
+    memcpy(&header, raw.value().data(), sizeof(header));
+    if (header.magic != wallpaper_magic || header.width == 0 || header.height == 0 || header.pitch == 0)
+        return nullptr;
+    size_t const pixels = static_cast<size_t>(header.pitch) * static_cast<size_t>(header.height);
+    if (raw.value().size() < sizeof(header) + pixels)
+        return nullptr;
+
+    auto bitmap = Gfx::Bitmap::create(static_cast<Gfx::BitmapFormat>(header.format), { static_cast<int>(header.width), static_cast<int>(header.height) });
+    if (bitmap.is_error())
+        return nullptr;
+    auto& created = *bitmap.value();
+    auto const row_bytes = min(static_cast<size_t>(header.pitch), static_cast<size_t>(created.pitch()));
+    for (int y = 0; y < created.height(); ++y)
+        memcpy(created.scanline(y), raw.value().data() + sizeof(header) + static_cast<size_t>(y) * header.pitch, row_bytes);
+    return bitmap.release_value();
+}
 
 }
 
@@ -668,11 +708,18 @@ Messages::WindowServer::GetWallpaperResponse WindowServerConnection::get_wallpap
 {
     if (m_wallpaper)
         return m_wallpaper->to_shareable_bitmap();
-    // The desktop owns the wallpaper; the compositor sends it over serenity-window.
+    // Rolling-upgrade compatibility: an older compositor still pushes the
+    // wallpaper over serenity-window. New compositors leave it unset.
     if (auto* host = WaylandClient::the().host_wallpaper()) {
         m_wallpaper = host;
         return m_wallpaper->to_shareable_bitmap();
     }
+    // The wallpaper is normally loaded on demand from the compositor's persisted
+    // raw state. Only the desktop/Display Settings ask for it, so the rest of the
+    // session does not pay for a private copy of the image.
+    m_wallpaper = read_wallpaper_state();
+    if (m_wallpaper)
+        return m_wallpaper->to_shareable_bitmap();
     return Gfx::ShareableBitmap { };
 }
 

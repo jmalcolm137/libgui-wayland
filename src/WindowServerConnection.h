@@ -255,6 +255,7 @@ private:
 
     // Wallpaper/background: the shim persists the chosen image, mode and colour
     // to a shared state directory the compositor watches (no cross-process bus).
+    // The bitmap is loaded on demand, not pushed to every client.
     RefPtr<Gfx::Bitmap> m_wallpaper;
     ByteString m_wallpaper_mode;
 

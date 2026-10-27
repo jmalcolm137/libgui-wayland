@@ -65,9 +65,10 @@
       <description summary="the wallpaper the desktop currently shows">
         The desktop's wallpaper as raw pixels: format is a wl_shm format value
         (0 = ARGB8888, little-endian) and fd carries width*height pixels. fd is
-        -1 (with width 0) when there is no wallpaper. Sent with the host
-        configuration, and again when it changes, so the shim answers
-        get_wallpaper without reading the desktop's state file.
+        -1 (with width 0) when there is no wallpaper. The SDE compositor does not
+        push this event on bind: clients that need the wallpaper load the
+        persisted raw state on demand, so an idle applet does not carry a private
+        copy of the image. The event remains for compositor compatibility.
       </description>
       <arg name="width" type="int"/>
       <arg name="height" type="int"/>
