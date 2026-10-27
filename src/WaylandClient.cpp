@@ -77,6 +77,8 @@ static void registry_global(void* data, wl_registry* registry, uint32_t name, ch
 
     if (!strcmp(interface, wl_compositor_interface.name))
         self.set_compositor(reinterpret_cast<wl_compositor*>(wl_registry_bind(registry, name, &wl_compositor_interface, min(version, 4u))));
+    else if (!strcmp(interface, wl_subcompositor_interface.name))
+        self.set_subcompositor(reinterpret_cast<wl_subcompositor*>(wl_registry_bind(registry, name, &wl_subcompositor_interface, 1)));
     else if (!strcmp(interface, wl_shm_interface.name))
         self.set_shm(reinterpret_cast<wl_shm*>(wl_registry_bind(registry, name, &wl_shm_interface, 1)));
     else if (!strcmp(interface, wl_seat_interface.name))
@@ -97,7 +99,7 @@ static void registry_global(void* data, wl_registry* registry, uint32_t name, ch
     } else if (!strcmp(interface, zwlr_layer_shell_v1_interface.name)) {
         self.set_layer_shell(reinterpret_cast<zwlr_layer_shell_v1*>(wl_registry_bind(registry, name, &zwlr_layer_shell_v1_interface, min(version, 4u))));
     } else if (!strcmp(interface, serenity_window_manager_interface.name)) {
-        self.set_serenity_window_manager(reinterpret_cast<serenity_window_manager*>(wl_registry_bind(registry, name, &serenity_window_manager_interface, 1)));
+        self.set_serenity_window_manager(reinterpret_cast<serenity_window_manager*>(wl_registry_bind(registry, name, &serenity_window_manager_interface, min(version, 2u))));
     }
 }
 
@@ -1069,7 +1071,7 @@ void WaylandClient::on_seat_capabilities(u32 capabilities)
 i32 WaylandClient::window_id_for_surface(wl_surface* surface) const
 {
     for (auto const& it : m_windows) {
-        if (it.value->surface == surface)
+        if (it.value->surface == surface || it.value->menubar_surface == surface)
             return it.value->window_id;
     }
     return -1;
@@ -1079,6 +1081,7 @@ void WaylandClient::on_pointer_enter(wl_surface* surface, Gfx::IntPoint position
 {
     m_pointer_popup = popup_id_for_surface(surface);
     m_pointer_window = m_pointer_popup >= 0 ? -1 : window_id_for_surface(surface);
+    m_pointer_surface = surface;
     m_pointer_position = position;
     dbgln("LibWM/Wayland: pointer entered {} {} at {},{}",
         m_pointer_popup >= 0 ? "popup" : "window",
@@ -1106,6 +1109,7 @@ void WaylandClient::on_pointer_leave()
     if (m_pointer_window >= 0 && m_input.window_left)
         m_input.window_left(m_pointer_window);
     m_pointer_window = -1;
+    m_pointer_surface = nullptr;
     m_axis_accum_x = 0;
     m_axis_accum_y = 0;
 }
@@ -1123,6 +1127,18 @@ void WaylandClient::on_pointer_motion(Gfx::IntPoint position)
         return;
 
     auto* window_surface = find(m_pointer_window);
+    if (window_surface && window_surface->menubar_surface) {
+        if (m_pointer_surface == window_surface->menubar_surface) {
+            if (m_input.menubar_motion)
+                m_input.menubar_motion(m_pointer_window, position);
+            return;
+        }
+        if (m_input.menubar_left)
+            m_input.menubar_left(m_pointer_window);
+        if (m_input.mouse_move)
+            m_input.mouse_move(m_pointer_window, position, m_pointer_buttons, current_modifiers());
+        return;
+    }
     int inset = window_surface ? window_surface->inset : 0;
     if (inset > 0 && position.y() < inset) {
         if (m_input.menubar_motion)
@@ -1167,6 +1183,22 @@ void WaylandClient::on_pointer_button(u32 button, bool pressed)
         return;
 
     auto* window_surface = find(m_pointer_window);
+    if (window_surface && window_surface->menubar_surface) {
+        if (m_pointer_surface == window_surface->menubar_surface) {
+            if (pressed && m_input.menubar_press)
+                m_input.menubar_press(m_pointer_window, m_pointer_position);
+            return;
+        }
+        auto position = m_pointer_position;
+        if (pressed) { m_pointer_buttons |= serenity_button; }
+        else { m_pointer_buttons &= ~serenity_button; }
+        if (pressed) {
+            if (m_input.mouse_down) m_input.mouse_down(m_pointer_window, position, serenity_button, m_pointer_buttons, current_modifiers());
+        } else {
+            if (m_input.mouse_up) m_input.mouse_up(m_pointer_window, position, serenity_button, m_pointer_buttons, current_modifiers());
+        }
+        return;
+    }
     int inset = window_surface ? window_surface->inset : 0;
     if (inset > 0 && m_pointer_position.y() < inset) {
         if (pressed && m_input.menubar_press)
@@ -1193,6 +1225,13 @@ void WaylandClient::on_pointer_axis(i32 x, i32 y)
     if (m_pointer_popup >= 0 || m_pointer_window < 0)
         return;
     auto* window_surface = find(m_pointer_window);
+    if (window_surface && window_surface->menubar_surface) {
+        if (m_pointer_surface == window_surface->menubar_surface)
+            return;
+        if (m_input.mouse_wheel)
+            m_input.mouse_wheel(m_pointer_window, m_pointer_position, m_pointer_buttons, current_modifiers(), x, y);
+        return;
+    }
     int inset = window_surface ? window_surface->inset : 0;
     if (m_input.mouse_wheel)
         m_input.mouse_wheel(m_pointer_window, m_pointer_position.translated(0, -inset), m_pointer_buttons, current_modifiers(), x, y);
@@ -1901,21 +1940,66 @@ void WaylandClient::bind_bitmap(wl_surface* surface, Core::AnonymousBuffer const
 
 void WaylandClient::set_window_inset(i32 window_id, int inset, Function<void(Gfx::Bitmap&, Gfx::IntRect)> draw)
 {
-    if (auto* window_surface = find(window_id)) {
-        SurfaceLocker locker(window_surface->mutex);
-        window_surface->inset = inset;
-        window_surface->draw_inset = move(draw);
-        // The menubar strip must be redrawn (and re-damaged) on the next present.
-        window_surface->inset_dirty = true;
-        // Non-resizable windows are pinned to their original size (plus inset);
-        // the compositor still overrides this to go fullscreen.
-        if (!window_surface->resizable && window_surface->toplevel) {
-            int w = window_surface->fixed_size.width();
-            int h = window_surface->fixed_size.height() + inset;
-            xdg_toplevel_set_min_size(window_surface->toplevel, w, h);
-            xdg_toplevel_set_max_size(window_surface->toplevel, w, h);
+    auto* window_surface = find(window_id);
+    if (!window_surface)
+        return;
+    SurfaceLocker locker(window_surface->mutex);
+    inset = max(0, inset);
+    window_surface->inset = inset;
+    window_surface->draw_inset = move(draw);
+    // The menubar strip must be redrawn (and re-damaged) on the next present.
+    window_surface->inset_dirty = true;
+    window_surface->composed_valid = false;
+
+    bool const direct = m_subcompositor && window_surface->chrome
+        && wl_proxy_get_version(reinterpret_cast<wl_proxy*>(window_surface->chrome)) >= 2;
+    // Drop the old composed buffer if we are switching to the direct path.
+    if (direct && window_surface->menubar_surface == nullptr) {
+        window_surface->composed_bitmap = nullptr;
+        window_surface->composed_buffer = {};
+    }
+
+    if (direct && inset > 0) {
+        if (!window_surface->menubar_surface) {
+            window_surface->menubar_surface = wl_compositor_create_surface(m_compositor);
+            window_surface->menubar_subsurface = wl_subcompositor_get_subsurface(
+                m_subcompositor, window_surface->menubar_surface, window_surface->surface);
+            wl_subsurface_set_desync(window_surface->menubar_subsurface);
+        }
+        wl_subsurface_set_position(window_surface->menubar_subsurface, 0, -inset);
+        serenity_toplevel_set_menubar_inset(window_surface->chrome, inset);
+        wl_surface_commit(window_surface->surface);
+        wl_display_flush(m_display);
+    } else {
+        for (auto& record : window_surface->menubar_buffers) {
+            if (record->buffer)
+                wl_buffer_destroy(record->buffer);
+        }
+        window_surface->menubar_buffers.clear();
+        if (window_surface->menubar_subsurface) {
+            wl_subsurface_destroy(window_surface->menubar_subsurface);
+            window_surface->menubar_subsurface = nullptr;
+        }
+        if (window_surface->menubar_surface) {
+            wl_surface_destroy(window_surface->menubar_surface);
+            window_surface->menubar_surface = nullptr;
+        }
+        window_surface->menubar_bitmap = nullptr;
+        window_surface->menubar_buffer = {};
+        if (window_surface->chrome && wl_proxy_get_version(reinterpret_cast<wl_proxy*>(window_surface->chrome)) >= 2) {
+            serenity_toplevel_set_menubar_inset(window_surface->chrome, 0);
             wl_display_flush(m_display);
         }
+    }
+
+    // Non-resizable windows are pinned to their original size (plus inset);
+    // the compositor still overrides this to go fullscreen.
+    if (!window_surface->resizable && window_surface->toplevel) {
+        int w = window_surface->fixed_size.width();
+        int h = window_surface->fixed_size.height() + inset;
+        xdg_toplevel_set_min_size(window_surface->toplevel, w, h);
+        xdg_toplevel_set_max_size(window_surface->toplevel, w, h);
+        wl_display_flush(m_display);
     }
 }
 
@@ -2487,6 +2571,21 @@ void WaylandClient::destroy_window(i32 window_id)
         m_display_link_callback = nullptr;
         m_display_link_surface = nullptr;
     }
+    if (m_pointer_surface == window_surface.surface || m_pointer_surface == window_surface.menubar_surface)
+        m_pointer_surface = nullptr;
+    for (auto& record : window_surface.menubar_buffers) {
+        if (record->buffer)
+            wl_buffer_destroy(record->buffer);
+    }
+    window_surface.menubar_buffers.clear();
+    if (window_surface.menubar_subsurface) {
+        wl_subsurface_destroy(window_surface.menubar_subsurface);
+        window_surface.menubar_subsurface = nullptr;
+    }
+    if (window_surface.menubar_surface) {
+        wl_surface_destroy(window_surface.menubar_surface);
+        window_surface.menubar_surface = nullptr;
+    }
     if (window_surface.surface)
         wl_surface_destroy(window_surface.surface);
     m_windows.remove(it);
@@ -2605,15 +2704,18 @@ void WaylandClient::set_window_icon_bitmap(i32 window_id, Gfx::ShareableBitmap c
 
 void WaylandClient::purge_released_buffers(WindowSurface& window_surface)
 {
-    Vector<NonnullOwnPtr<BufferRecord>> kept;
-    for (auto& record : window_surface.buffers) {
-        if (record->released) {
-            wl_buffer_destroy(record->buffer);
-        } else {
-            kept.append(move(record));
+    auto purge = [](Vector<NonnullOwnPtr<BufferRecord>>& buffers) {
+        Vector<NonnullOwnPtr<BufferRecord>> kept;
+        for (auto& record : buffers) {
+            if (record->released)
+                wl_buffer_destroy(record->buffer);
+            else
+                kept.append(move(record));
         }
-    }
-    window_surface.buffers = move(kept);
+        buffers = move(kept);
+    };
+    purge(window_surface.buffers);
+    purge(window_surface.menubar_buffers);
 }
 
 void WaylandClient::attach_and_commit(i32 window_id, int client_fd, Gfx::IntSize size, Gfx::IntSize visible_size, i32 pitch, bool has_alpha)
@@ -2664,6 +2766,41 @@ void WaylandClient::attach_and_commit(i32 window_id, int client_fd, Gfx::IntSize
     commit_window_content(*window_surface, client_fd, size, visible_size, pitch, has_alpha);
 }
 
+void WaylandClient::present_menubar(WindowSurface& window_surface, Gfx::IntSize visible_size)
+{
+    if (!window_surface.menubar_surface || !window_surface.draw_inset || window_surface.inset <= 0)
+        return;
+
+    int const scale = client_scale();
+    Gfx::IntSize const logical { visible_size.width(), window_surface.inset };
+    bool const recreate = !window_surface.menubar_bitmap
+        || window_surface.menubar_bitmap->size() != logical
+        || window_surface.menubar_bitmap->scale() != scale;
+    if (recreate) {
+        size_t const pitch = Gfx::Bitmap::minimum_pitch(logical.width() * scale, Gfx::BitmapFormat::BGRA8888);
+        size_t const bytes = pitch * static_cast<size_t>(logical.height() * scale);
+        auto buffer = Core::AnonymousBuffer::create_with_size(bytes);
+        if (buffer.is_error())
+            return;
+        window_surface.menubar_buffer = buffer.release_value();
+        auto bitmap = Gfx::Bitmap::create_with_anonymous_buffer(
+            Gfx::BitmapFormat::BGRA8888, window_surface.menubar_buffer, logical, scale);
+        if (bitmap.is_error())
+            return;
+        window_surface.menubar_bitmap = bitmap.release_value();
+        window_surface.inset_dirty = true;
+    }
+
+    if (window_surface.inset_dirty) {
+        window_surface.draw_inset(*window_surface.menubar_bitmap, { 0, 0, logical.width(), logical.height() });
+        window_surface.inset_dirty = false;
+    }
+
+    bind_bitmap(window_surface.menubar_surface, window_surface.menubar_buffer, *window_surface.menubar_bitmap,
+        window_surface.menubar_buffers);
+    wl_surface_commit(window_surface.menubar_surface);
+}
+
 void WaylandClient::commit_window_content(WindowSurface& window_surface, int client_fd, Gfx::IntSize size, Gfx::IntSize visible_size, i32 pitch, bool has_alpha)
 {
     // A display link enabled before the first present starts ticking once there is a
@@ -2694,9 +2831,22 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
     bool const full_damage = window_surface.damage_full || damage.is_empty();
     window_surface.damage_full = false;
 
-    // If the window has a top inset (menubar), compose it above the client's
-    // content into a single buffer. Otherwise attach the client's buffer as-is.
-    if (window_surface.inset > 0 && window_surface.draw_inset) {
+    // Direct path: the menubar is a small subsurface above the client content.
+    // The compositor offsets the content tree by the same inset (see
+    // serenity_toplevel.set_menubar_inset). Only fall back to the old
+    // full-window composition if the compositor cannot do that.
+    if (window_surface.menubar_surface) {
+        present_menubar(window_surface, visible_size);
+        // The menubar is a subsurface above the xdg surface. Keep the xdg window
+        // geometry on the client content so the compositor does not treat the
+        // negative subsurface position as the window origin (which would shift
+        // the whole frame down by the inset).
+        if (window_surface.xdg_surface_object)
+            xdg_surface_set_window_geometry(window_surface.xdg_surface_object, 0, 0,
+                visible_size.width(), visible_size.height());
+    }
+
+    if (window_surface.inset > 0 && window_surface.draw_inset && !window_surface.menubar_surface) {
         // Compose at the client's backing-store scale: the menubar and the window's
         // visible region are both scaled, and the composed buffer is presented with
         // buffer_scale.

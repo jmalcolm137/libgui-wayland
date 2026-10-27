@@ -36,6 +36,8 @@ struct wl_pointer;
 struct wl_registry;
 struct wl_seat;
 struct wl_shm;
+struct wl_subcompositor;
+struct wl_subsurface;
 struct wl_surface;
 struct wp_viewporter;
 struct wp_viewport;
@@ -178,6 +180,7 @@ public:
         bool released { false };
     };
     void set_compositor(wl_compositor* compositor) { m_compositor = compositor; }
+    void set_subcompositor(wl_subcompositor* subcompositor) { m_subcompositor = subcompositor; }
     void set_shm(wl_shm* shm) { m_shm = shm; }
     void add_seat(wl_seat* seat);
     void add_wm_base(xdg_wm_base* wm_base);
@@ -356,9 +359,18 @@ private:
         bool fullscreen { false };
         Gfx::IntSize fixed_size;
         Vector<NonnullOwnPtr<BufferRecord>> buffers;
-        // Optional top strip (menubar) composited above the client content.
+        // Optional top strip (menubar). The direct path presents it from a small
+        // subsurface placed at y = -inset; the compositor offsets the client
+        // content down by the same amount. The composed_* fields are the
+        // compatibility fallback for compositors without a subcompositor or a
+        // version-2 serenity_toplevel.
         int inset { 0 };
         Function<void(Gfx::Bitmap&, Gfx::IntRect)> draw_inset;
+        wl_surface* menubar_surface { nullptr };
+        wl_subsurface* menubar_subsurface { nullptr };
+        Core::AnonymousBuffer menubar_buffer;
+        RefPtr<Gfx::Bitmap> menubar_bitmap;
+        Vector<NonnullOwnPtr<BufferRecord>> menubar_buffers;
         Core::AnonymousBuffer composed_buffer;
         RefPtr<Gfx::Bitmap> composed_bitmap;
         // The composed buffer is reused across presents; it is only recreated
@@ -408,6 +420,7 @@ private:
 
     WindowSurface* find(i32 window_id);
     void commit_window_content(WindowSurface&, int client_fd, Gfx::IntSize size, Gfx::IntSize visible_size, i32 pitch, bool has_alpha);
+    void present_menubar(WindowSurface&, Gfx::IntSize visible_size);
     Popup* find_popup(i32 popup_id);
     i32 popup_id_for_surface(wl_surface*) const;
     void purge_released_buffers(WindowSurface&);
@@ -420,6 +433,7 @@ private:
     wl_display* m_display { nullptr };
     wl_registry* m_registry { nullptr };
     wl_compositor* m_compositor { nullptr };
+    wl_subcompositor* m_subcompositor { nullptr };
     wl_shm* m_shm { nullptr };
     wl_seat* m_seat { nullptr };
     wl_pointer* m_pointer { nullptr };
@@ -480,6 +494,7 @@ private:
 
     InputCallbacks m_input;
     i32 m_pointer_window { -1 };
+    wl_surface* m_pointer_surface { nullptr };
     i32 m_focused_window { -1 };
     Gfx::IntPoint m_pointer_position;
     u32 m_pointer_buttons { 0 };

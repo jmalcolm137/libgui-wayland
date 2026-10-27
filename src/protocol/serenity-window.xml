@@ -36,7 +36,7 @@
     repository (server side) and libgui-wayland (client side); keep them in
     sync.
   -->
-  <interface name="serenity_window_manager" version="1">
+  <interface name="serenity_window_manager" version="2">
     <description summary="compositor-side window chrome control">
       Global factory for per-toplevel chrome handles.
     </description>
@@ -155,7 +155,7 @@
     </event>
   </interface>
 
-  <interface name="serenity_toplevel" version="1">
+  <interface name="serenity_toplevel" version="2">
     <description summary="per-toplevel chrome control">
       Compositor-driven chrome for a single toplevel.
     </description>
@@ -206,6 +206,17 @@
       <arg name="y" type="int"/>
       <arg name="width" type="int"/>
       <arg name="height" type="int"/>
+    </request>
+
+    <request name="set_menubar_inset">
+      <description summary="reserve a menubar strip at the top of the toplevel">
+        The client reserves `inset` logical pixels at the top of the window for
+        a menubar. The compositor offsets the client surface down by that amount
+        and expects the client to present the menubar from a subsurface placed
+        at y = -inset. This lets the menubar be a small separate buffer instead
+        of composing a second full-window buffer. 0 removes the strip.
+      </description>
+      <arg name="inset" type="int"/>
     </request>
 
     <event name="menubar_visibility">
