@@ -1,0 +1,48 @@
+--- a/Userland/Libraries/LibVT/TerminalWidget.cpp
++++ b/Userland/Libraries/LibVT/TerminalWidget.cpp
+@@ -508,12 +508,19 @@
+ 
+ void TerminalWidget::flush_dirty_lines()
+ {
+-    // FIXME: Update smarter when scrolled
+-    if (m_terminal.m_need_full_flush || m_scrollbar->value() != m_scrollbar->max()) {
++    if (m_terminal.m_need_full_flush) {
+         update();
+         m_terminal.m_need_full_flush = false;
+         return;
+     }
++    // While scrolled back the visible rows are history lines and do not change
++    // as new output arrives (the live rows are below the viewport). Leave their
++    // dirty flags alone — the whole widget is repainted when we scroll (the
++    // scrollbar's on_change) or when the history ring drops lines
++    // (terminal_history_changed). This avoids repainting a large window on every
++    // output chunk and on every cursor blink while the user is reading back.
++    if (m_scrollbar->value() != m_scrollbar->max())
++        return;
+     // Update each dirty row on its own. update() accumulates the rects, so only
+     // the rows that changed are repainted: a single united rect would repaint
+     // every row between the topmost and bottommost change (a full-screen TUI
+@@ -1172,12 +1179,21 @@
+ {
+     bool was_max = m_scrollbar->value() == m_scrollbar->max();
+     m_scrollbar->set_max(m_terminal.history_size());
+-    if (was_max)
+-        m_scrollbar->set_value(m_scrollbar->max());
++    if (was_max) {
++        // Follow the output without invoking on_change: the content rows are
++        // repainted individually by flush_dirty_lines, so a full-window update
++        // for every new line is unnecessary.
++        m_scrollbar->set_value(m_scrollbar->max(), GUI::AllowCallback::No);
++    }
+     m_scrollbar->update();
+     // If the history buffer wrapped around, the selection needs to be offset accordingly.
+     if (m_selection.is_valid() && delta < 0)
+         m_selection.offset_row(delta);
++    // When scrolled back, new output appends below the viewport so nothing
++    // visible changes; only repaint if the history ring dropped old lines
++    // (delta < 0), which shifts what the viewport is showing.
++    if (!was_max && delta < 0)
++        update();
+ }
+ 
+ void TerminalWidget::terminal_did_perform_possibly_partial_clear()
