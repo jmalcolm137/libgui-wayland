@@ -1,0 +1,638 @@
+diff --git a/Userland/Libraries/LibVT/Attribute.h b/Userland/Libraries/LibVT/Attribute.h
+index bb362505..483f0a97 100644
+--- a/Userland/Libraries/LibVT/Attribute.h
++++ b/Userland/Libraries/LibVT/Attribute.h
+@@ -12,10 +12,6 @@
+ #include <LibVT/Color.h>
+ #include <LibVT/XtermColors.h>
+ 
+-#ifndef KERNEL
+-#    include <AK/ByteString.h>
+-#endif
+-
+ namespace VT {
+ 
+ struct Attribute {
+@@ -32,16 +28,13 @@ struct Attribute {
+     Color foreground_color { default_foreground_color };
+     Color background_color { default_background_color };
+ 
+-#ifndef KERNEL
+-    ByteString href;
+-    Optional<ByteString> href_id;
++    // Index into Terminal::m_hyperlinks (0 = no hyperlink). Keeping the strings
++    // out of every cell is what makes Cell small: a 1024-line, 160-column
++    // scrollback no longer pays for two empty ByteStrings per cell.
++    u32 hyperlink { 0 };
+ 
+-    void reset_hyperlink()
+-    {
+-        href = {};
+-        href_id = {};
+-    }
+-#endif
++    void reset_hyperlink() { hyperlink = 0; }
++    bool has_hyperlink() const { return hyperlink != 0; }
+ 
+     enum class Flags : u8 {
+         NoAttributes = 0x00,
+@@ -64,7 +57,10 @@ struct Attribute {
+ 
+     constexpr bool operator==(Attribute const& other) const
+     {
+-        return foreground_color == other.foreground_color && background_color == other.background_color && flags == other.flags;
++        return foreground_color == other.foreground_color
++            && background_color == other.background_color
++            && flags == other.flags
++            && hyperlink == other.hyperlink;
+     }
+ };
+ 
+diff --git a/Userland/Libraries/LibVT/Terminal.cpp b/Userland/Libraries/LibVT/Terminal.cpp
+index 3dc48176..c9fd9329 100644
+--- a/Userland/Libraries/LibVT/Terminal.cpp
++++ b/Userland/Libraries/LibVT/Terminal.cpp
+@@ -80,6 +80,9 @@ void Terminal::clear_to_mark(Mark mark)
+     }
+ 
+     // If the mark is not found, go through the history.
++    // The ring has to be linearised first: the search below (and the removal) treat
++    // m_history as an ordered list.
++    normalize_history();
+     auto it = AK::find_if(
+         m_history.rbegin(),
+         m_history.rend(),
+@@ -206,6 +209,32 @@ void Terminal::alter_private_mode(bool should_set, Parameters params)
+             dbgln_if(TERMINAL_DEBUG, "Setting bracketed mode enabled={}", should_set);
+             m_needs_bracketed_paste = should_set;
+             break;
++        case 9:
++        case 1000:
++        case 1002:
++        case 1003: {
++            u8 bit = mode == 9 ? 0x1u : mode == 1000 ? 0x2u
++                : mode == 1002               ? 0x4u
++                                             : 0x8u;
++            dbgln_if(TERMINAL_DEBUG, "Setting mouse tracking mode {} (should_set={})", mode, should_set);
++            if (should_set)
++                m_mouse_tracking_flags |= bit;
++            else
++                m_mouse_tracking_flags &= ~bit;
++            break;
++        }
++        case 1004:
++            dbgln_if(TERMINAL_DEBUG, "Setting focus reporting enabled={}", should_set);
++            m_mouse_focus_events = should_set;
++            break;
++        case 1005:
++            dbgln_if(TERMINAL_DEBUG, "Setting UTF-8 mouse coordinates enabled={}", should_set);
++            m_mouse_utf8 = should_set;
++            break;
++        case 1006:
++            dbgln_if(TERMINAL_DEBUG, "Setting SGR mouse coordinates enabled={}", should_set);
++            m_mouse_sgr = should_set;
++            break;
+         default:
+             dbgln("Terminal::alter_private_mode: Unimplemented private mode {} (should_set={})", mode, should_set);
+             break;
+@@ -918,10 +947,21 @@ void Terminal::put_character_at(unsigned row, unsigned column, u32 code_point)
+     VERIFY(row < rows());
+     VERIFY(column < columns());
+     auto& line = active_buffer()[row];
++
++    // Only mark the line dirty if this write actually changes the cell. Full-screen
++    // TUIs (and synchronized-update redraws) rewrite whole frames with mostly
++    // identical content; treating an identical rewrite as a change made the widget
++    // repaint every row every frame.
++    bool changed = line->code_point(column) != code_point;
+     line->set_code_point(column, code_point);
+-    line->attribute_at(column) = m_current_state.attribute;
+-    line->attribute_at(column).flags |= Attribute::Flags::Touched;
+-    line->set_dirty(true);
++    auto new_attribute = m_current_state.attribute;
++    new_attribute.flags |= Attribute::Flags::Touched;
++    if (line->attribute_at(column) != new_attribute) {
++        line->attribute_at(column) = new_attribute;
++        changed = true;
++    }
++    if (changed)
++        line->set_dirty(true);
+ 
+     m_last_code_point = code_point;
+ }
+@@ -1346,13 +1386,14 @@ void Terminal::execute_osc_sequence(OscParameters parameters, u8 last_byte)
+ #ifndef KERNEL
+         if (parameters.size() < 3) {
+             dbgln("Attempted to set href but gave too few parameters");
+-        } else if (parameters[1].is_empty() && parameters[2].is_empty()) {
+-            // Clear hyperlink
++        } else if (parameters[2].is_empty()) {
++            // Clear hyperlink (an empty URI means no link; an ID alone is not one).
+             m_current_state.attribute.reset_hyperlink();
+         } else {
+-            m_current_state.attribute.href = stringview_ify(2);
+-            // FIXME: Respect the provided ID
+-            m_current_state.attribute.href_id = ByteString::number(m_next_href_id++);
++            // Keep the URL and ID once in the terminal, not once per cell. The
++            // attribute only stores the 1-based index into this table.
++            m_hyperlinks.append({ stringview_ify(2).to_byte_string(), ByteString::number(m_next_href_id++) });
++            m_current_state.attribute.hyperlink = static_cast<u32>(m_hyperlinks.size());
+         }
+ #endif
+         break;
+@@ -1547,6 +1588,18 @@ void Terminal::handle_key_press(KeyCode key, u32 code_point, u8 flags)
+         emit_tilde_with_modifier(6);
+         return;
+     case KeyCode::Key_Backspace:
++        if (!ctrl) {
++            // A host line discipline expects ^? (DEL) for backspace: that is what
++            // `stty` reports as `erase` on the host this port runs on, and what
++            // full-screen programs that read bytes themselves (yay, htop in raw
++            // mode, vim) recognise. Emitting 0x08 instead makes backspace do
++            // nothing in all of them.
++            //
++            // Serenity's own line editor accepts both (LibLine/Editor.cpp registers
++            // 0x7f and '\b'), so nothing in-tree loses anything.
++            emit_string("\x7f"sv);
++            return;
++        }
+         if (ctrl) {
+             // This is an extension that allows Editor.cpp to delete whole words when
+             // Ctrl+Backspace is pressed. Ctrl cannot be transmitted without a CSI, and
+@@ -1737,6 +1790,10 @@ void Terminal::set_size(u16 columns, u16 rows)
+         return old_cursor;
+     };
+ 
++    // resize_and_rewrap() below walks m_history -- and moves lines through it -- as an
++    // ordered list, so linearise the scrollback ring first.
++    normalize_history();
++
+     auto old_history_size = m_history.size();
+     m_history.extend(move(m_normal_screen_buffer));
+     CursorPosition cursor_tracker { cursor_row() + old_history_size, cursor_column() };
+diff --git a/Userland/Libraries/LibVT/Terminal.h b/Userland/Libraries/LibVT/Terminal.h
+index ed170c5a..234f5c92 100644
+--- a/Userland/Libraries/LibVT/Terminal.h
++++ b/Userland/Libraries/LibVT/Terminal.h
+@@ -65,6 +65,13 @@ public:
+     virtual void set_cursor_hidden(bool) = 0;
+ };
+ 
++#ifndef KERNEL
++struct Hyperlink {
++    ByteString href;
++    Optional<ByteString> id;
++};
++#endif
++
+ class Terminal : public EscapeSequenceExecutor {
+ public:
+ #ifndef KERNEL
+@@ -190,6 +197,23 @@ public:
+ 
+ #ifndef KERNEL
+     Attribute attribute_at(Position const&) const;
++
++    Hyperlink const* hyperlink(u32 index) const
++    {
++        return index > 0 && index <= m_hyperlinks.size() ? &m_hyperlinks[index - 1] : nullptr;
++    }
++    ByteString hyperlink_href(Attribute const& attribute) const
++    {
++        if (auto* link = hyperlink(attribute.hyperlink))
++            return link->href;
++        return {};
++    }
++    Optional<ByteString> hyperlink_id(Attribute const& attribute) const
++    {
++        if (auto* link = hyperlink(attribute.hyperlink))
++            return link->id;
++        return {};
++    }
+ #endif
+ 
+     bool needs_bracketed_paste() const
+@@ -197,6 +221,15 @@ public:
+         return m_needs_bracketed_paste;
+     }
+ 
++    // Mouse reporting (DEC private modes 9/1000/1002/1003) and its encodings
++    // (1005 UTF-8, 1006 SGR) and focus reporting (1004).
++    bool mouse_tracking() const { return m_mouse_tracking_flags != 0; }
++    bool mouse_reports_any_motion() const { return (m_mouse_tracking_flags & 0x8u) != 0; }
++    bool mouse_reports_drag() const { return (m_mouse_tracking_flags & 0xcu) != 0; }
++    bool mouse_sgr() const { return m_mouse_sgr; }
++    bool mouse_utf8() const { return m_mouse_utf8; }
++    bool mouse_focus_events() const { return m_mouse_focus_events; }
++
+     bool is_within_scroll_region(u16 line) const
+     {
+         return line >= m_scroll_region_top && line <= m_scroll_region_bottom;
+@@ -396,6 +429,27 @@ protected:
+ #ifndef KERNEL
+     size_t m_history_start = 0;
+     Vector<NonnullOwnPtr<Line>> m_history;
++
++    // The history is a ring buffer: while it is full, add_line_to_history() below
++    // overwrites the oldest line at m_history_start and advances that index. Code
++    // that treats m_history as an ordered list -- the mark search in clear_to_mark(),
++    // the rewrap in set_size() -- has to linearise the ring first. Otherwise it reads
++    // the lines in the wrong order and, worse, leaves m_history_start past the end of
++    // a shortened vector, so the next add_line_to_history() inserts out of bounds and
++    // AK::Vector::insert's `index <= size()` VERIFY trips (SIGILL).
++    void normalize_history()
++    {
++        if (m_history_start == 0)
++            return;
++
++        Vector<NonnullOwnPtr<Line>> linearized;
++        linearized.ensure_capacity(m_history.size());
++        for (size_t i = 0; i < m_history.size(); ++i)
++            linearized.unchecked_append(move(m_history[(m_history_start + i) % m_history.size()]));
++        m_history = move(linearized);
++        m_history_start = 0;
++    }
++
+     void add_line_to_history(NonnullOwnPtr<Line>&& line)
+     {
+         if (max_history_size() == 0)
+@@ -404,6 +458,10 @@ protected:
+         // If m_history can expand, add the new line to the end of the list.
+         // If there is an overflow wrap, the end is at the index before the start.
+         if (m_history.size() < max_history_size()) {
++            // m_history_start is only non-zero while the ring is full; a stale index
++            // (see normalize_history()) would make the insert below go out of bounds.
++            if (m_history_start >= m_history.size())
++                m_history_start = 0;
+             if (m_history_start == 0)
+                 m_history.append(move(line));
+             else
+@@ -445,6 +503,12 @@ protected:
+ 
+     bool m_needs_bracketed_paste { false };
+ 
++    // Mouse reporting: bit 0 = X10 (9), bit 1 = 1000, bit 2 = 1002, bit 3 = 1003.
++    u8 m_mouse_tracking_flags { 0 };
++    bool m_mouse_sgr { false };
++    bool m_mouse_utf8 { false };
++    bool m_mouse_focus_events { false };
++
+     Attribute m_current_attribute;
+     Attribute m_saved_attribute;
+ 
+@@ -456,6 +520,7 @@ protected:
+ 
+ #ifndef KERNEL
+     u32 m_next_href_id { 0 };
++    Vector<Hyperlink> m_hyperlinks;
+ #endif
+ 
+     u8 m_current_progress { 0 };
+diff --git a/Userland/Libraries/LibVT/TerminalWidget.cpp b/Userland/Libraries/LibVT/TerminalWidget.cpp
+index 725a7667..0ee414ac 100644
+--- a/Userland/Libraries/LibVT/TerminalWidget.cpp
++++ b/Userland/Libraries/LibVT/TerminalWidget.cpp
+@@ -201,12 +201,16 @@ void TerminalWidget::set_logical_focus(bool focus)
+ void TerminalWidget::focusin_event(GUI::FocusEvent& event)
+ {
+     set_logical_focus(true);
++    if (m_terminal.mouse_focus_events())
++        emit(reinterpret_cast<u8 const*>("\e[I"), 3);
+     return GUI::Frame::focusin_event(event);
+ }
+ 
+ void TerminalWidget::focusout_event(GUI::FocusEvent& event)
+ {
+     set_logical_focus(false);
++    if (m_terminal.mouse_focus_events())
++        emit(reinterpret_cast<u8 const*>("\e[O"), 3);
+     return GUI::Frame::focusout_event(event);
+ }
+ 
+@@ -308,11 +312,11 @@ void TerminalWidget::paint_event(GUI::PaintEvent& event)
+ 
+     // Pass: Compute the rect(s) of the currently hovered link, if any.
+     Vector<Gfx::IntRect> hovered_href_rects;
+-    if (m_hovered_href_id.has_value()) {
++    if (m_hovered_hyperlink != 0) {
+         for (u16 visual_row = 0; visual_row < m_terminal.rows(); ++visual_row) {
+             auto& line = m_terminal.line(first_row_from_history + visual_row);
+             for (size_t column = 0; column < line.length(); ++column) {
+-                if (m_hovered_href_id == line.attribute_at(column).href_id) {
++                if (m_hovered_hyperlink == line.attribute_at(column).hyperlink) {
+                     bool merged_with_existing_rect = false;
+                     auto glyph_rect = this->glyph_rect(visual_row, column);
+                     for (auto& rect : hovered_href_rects) {
+@@ -370,9 +374,9 @@ void TerminalWidget::paint_event(GUI::PaintEvent& event)
+             if (has_flag(attribute.flags, VT::Attribute::Flags::Underline)) {
+                 // Content has specified underline
+                 underline_style = UnderlineStyle::Solid;
+-            } else if (!attribute.href.is_empty()) {
++            } else if (attribute.has_hyperlink()) {
+                 // We're hovering a hyperlink
+-                if (m_hovered_href_id == attribute.href_id || m_active_href_id == attribute.href_id) {
++                if (m_hovered_hyperlink == attribute.hyperlink || m_active_hyperlink == attribute.hyperlink) {
+                     underline_style = UnderlineStyle::Solid;
+                     underline_color = palette().active_link();
+                 } else {
+@@ -433,7 +437,7 @@ void TerminalWidget::paint_event(GUI::PaintEvent& event)
+ 
+             auto character_rect = glyph_rect(visual_row, column);
+ 
+-            if (m_hovered_href_id.has_value() && attribute.href_id == m_hovered_href_id) {
++            if (m_hovered_hyperlink != 0 && attribute.hyperlink == m_hovered_hyperlink) {
+                 text_color = palette().base_text();
+             }
+ 
+@@ -632,6 +638,50 @@ VT::Position TerminalWidget::buffer_position_at(Gfx::IntPoint position) const
+     return { row, column };
+ }
+ 
++// The cell under a widget-relative point, in *screen* coordinates (0-based,
++// without the scrollback offset) — what mouse reporting reports.
++VT::Position TerminalWidget::screen_position_at(Gfx::IntPoint position) const
++{
++    auto adjusted_position = position.translated(-(frame_thickness() + m_inset), -(frame_thickness() + m_inset));
++    int row = adjusted_position.y() / m_line_height;
++    int column = adjusted_position.x() / m_column_width;
++    row = AK::clamp(row, 0, static_cast<int>(m_terminal.rows()) - 1);
++    column = AK::clamp(column, 0, static_cast<int>(m_terminal.columns()) - 1);
++    return { row, column };
++}
++
++// Encode a mouse event and send it to the application (SGR 1006 or legacy).
++void TerminalWidget::send_mouse_event(GUI::MouseEvent& event, int button, bool release)
++{
++    auto position = screen_position_at(event.position());
++    unsigned x = static_cast<unsigned>(position.column()) + 1;
++    unsigned y = static_cast<unsigned>(position.row()) + 1;
++
++    unsigned modifiers = 0;
++    if (event.shift())
++        modifiers |= 4;
++    if (event.alt())
++        modifiers |= 8;
++    if (event.ctrl())
++        modifiers |= 16;
++
++    if (m_terminal.mouse_sgr()) {
++        StringBuilder builder;
++        builder.appendff("\e[<{};{};{}{}", button | modifiers, x, y, release ? 'm' : 'M');
++        auto sequence = builder.to_byte_string();
++        emit(reinterpret_cast<u8 const*>(sequence.characters()), sequence.length());
++        return;
++    }
++
++    // Legacy encoding: 32 + button; release is button 3; coordinates are clamped
++    // to the 223 byte range (UTF-8 extended coordinates are not implemented).
++    unsigned encoded_button = (release ? 3u : static_cast<unsigned>(button)) | modifiers;
++    x = min(x, 223u);
++    y = min(y, 223u);
++    u8 bytes[6] = { '\e', '[', 'M', static_cast<u8>(32 + encoded_button), static_cast<u8>(32 + x), static_cast<u8>(32 + y) };
++    emit(bytes, sizeof(bytes));
++}
++
+ u32 TerminalWidget::code_point_at(VT::Position const& position) const
+ {
+     VERIFY(position.is_valid());
+@@ -773,11 +823,13 @@ VT::Range TerminalWidget::find_previous(StringView needle, VT::Position const& s
+ 
+ void TerminalWidget::doubleclick_event(GUI::MouseEvent& event)
+ {
++    if (m_terminal.mouse_tracking())
++        return;
+     if (event.button() == GUI::MouseButton::Primary) {
+         auto attribute = m_terminal.attribute_at(buffer_position_at(event.position()));
+-        if (attribute.href_id.has_value()) {
+-            dbgln("Open hyperlinked URL: '{}'", attribute.href);
+-            Desktop::Launcher::open(attribute.href);
++        if (auto* hyperlink = m_terminal.hyperlink(attribute.hyperlink)) {
++            dbgln("Open hyperlinked URL: '{}'", hyperlink->href);
++            Desktop::Launcher::open(hyperlink->href);
+             return;
+         }
+ 
+@@ -826,10 +878,28 @@ void TerminalWidget::copy()
+ 
+ void TerminalWidget::mouseup_event(GUI::MouseEvent& event)
+ {
++    if (m_terminal.mouse_tracking()) {
++        int button;
++        switch (event.button()) {
++        case GUI::MouseButton::Primary:
++            button = 0;
++            break;
++        case GUI::MouseButton::Middle:
++            button = 1;
++            break;
++        case GUI::MouseButton::Secondary:
++            button = 2;
++            break;
++        default:
++            return;
++        }
++        send_mouse_event(event, button, true);
++        return;
++    }
+     if (event.button() == GUI::MouseButton::Primary) {
+-        if (m_active_href_id.has_value()) {
++        if (m_active_hyperlink != 0) {
+             m_active_href = {};
+-            m_active_href_id = {};
++            m_active_hyperlink = 0;
+             update();
+         }
+ 
+@@ -842,6 +912,25 @@ void TerminalWidget::mouseup_event(GUI::MouseEvent& event)
+ 
+ void TerminalWidget::mousedown_event(GUI::MouseEvent& event)
+ {
++    if (m_terminal.mouse_tracking()) {
++        int button;
++        switch (event.button()) {
++        case GUI::MouseButton::Primary:
++            button = 0;
++            break;
++        case GUI::MouseButton::Middle:
++            button = 1;
++            break;
++        case GUI::MouseButton::Secondary:
++            button = 2;
++            break;
++        default:
++            return;
++        }
++        send_mouse_event(event, button, false);
++        return;
++    }
++
+     using namespace AK::TimeLiterals;
+ 
+     if (event.button() == GUI::MouseButton::Primary) {
+@@ -849,14 +938,16 @@ void TerminalWidget::mousedown_event(GUI::MouseEvent& event)
+         m_left_mousedown_position_buffer = buffer_position_at(m_left_mousedown_position);
+ 
+         auto attribute = m_terminal.attribute_at(m_left_mousedown_position_buffer);
+-        if (!(event.modifiers() & Mod_Shift) && !attribute.href.is_empty()) {
+-            m_active_href = attribute.href;
+-            m_active_href_id = attribute.href_id;
+-            update();
+-            return;
++        if (!(event.modifiers() & Mod_Shift) && attribute.has_hyperlink()) {
++            if (auto* hyperlink = m_terminal.hyperlink(attribute.hyperlink)) {
++                m_active_href = hyperlink->href;
++                m_active_hyperlink = attribute.hyperlink;
++                update();
++                return;
++            }
+         }
+         m_active_href = {};
+-        m_active_href_id = {};
++        m_active_hyperlink = 0;
+ 
+         if (m_triple_click_timer.is_valid() && m_triple_click_timer.elapsed_time() < 250_ms) {
+             int start_column = 0;
+@@ -878,18 +969,36 @@ void TerminalWidget::mousedown_event(GUI::MouseEvent& event)
+ 
+ void TerminalWidget::mousemove_event(GUI::MouseEvent& event)
+ {
++    if (m_terminal.mouse_tracking() && m_terminal.mouse_reports_drag()) {
++        bool have_button = event.buttons() != 0;
++        if (!have_button && !m_terminal.mouse_reports_any_motion())
++            return;
++        int button = 3;
++        if (have_button) {
++            if (event.buttons() & static_cast<unsigned>(GUI::MouseButton::Primary))
++                button = 0;
++            else if (event.buttons() & static_cast<unsigned>(GUI::MouseButton::Middle))
++                button = 1;
++            else if (event.buttons() & static_cast<unsigned>(GUI::MouseButton::Secondary))
++                button = 2;
++        }
++        send_mouse_event(event, button + 32, false);
++        return;
++    }
++
+     auto position = buffer_position_at(event.position());
+ 
+     auto attribute = m_terminal.attribute_at(position);
+ 
+-    if (attribute.href_id != m_hovered_href_id) {
+-        if (attribute.href_id.has_value()) {
+-            m_hovered_href_id = attribute.href_id;
+-            m_hovered_href = attribute.href;
++    if (attribute.hyperlink != m_hovered_hyperlink) {
++        if (auto* hyperlink = m_terminal.hyperlink(attribute.hyperlink)) {
++            auto const& href = hyperlink->href;
++            m_hovered_hyperlink = attribute.hyperlink;
++            m_hovered_href = href;
+ 
+-            auto handlers = Desktop::Launcher::get_handlers_for_url(attribute.href);
++            auto handlers = Desktop::Launcher::get_handlers_for_url(href);
+             if (!handlers.is_empty()) {
+-                auto url = URL::URL(attribute.href);
++                auto url = URL::URL(href);
+                 auto path = URL::percent_decode(url.serialize_path());
+ 
+                 auto app_file = Desktop::AppFile::get_for_app(LexicalPath::basename(handlers[0]));
+@@ -904,11 +1013,11 @@ void TerminalWidget::mousemove_event(GUI::MouseEvent& event)
+                         set_tooltip(MUST(String::formatted("Open {} with {}", file_name, app_name)));
+                     }
+                 } else {
+-                    set_tooltip(MUST(String::formatted("Open {} with {}", attribute.href, app_name)));
++                    set_tooltip(MUST(String::formatted("Open {} with {}", href, app_name)));
+                 }
+             }
+         } else {
+-            m_hovered_href_id = {};
++            m_hovered_hyperlink = 0;
+             m_hovered_href = {};
+             set_tooltip({});
+         }
+@@ -923,7 +1032,7 @@ void TerminalWidget::mousemove_event(GUI::MouseEvent& event)
+     if (!(event.buttons() & GUI::MouseButton::Primary))
+         return;
+ 
+-    if (m_active_href_id.has_value()) {
++    if (m_active_hyperlink != 0) {
+         auto diff = event.position() - m_left_mousedown_position;
+         auto distance_travelled_squared = diff.x() * diff.x() + diff.y() * diff.y();
+         constexpr int drag_distance_threshold = 5;
+@@ -936,9 +1045,9 @@ void TerminalWidget::mousemove_event(GUI::MouseEvent& event)
+         drag_operation->set_data("text/uri-list"_string, m_active_href);
+ 
+         m_active_href = {};
+-        m_active_href_id = {};
++        m_active_hyperlink = 0;
+         m_hovered_href = {};
+-        m_hovered_href_id = {};
++        m_hovered_hyperlink = 0;
+         drag_operation->exec();
+         update();
+         return;
+@@ -977,7 +1086,7 @@ void TerminalWidget::leave_event(Core::Event&)
+ {
+     bool should_update = !m_hovered_href.is_empty();
+     m_hovered_href = {};
+-    m_hovered_href_id = {};
++    m_hovered_hyperlink = 0;
+     set_tooltip({});
+     set_override_cursor(Gfx::StandardCursor::IBeam);
+     if (should_update)
+@@ -986,6 +1095,21 @@ void TerminalWidget::leave_event(Core::Event&)
+ 
+ void TerminalWidget::mousewheel_event(GUI::MouseEvent& event)
+ {
++    if (m_terminal.mouse_tracking()) {
++        // Report the wheel as button 64 (up) / 65 (down) (+64 for horizontal).
++        int button = 0;
++        if (event.wheel_delta_y() < 0)
++            button = 64;
++        else if (event.wheel_delta_y() > 0)
++            button = 65;
++        else if (event.wheel_delta_x() < 0)
++            button = 66;
++        else if (event.wheel_delta_x() > 0)
++            button = 67;
++        if (button != 0)
++            send_mouse_event(event, button, false);
++        return;
++    }
+     if (!is_scrollable())
+         return;
+     set_auto_scroll_direction(AutoScrollDirection::None);
+@@ -1154,7 +1278,7 @@ void TerminalWidget::set_cursor_shape(CursorShape shape)
+ 
+ void TerminalWidget::context_menu_event(GUI::ContextMenuEvent& event)
+ {
+-    if (!m_hovered_href_id.has_value()) {
++    if (m_hovered_hyperlink == 0) {
+         m_context_menu->popup(event.screen_position());
+     } else {
+         m_context_menu_href = m_hovered_href;
+diff --git a/Userland/Libraries/LibVT/TerminalWidget.h b/Userland/Libraries/LibVT/TerminalWidget.h
+index 50bd9009..2634e5b6 100644
+--- a/Userland/Libraries/LibVT/TerminalWidget.h
++++ b/Userland/Libraries/LibVT/TerminalWidget.h
+@@ -69,6 +69,8 @@ public:
+     VT::Range normalized_selection() const { return m_selection.normalized(); }
+     void set_selection(const VT::Range& selection);
+     VT::Position buffer_position_at(Gfx::IntPoint) const;
++    VT::Position screen_position_at(Gfx::IntPoint) const;
++    void send_mouse_event(GUI::MouseEvent&, int button, bool release);
+ 
+     VT::Range find_next(StringView, const VT::Position& start = {}, bool case_sensitivity = false, bool should_wrap = false);
+     VT::Range find_previous(StringView, const VT::Position& start = {}, bool case_sensitivity = false, bool should_wrap = false);
+@@ -188,10 +190,10 @@ private:
+     VT::Range m_selection;
+ 
+     ByteString m_hovered_href;
+-    Optional<ByteString> m_hovered_href_id;
++    u32 m_hovered_hyperlink { 0 };
+ 
+     ByteString m_active_href;
+-    Optional<ByteString> m_active_href_id;
++    u32 m_active_hyperlink { 0 };
+ 
+     // Snapshot of m_hovered_href when opening a context menu for a hyperlink.
+     ByteString m_context_menu_href;
