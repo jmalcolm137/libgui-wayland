@@ -1,5 +1,4 @@
 diff --git a/Userland/Libraries/LibGUI/FileIconProvider.cpp b/Userland/Libraries/LibGUI/FileIconProvider.cpp
-index 102d3dad..1392451b 100644
 --- a/Userland/Libraries/LibGUI/FileIconProvider.cpp
 +++ b/Userland/Libraries/LibGUI/FileIconProvider.cpp
 @@ -8,6 +8,7 @@
@@ -10,7 +9,7 @@ index 102d3dad..1392451b 100644
  #include <LibCore/ConfigFile.h>
  #include <LibCore/MappedFile.h>
  #include <LibCore/StandardPaths.h>
-@@ -69,7 +70,15 @@ static void initialize_if_needed()
+@@ -69,7 +70,15 @@
      if (s_initialized)
          return;
  
@@ -27,7 +26,7 @@ index 102d3dad..1392451b 100644
  
      s_symlink_emblem = MUST(Gfx::Bitmap::load_from_uri("resource://icons/symlink-emblem.png"sv));
      s_symlink_emblem_small = MUST(Gfx::Bitmap::load_from_uri("resource://icons/symlink-emblem-small.png"sv));
-@@ -154,6 +163,31 @@ Icon FileIconProvider::icon_for_path(StringView path)
+@@ -154,6 +163,53 @@
      return icon_for_path(path, stat_or_error.release_value().st_mode);
  }
  
@@ -38,6 +37,28 @@ index 102d3dad..1392451b 100644
 +static ByteString app_icon_resource_name(StringView executable_path)
 +{
 +    auto name = LexicalPath { executable_path }.basename();
++
++    // Most settings apps are named <Thing>Settings, but the resource bundle
++    // names their icons after the thing (and a few have a different name), so
++    // use the real icon rather than the generic executable icon.
++    static constexpr Array<Array<StringView, 2>, 11> settings_icon_aliases {{
++        { "BrowserSettings"sv, "app-browser"sv },
++        { "CalendarSettings"sv, "app-calendar"sv },
++        { "CertificateSettings"sv, "certificate"sv },
++        { "ClockSettings"sv, "app-analog-clock"sv },
++        { "GamesSettings"sv, "games"sv },
++        { "MailSettings"sv, "app-mail"sv },
++        { "MapsSettings"sv, "app-maps"sv },
++        { "MouseSettings"sv, "app-mouse"sv },
++        { "NetworkSettings"sv, "network"sv },
++        { "TerminalSettings"sv, "app-terminal"sv },
++        { "UsersSettings"sv, "app-user-settings"sv },
++    }};
++    for (auto const& alias : settings_icon_aliases) {
++        if (name == alias[0])
++            return alias[1].to_byte_string();
++    }
++
 +    StringBuilder builder;
 +    builder.append("app-"sv);
 +    for (size_t i = 0; i < name.length(); ++i) {
@@ -59,7 +80,7 @@ index 102d3dad..1392451b 100644
  Icon FileIconProvider::icon_for_executable(ByteString const& path)
  {
      static HashMap<ByteString, Icon> app_icon_cache;
-@@ -208,7 +242,13 @@ Icon FileIconProvider::icon_for_executable(ByteString const& path)
+@@ -208,7 +264,13 @@
  
          RefPtr<Gfx::Bitmap const> bitmap;
          if (!section.has_value()) {
