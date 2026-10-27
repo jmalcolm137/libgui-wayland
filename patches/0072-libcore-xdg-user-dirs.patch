@@ -1,0 +1,198 @@
+diff --git a/Userland/Libraries/LibCore/StandardPaths.cpp b/Userland/Libraries/LibCore/StandardPaths.cpp
+index 995c992e..ecb902fa 100644
+--- a/Userland/Libraries/LibCore/StandardPaths.cpp
++++ b/Userland/Libraries/LibCore/StandardPaths.cpp
+@@ -7,11 +7,15 @@
+ 
+ #include <AK/ByteString.h>
+ #include <AK/LexicalPath.h>
++#include <AK/Optional.h>
++#include <AK/StringView.h>
++#include <AK/Vector.h>
+ #include <AK/Platform.h>
+ #include <AK/String.h>
+ #include <AK/StringBuilder.h>
+ #include <AK/StringUtils.h>
+ #include <LibCore/Environment.h>
++#include <LibCore/File.h>
+ #include <LibCore/SessionManagement.h>
+ #include <LibCore/StandardPaths.h>
+ #include <LibCore/System.h>
+@@ -36,74 +40,123 @@ ByteString StandardPaths::home_directory()
+     return LexicalPath::canonicalized_path(path);
+ }
+ 
+-ByteString StandardPaths::desktop_directory()
++namespace {
++
++struct UserDirEntry {
++    ByteString key;
++    ByteString value;
++};
++
++// Parse $XDG_CONFIG_HOME/user-dirs.dirs (the XDG User Directories spec).
++Vector<UserDirEntry> parse_user_dirs(ByteString const& path)
+ {
+-    if (auto* desktop_directory = getenv("XDG_DESKTOP_DIR"))
+-        return LexicalPath::canonicalized_path(desktop_directory);
++    Vector<UserDirEntry> entries;
++    auto file = Core::File::open(path, Core::File::OpenMode::Read);
++    if (file.is_error())
++        return entries;
++    auto contents = file.value()->read_until_eof();
++    if (contents.is_error())
++        return entries;
+ 
+-    StringBuilder builder;
+-    builder.append(home_directory());
+-    builder.append("/Desktop"sv);
+-    return LexicalPath::canonicalized_path(builder.to_byte_string());
++    auto bytes = contents.release_value();
++    auto home = Core::StandardPaths::home_directory();
++    StringView text { reinterpret_cast<char const*>(bytes.data()), bytes.size() };
++    for (auto line : text.split_view('\n')) {
++        line = line.trim_whitespace();
++        if (line.is_empty() || line.starts_with('#'))
++            continue;
++        auto equals = line.find('=');
++        if (!equals.has_value())
++            continue;
++        auto key = line.substring_view(0, *equals).trim_whitespace();
++        auto value = line.substring_view(*equals + 1).trim_whitespace();
++        if (key.is_empty())
++            continue;
++        if (value.length() >= 2
++            && ((value.starts_with('"') && value.ends_with('"'))
++                || (value.starts_with('\'') && value.ends_with('\''))))
++            value = value.substring_view(1, value.length() - 2);
++
++        // The spec's values are shell-style and use $HOME.
++        auto expanded = value.to_byte_string();
++        if (expanded.starts_with("${HOME}"sv))
++            expanded = ByteString::formatted("{}{}", home, expanded.substring_view(7));
++        else if (expanded.starts_with("$HOME"sv))
++            expanded = ByteString::formatted("{}{}", home, expanded.substring_view(5));
++        entries.append(UserDirEntry { key.to_byte_string(), move(expanded) });
++    }
++    return entries;
+ }
+ 
+-ByteString StandardPaths::documents_directory()
++// user-dirs.dirs is written at login by the session (sde-user-dirs.sh); read it
++// once per process. The function-local static is thread-safe and immutable
++// afterwards.
++Vector<UserDirEntry> const& user_dirs_entries()
+ {
+-    if (auto* documents_directory = getenv("XDG_DOCUMENTS_DIR"))
+-        return LexicalPath::canonicalized_path(documents_directory);
++    static auto entries = parse_user_dirs(
++        ByteString::formatted("{}/user-dirs.dirs", Core::StandardPaths::config_directory()));
++    return entries;
++}
+ 
++ByteString user_dir(char const* key, StringView fallback)
++{
++    // Keep the historical environment override (used by tests and scripts).
++    if (auto* env = getenv(key))
++        return LexicalPath::canonicalized_path(env);
++    for (auto const& entry : user_dirs_entries()) {
++        if (entry.key == key)
++            return LexicalPath::canonicalized_path(entry.value);
++    }
+     StringBuilder builder;
+-    builder.append(home_directory());
+-    builder.append("/Documents"sv);
++    builder.append(Core::StandardPaths::home_directory());
++    builder.append(fallback);
+     return LexicalPath::canonicalized_path(builder.to_byte_string());
+ }
+ 
+-ByteString StandardPaths::downloads_directory()
++}
++
++ByteString StandardPaths::desktop_directory()
+ {
+-    if (auto* downloads_directory = getenv("XDG_DOWNLOAD_DIR"))
+-        return LexicalPath::canonicalized_path(downloads_directory);
++    return user_dir("XDG_DESKTOP_DIR", "/Desktop"sv);
++}
+ 
+-    StringBuilder builder;
+-    builder.append(home_directory());
+-    builder.append("/Downloads"sv);
+-    return LexicalPath::canonicalized_path(builder.to_byte_string());
++ByteString StandardPaths::documents_directory()
++{
++    return user_dir("XDG_DOCUMENTS_DIR", "/Documents"sv);
+ }
+ 
+-ByteString StandardPaths::music_directory()
++ByteString StandardPaths::downloads_directory()
+ {
+-    if (auto* music_directory = getenv("XDG_MUSIC_DIR"))
+-        return LexicalPath::canonicalized_path(music_directory);
++    return user_dir("XDG_DOWNLOAD_DIR", "/Downloads"sv);
++}
+ 
+-    StringBuilder builder;
+-    builder.append(home_directory());
+-    builder.append("/Music"sv);
+-    return LexicalPath::canonicalized_path(builder.to_byte_string());
++ByteString StandardPaths::music_directory()
++{
++    return user_dir("XDG_MUSIC_DIR", "/Music"sv);
+ }
+ 
+ ByteString StandardPaths::pictures_directory()
+ {
+-    if (auto* pictures_directory = getenv("XDG_PICTURES_DIR"))
+-        return LexicalPath::canonicalized_path(pictures_directory);
+-
+-    StringBuilder builder;
+-    builder.append(home_directory());
+-    builder.append("/Pictures"sv);
+-    return LexicalPath::canonicalized_path(builder.to_byte_string());
++    return user_dir("XDG_PICTURES_DIR", "/Pictures"sv);
+ }
+ 
+ ByteString StandardPaths::videos_directory()
+ {
+-    if (auto* videos_directory = getenv("XDG_VIDEOS_DIR"))
+-        return LexicalPath::canonicalized_path(videos_directory);
+-
+-    StringBuilder builder;
+-    builder.append(home_directory());
+ #if defined(AK_OS_MACOS)
+-    builder.append("/Movies"sv);
++    return user_dir("XDG_VIDEOS_DIR", "/Movies"sv);
+ #else
+-    builder.append("/Videos"sv);
++    return user_dir("XDG_VIDEOS_DIR", "/Videos"sv);
+ #endif
+-    return LexicalPath::canonicalized_path(builder.to_byte_string());
++}
++
++ByteString StandardPaths::templates_directory()
++{
++    return user_dir("XDG_TEMPLATES_DIR", "/Templates"sv);
++}
++
++ByteString StandardPaths::public_share_directory()
++{
++    return user_dir("XDG_PUBLICSHARE_DIR", "/Public"sv);
+ }
+ 
+ ByteString StandardPaths::config_directory()
+diff --git a/Userland/Libraries/LibCore/StandardPaths.h b/Userland/Libraries/LibCore/StandardPaths.h
+index e82115d1..6929d343 100644
+--- a/Userland/Libraries/LibCore/StandardPaths.h
++++ b/Userland/Libraries/LibCore/StandardPaths.h
+@@ -21,6 +21,8 @@ public:
+     static ByteString music_directory();
+     static ByteString pictures_directory();
+     static ByteString videos_directory();
++    static ByteString templates_directory();
++    static ByteString public_share_directory();
+     static ByteString tempfile_directory();
+     static ByteString config_directory();
+     static ByteString data_directory();
