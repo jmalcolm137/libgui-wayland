@@ -81,6 +81,8 @@
       <description summary="hand a new wallpaper to the desktop">
         The application set a wallpaper. The desktop owns it: it stores what it
         receives and shows it. fd is -1 (with width 0) to clear the wallpaper.
+        format is a Gfx::BitmapFormat value (2 = BGRA8888, little-endian);
+        an invalid value is ignored.
       </description>
       <arg name="width" type="int"/>
       <arg name="height" type="int"/>

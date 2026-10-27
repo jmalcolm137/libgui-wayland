@@ -1,0 +1,25 @@
+diff --git a/Userland/Applications/FileManager/main.cpp b/Userland/Applications/FileManager/main.cpp
+index e86d1c24..aec7fd45 100644
+--- a/Userland/Applications/FileManager/main.cpp
++++ b/Userland/Applications/FileManager/main.cpp
+@@ -580,16 +580,10 @@ ErrorOr<int> run_in_desktop_mode()
+         }
+     } wallpaper_listener;
+ 
+-    // This sets the wallpaper at startup, even if there is no wallpaper, the
+-    // desktop should still show the background color. It's fine to pass a
+-    // nullptr to Desktop::set_wallpaper.
+-    GUI::Desktop::the().load_current_wallpaper();
+-
+-    // Update wallpaper if desktop resolution changes.
+-    GUI::Desktop::the().on_receive_screen_rects([&](auto&) {
+-        GUI::Desktop::the().load_current_wallpaper();
+-    });
+-
++    // The compositor owns the wallpaper and paints it behind this transparent
++    // desktop window. Reading it back here would make the desktop allocate a
++    // private copy and send the same pixels to the compositor again, which
++    // reloads them; the desktop would pay for an image it never paints.
+     window->show();
+     return GUI::Application::the()->exec();
+ }
