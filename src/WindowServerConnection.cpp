@@ -160,9 +160,10 @@ void WindowServerConnection::send_fast_greet()
 
 void WindowServerConnection::send_paint(Window& window, Vector<Gfx::IntRect> rects)
 {
-    // Record what the repaint will change, so the present copies and damages only
-    // those regions instead of the whole window.
-    WaylandClient::the().add_window_damage(window.id, rects);
+    // The damage is recorded from the rects the client actually paints (see
+    // did_finish_painting), not from this request: the client folds in update()
+    // rects that arrived in the meantime, so the invalidation set can be smaller
+    // than the painted set.
     async_paint(window.id, window.rect.size(), move(rects));
 }
 
@@ -532,11 +533,6 @@ void WindowServerConnection::set_window_backing_store(i32 window_id, i32, i32 pi
     // size: release any resize we coalesced while it was busy.
     flush_pending_resize(*w);
 
-    if (w->bitmap && w->last_serial == serial) {
-        present(*w);
-        return;
-    }
-
     if (size.is_empty())
         return;
 
@@ -581,8 +577,13 @@ void WindowServerConnection::invalidate_rect(i32 window_id, Vector<Gfx::IntRect>
     send_paint(*w, move(copy));
 }
 
-void WindowServerConnection::did_finish_painting(i32, Vector<Gfx::IntRect> const&)
+void WindowServerConnection::did_finish_painting(i32 window_id, Vector<Gfx::IntRect> const& rects)
 {
+    // The client reports exactly what it painted, before presenting. Record it as
+    // the surface damage; the present that follows consumes it. This includes the
+    // update() rects the client folded into the paint, which the invalidation
+    // request may not have covered.
+    WaylandClient::the().add_window_damage(window_id, rects);
 }
 
 void WindowServerConnection::set_window_has_alpha_channel(i32 window_id, bool has_alpha_channel)

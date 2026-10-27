@@ -1,0 +1,28 @@
+diff --git a/Userland/Libraries/LibGUI/Window.cpp b/Userland/Libraries/LibGUI/Window.cpp
+index cf9453f3..e42abd06 100644
+--- a/Userland/Libraries/LibGUI/Window.cpp
++++ b/Userland/Libraries/LibGUI/Window.cpp
+@@ -543,13 +551,20 @@ void Window::handle_multi_paint_event(MultiPaintEvent& event)
+     }
+     m_back_store->set_visible_size(event.window_size());
+ 
++    // Report the painted rects *before* presenting. The host records them as the
++    // surface damage and consumes it in the present that follows (both are
++    // ordered messages on the same connection). Reporting them after the present
++    // left one frame's damage behind; reporting the invalidation rects instead
++    // (what the host used to do) missed rects that update() folded into this
++    // paint, so those changes were painted but never damaged -- and stayed
++    // invisible until an unrelated repaint covered them again.
++    if (is_visible())
++        ConnectionToWindowServer::the().async_did_finish_painting(m_window_id, rects);
++
+     if (m_double_buffering_enabled)
+         flip(rects);
+     else if (created_new_backing_store)
+         set_current_backing_store(*m_back_store, true);
+-
+-    if (is_visible())
+-        ConnectionToWindowServer::the().async_did_finish_painting(m_window_id, rects);
+ }
+ 
+ void Window::propagate_shortcuts(KeyEvent& event, Widget* widget, ShortcutPropagationBoundary boundary)
