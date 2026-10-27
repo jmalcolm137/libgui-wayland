@@ -1,0 +1,73 @@
+--- a/Userland/Libraries/LibGUI/TextEditor.cpp
++++ b/Userland/Libraries/LibGUI/TextEditor.cpp
+@@ -13,6 +13,7 @@
+ #include <AK/StringBuilder.h>
+ #include <AK/TemporaryChange.h>
+ #include <LibCore/Timer.h>
++#include <LibGUI/AccessibilityServer.h>
+ #include <LibGUI/Action.h>
+ #include <LibGUI/AutocompleteProvider.h>
+ #include <LibGUI/Clipboard.h>
+@@ -173,29 +174,34 @@
+ 
+     size_t line_index = 0;
+ 
+-    if (position.y() >= 0) {
+-        size_t last_visible_line_index = 0;
+-        // FIXME: Oh boy is this a slow way of calculating this!
+-        // NOTE: Offset by 1 in calculations is because we can't do `i >= 0` with an unsigned type.
+-        for (size_t i = line_count(); i > 0; --i) {
+-            if (document().line_is_visible(i - 1)) {
+-                last_visible_line_index = i - 1;
+-                break;
+-            }
++    if (position.y() >= 0 && line_count() > 0) {
++        // Find the last line whose visual rect starts at or above y. The rects
++        // are laid out top-to-bottom in recompute_all_visual_lines(), so their
++        // tops are non-decreasing and this is a binary search rather than a
++        // scan of every line (which was O(line_count * folding_regions)).
++        size_t low = 0;
++        size_t high = line_count();
++        while (low < high) {
++            auto mid = low + (high - low) / 2;
++            if (m_line_data[mid]->visual_rect.top() <= position.y())
++                low = mid + 1;
++            else
++                high = mid;
+         }
++        line_index = low > 0 ? low - 1 : 0;
+ 
+-        for (size_t i = 0; i < line_count(); ++i) {
+-            if (!document().line_is_visible(i))
+-                continue;
++        // Folded lines have a zero-height visual rect; step back to the visible
++        // line that owns this y position.
++        while (line_index > 0 && m_line_data[line_index]->visual_rect.height() == 0)
++            --line_index;
++
++        // Clicks below the text belong to the last visible line.
++        size_t last_visible_line_index = line_count() > 0 ? line_count() - 1 : 0;
++        while (last_visible_line_index > 0 && m_line_data[last_visible_line_index]->visual_rect.height() == 0)
++            --last_visible_line_index;
+ 
+-            auto& rect = m_line_data[i]->visual_rect;
+-            if (rect.contains_vertically(position.y())) {
+-                line_index = i;
+-                break;
+-            }
+-            if (position.y() >= rect.bottom())
+-                line_index = last_visible_line_index;
+-        }
++        if (position.y() >= m_line_data[last_visible_line_index]->visual_rect.bottom())
++            line_index = last_visible_line_index;
+         line_index = max((size_t)0, min(line_index, last_visible_line_index));
+     }
+ 
+@@ -2281,6 +2287,7 @@
+ {
+     did_change(allow_callback);
+     update();
++    AccessibilityServer::notify_text_changed(*this);
+ }
+ 
+ void TextEditor::document_did_update_undo_stack()
