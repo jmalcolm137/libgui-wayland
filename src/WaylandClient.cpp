@@ -1284,12 +1284,33 @@ u32 WaylandClient::current_modifiers() const
     return m_modifiers;
 }
 
-void WaylandClient::on_keyboard_modifiers(u32 depressed, u32, u32 locked, u32 group, u32)
+void WaylandClient::on_keyboard_modifiers(u32 depressed, u32 latched, u32 locked, u32 group, u32)
 {
-    // We derive modifiers from the key events themselves (see on_keyboard_key),
-    // because some compositors don't deliver modifier events for injected or
-    // synthetic keys. Keep the xkb layout group in sync.
-    dbgln("LibWM/Wayland: modifiers depressed={:#x} locked={:#x} group={}", depressed, locked, group);
+    // The compositor's modifier state is authoritative. Key events alone are not
+    // enough: if a release is lost because focus moved while Ctrl/Alt was held,
+    // the next click and wheel event would silently keep that modifier forever.
+    // Keep the xkb state in sync as well so code points and shortcuts stay
+    // correct, and fall back to the key-event bookkeeping when no modifier event
+    // arrives (some compositors omit it for synthetic keys).
+    if (!m_xkb_state) {
+        dbgln("LibWM/Wayland: modifiers depressed={:#x} locked={:#x} group={}", depressed, locked, group);
+        return;
+    }
+
+    xkb_state_update_mask(m_xkb_state, depressed, latched, locked, 0, 0, group);
+
+    u32 modifiers = 0;
+    if (xkb_state_mod_name_is_active(m_xkb_state, XKB_MOD_NAME_SHIFT, XKB_STATE_MODS_EFFECTIVE) > 0)
+        modifiers |= Mod_Shift;
+    if (xkb_state_mod_name_is_active(m_xkb_state, XKB_MOD_NAME_CTRL, XKB_STATE_MODS_EFFECTIVE) > 0)
+        modifiers |= Mod_Ctrl;
+    if (xkb_state_mod_name_is_active(m_xkb_state, XKB_MOD_NAME_ALT, XKB_STATE_MODS_EFFECTIVE) > 0)
+        modifiers |= Mod_Alt;
+    if (xkb_state_mod_name_is_active(m_xkb_state, XKB_MOD_NAME_LOGO, XKB_STATE_MODS_EFFECTIVE) > 0)
+        modifiers |= Mod_Super;
+    m_modifiers = modifiers;
+
+    dbgln("LibWM/Wayland: modifiers depressed={:#x} locked={:#x} group={} -> {:#x}", depressed, locked, group, m_modifiers);
 }
 
 static u32 modifier_bit_for_evdev(u32 key)
