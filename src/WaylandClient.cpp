@@ -2234,6 +2234,25 @@ void WaylandClient::on_popup_done(xdg_popup* popup)
 ErrorOr<ByteBuffer> WaylandClient::read_clipboard(ByteString& out_mime_type)
 {
     out_mime_type = { };
+
+    // If we are the clipboard owner, serve the stored offers directly. A
+    // Wayland round trip through our own data source would require dispatching
+    // the data-source request while the caller is blocked reading the pipe, and
+    // the 2 s timeout turned large copies into a long stall (and could take the
+    // client's clipboard connection down with it).
+    if (m_data_source && !m_clipboard_offers.is_empty()) {
+        for (auto const& preferred : { "text/plain"sv, "text/plain;charset=utf-8"sv, "UTF8_STRING"sv, "text/uri-list"sv, "image/png"sv, "image/x-serenityos"sv }) {
+            auto it = m_clipboard_offers.find(ByteString(preferred));
+            if (it != m_clipboard_offers.end()) {
+                out_mime_type = it->key;
+                return ByteBuffer::copy(it->value);
+            }
+        }
+        auto it = m_clipboard_offers.begin();
+        out_mime_type = it->key;
+        return ByteBuffer::copy(it->value);
+    }
+
     if (!m_current_offer || !m_display)
         return Error::from_string_literal("LibWM: no clipboard selection");
 
