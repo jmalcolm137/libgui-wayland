@@ -372,7 +372,7 @@ void MenuController::close_deeper_than(i32 menu_id)
     m_open_menus.resize(index + 1);
 }
 
-void MenuController::open_root(i32 menu_id, i32 window_id, Gfx::IntRect anchor)
+void MenuController::open_root(i32 menu_id, i32 window_id, Gfx::IntRect anchor, bool from_menubar)
 {
     auto* menu = find_menu(menu_id);
     if (!menu)
@@ -385,7 +385,7 @@ void MenuController::open_root(i32 menu_id, i32 window_id, Gfx::IntRect anchor)
     menu->hovered_valid = false;
     m_open_menus.append(menu_id);
     if (show_popup)
-        show_popup(menu_id, window_id, -1, anchor, menu->popup_size, false);
+        show_popup(menu_id, window_id, -1, anchor, menu->popup_size, false, from_menubar);
     if (visibility_changed)
         visibility_changed(menu_id, true);
 }
@@ -445,7 +445,7 @@ void MenuController::open_submenu_for(Menu& parent, int index)
     submenu->hovered_valid = false;
     m_open_menus.append(submenu->id);
     if (show_popup)
-        show_popup(submenu->id, parent.window_id, parent.id, item.rect, submenu->popup_size, true);
+        show_popup(submenu->id, parent.window_id, parent.id, item.rect, submenu->popup_size, true, false);
     if (visibility_changed)
         visibility_changed(submenu->id, true);
 }
@@ -489,7 +489,7 @@ void MenuController::on_menubar_press(i32 window_id, Gfx::IntPoint position)
             close_all_menus();
             return;
         }
-        open_root(menu_id, window_id, menu->menubar_rect);
+        open_root(menu_id, window_id, menu->menubar_rect, true);
         return;
     }
     close_all_menus();
@@ -612,7 +612,7 @@ void MenuController::switch_menubar(i32 window_id, int direction)
     int index = current_index.has_value() ? static_cast<int>(current_index.value()) : 0;
     int next = (index + direction + static_cast<int>(menus.size())) % static_cast<int>(menus.size());
     if (auto* menu = find_menu(menus[next]))
-        open_root(menus[next], window_id, menu->menubar_rect);
+        open_root(menus[next], window_id, menu->menubar_rect, true);
 }
 
 bool MenuController::handle_key(i32 window_id, u32 key_code, u32 code_point, u32 modifiers, bool is_press)
@@ -628,7 +628,7 @@ bool MenuController::handle_key(i32 window_id, u32 key_code, u32 code_point, u32
                 if (!menu || menu->window_id != window_id || menu->items.is_empty())
                     continue;
                 if (menu_accelerator(menu->name) == wanted) {
-                    open_root(menu_id, window_id, menu->menubar_rect);
+                    open_root(menu_id, window_id, menu->menubar_rect, true);
                     return true;
                 }
             }
@@ -641,7 +641,7 @@ bool MenuController::handle_key(i32 window_id, u32 key_code, u32 code_point, u32
             for (auto menu_id : m_menubar_order) {
                 auto* menu = find_menu(menu_id);
                 if (menu && menu->window_id == window_id && !menu->items.is_empty()) {
-                    open_root(menu_id, window_id, menu->menubar_rect);
+                    open_root(menu_id, window_id, menu->menubar_rect, true);
                     return true;
                 }
             }

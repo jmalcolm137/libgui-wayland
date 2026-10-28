@@ -81,7 +81,7 @@ public:
     Gfx::IntSize popup_size(i32 menu_id) const;
     void render_popup(i32 menu_id, Gfx::Painter&) const;
     i32 menu_window(i32 menu_id) const;
-    void open_root(i32 menu_id, i32 window_id, Gfx::IntRect anchor);
+    void open_root(i32 menu_id, i32 window_id, Gfx::IntRect anchor, bool from_menubar = false);
     void close_menu(i32 menu_id);
     // Dismiss any open menus, e.g. when a press lands outside them.
     bool has_open_menu() const { return !m_open_menus.is_empty(); }
@@ -99,7 +99,7 @@ public:
     bool handle_key(i32 window_id, u32 key_code, u32 code_point, u32 modifiers, bool is_press);
 
     // --- callbacks (wired by WindowServerConnection) ---
-    Function<void(i32 menu_id, i32 window_id, i32 parent_popup_id, Gfx::IntRect anchor, Gfx::IntSize size, bool is_submenu)> show_popup;
+    Function<void(i32 menu_id, i32 window_id, i32 parent_popup_id, Gfx::IntRect anchor, Gfx::IntSize size, bool is_submenu, bool from_menubar)> show_popup;
     Function<void(i32 menu_id)> hide_popup;
     Function<void(i32 menu_id, u32 identifier)> item_activated;
     Function<void(i32 menu_id, u32 identifier)> item_entered;

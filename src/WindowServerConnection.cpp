@@ -335,7 +335,12 @@ void WindowServerConnection::install_input_callbacks()
 
 void WindowServerConnection::install_menu_callbacks()
 {
-    m_menu.show_popup = [this](i32 menu_id, i32 window_id, i32 parent_popup_id, Gfx::IntRect anchor, Gfx::IntSize size, bool is_submenu) {
+    m_menu.show_popup = [this](i32 menu_id, i32 window_id, i32 parent_popup_id, Gfx::IntRect anchor, Gfx::IntSize size, bool is_submenu, bool from_menubar) {
+        // A menubar menu's rect is menubar-local. With the direct path the menubar is a subsurface above the
+        // window-content origin, so move the anchor above the content top; the fallback path composes the
+        // menubar into the content, where the rect is already in the right coordinate space.
+        if (from_menubar && WaylandClient::the().window_uses_menubar_subsurface(window_id))
+            anchor.translate_by(0, -m_menu.menubar_height());
         WaylandClient::the().create_popup(menu_id, window_id, parent_popup_id, anchor, size, is_submenu);
         present_menu_popup(menu_id);
     };

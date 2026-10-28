@@ -160,6 +160,7 @@ public:
     // Reserve a strip at the top of the window (a menubar) drawn by `draw`,
     // with the client's content shifted down by `inset` pixels.
     void set_window_inset(i32 window_id, int inset, Function<void(Gfx::Bitmap&, Gfx::IntRect)> draw);
+    bool window_uses_menubar_subsurface(i32 window_id) const;
 
     // Record the regions an incoming paint will change, so the present can copy
     // and damage only those (empty = the whole window).

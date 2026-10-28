@@ -1938,6 +1938,12 @@ void WaylandClient::bind_bitmap(wl_surface* surface, Core::AnonymousBuffer const
     buffers.append(move(record));
 }
 
+bool WaylandClient::window_uses_menubar_subsurface(i32 window_id) const
+{
+    auto it = m_windows.find(window_id);
+    return it != m_windows.end() && it->value->menubar_surface != nullptr;
+}
+
 void WaylandClient::set_window_inset(i32 window_id, int inset, Function<void(Gfx::Bitmap&, Gfx::IntRect)> draw)
 {
     auto* window_surface = find(window_id);
