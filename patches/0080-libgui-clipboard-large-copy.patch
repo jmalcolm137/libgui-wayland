@@ -1,0 +1,83 @@
+diff --git a/Userland/Libraries/LibGUI/Clipboard.cpp b/Userland/Libraries/LibGUI/Clipboard.cpp
+--- a/Userland/Libraries/LibGUI/Clipboard.cpp
++++ b/Userland/Libraries/LibGUI/Clipboard.cpp
+@@ -7,12 +7,15 @@
+ 
+ #include <Clipboard/ClipboardClientEndpoint.h>
+ #include <Clipboard/ClipboardServerEndpoint.h>
++#include <LibCore/EventLoop.h>
+ #include <LibGUI/Clipboard.h>
+ #include <LibGfx/Bitmap.h>
+ #include <LibIPC/ConnectionToServer.h>
+ 
+ namespace GUI {
+ 
++static void clipboard_connection_died();
++
+ class ConnectionToClipboardServer final
+     : public IPC::ConnectionToServer<ClipboardClientEndpoint, ClipboardServerEndpoint>
+     , public ClipboardClientEndpoint {
+@@ -28,12 +31,32 @@
+     {
+         Clipboard::the().clipboard_data_changed({}, mime_type);
+     }
++
++    virtual void die() override
++    {
++        // The clipboard is auxiliary: losing it must not terminate the
++        // application. The default ConnectionToServer::die() calls exit(0),
++        // which used to take the whole Terminal down after a large copy.
++        clipboard_connection_died();
++    }
+ };
+ 
+ static RefPtr<ConnectionToClipboardServer> s_connection;
+ 
++static void clipboard_connection_died()
++{
++    dbgln("GUI::Clipboard: connection to the clipboard server was lost");
++    Core::deferred_invoke([] {
++        s_connection = nullptr;
++    });
++}
++
+ static ConnectionToClipboardServer& connection()
+ {
++    // The previous connection may have been torn down; reconnect on the next use
++    // rather than exiting or dereferencing a dead connection.
++    if (!s_connection || !s_connection->is_open())
++        s_connection = ConnectionToClipboardServer::try_create().release_value_but_fixme_should_propagate_errors();
+     return *s_connection;
+ }
+ 
+diff --git a/Userland/Libraries/LibVT/TerminalWidget.h b/Userland/Libraries/LibVT/TerminalWidget.h
+--- a/Userland/Libraries/LibVT/TerminalWidget.h
++++ b/Userland/Libraries/LibVT/TerminalWidget.h
+@@ -156,7 +156,7 @@
+     virtual void emit(u8 const*, size_t) override;
+ 
+     // ^GUI::Clipboard::ClipboardClient
+-    virtual void clipboard_content_did_change(ByteString const&) override { update_paste_action(); }
++    virtual void clipboard_content_did_change(ByteString const& mime_type) override;
+ 
+     void send_non_user_input(ReadonlyBytes);
+ 
+diff --git a/Userland/Libraries/LibVT/TerminalWidget.cpp b/Userland/Libraries/LibVT/TerminalWidget.cpp
+--- a/Userland/Libraries/LibVT/TerminalWidget.cpp
++++ b/Userland/Libraries/LibVT/TerminalWidget.cpp
+@@ -1433,6 +1433,15 @@
+     m_paste_action->set_enabled(mime_type.starts_with("text/"sv) && !data.is_empty());
+ }
+ 
++void TerminalWidget::clipboard_content_did_change(ByteString const& mime_type)
++{
++    // Do not fetch the clipboard data here. This callback runs inside the
++    // clipboard connection's message dispatch, and the synchronous fetch used to
++    // re-enter that connection. After a large copy the Terminal could lose the
++    // connection and exit. Paste fetches the data when it is actually used.
++    m_paste_action->set_enabled(mime_type.starts_with("text/"sv));
++}
++
+ void TerminalWidget::update_color_scheme()
+ {
+     auto const& palette = GUI::Widget::palette();
