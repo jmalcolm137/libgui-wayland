@@ -1,0 +1,157 @@
+diff --git a/Userland/Libraries/LibGUI/TextEditor.cpp b/Userland/Libraries/LibGUI/TextEditor.cpp
+--- a/Userland/Libraries/LibGUI/TextEditor.cpp
++++ b/Userland/Libraries/LibGUI/TextEditor.cpp
+@@ -400,7 +400,8 @@
+     if (m_selection.start().is_valid() && m_selection.start() != m_cursor)
+         m_selection.set_end(m_cursor);
+ 
+-    update();
++    // did_update_selection() repaints the lines covered by the old and the new
++    // selection; the cursor move above already repainted the cursor lines.
+     did_update_selection();
+ }
+ 
+@@ -422,7 +423,6 @@
+         set_cursor_to_text_position(constrained);
+         m_selection.set_end(m_cursor);
+         did_update_selection();
+-        update();
+         return;
+     }
+ 
+@@ -1279,6 +1279,8 @@
+         m_selection.set_start({ selection_start.line(), selection_start.column() + m_soft_tab_width });
+         m_selection.set_end({ selection_end.line(), selection_end.column() + m_soft_tab_width });
+         set_cursor({ m_cursor.line(), m_cursor.column() + m_soft_tab_width });
++        // execute() queued a full repaint, which shows the adjusted selection.
++        m_last_repainted_selection = m_selection;
+     }
+ }
+ 
+@@ -1296,6 +1298,8 @@
+             m_selection.set_end({ selection_end.line(), selection_end.column() - current_line().leading_spaces() });
+         }
+         execute<UnindentSelection>(m_soft_tab_width, TextRange(selection_start, selection_end));
++        // execute() queued a full repaint, which shows the adjusted selection.
++        m_last_repainted_selection = m_selection;
+     }
+ }
+ 
+@@ -1669,8 +1673,12 @@
+ 
+ void TextEditor::focusout_event(FocusEvent&)
+ {
+-    if (is_displayonly() && has_selection())
++    if (is_displayonly() && has_selection()) {
+         m_selection.clear();
++        // The focus change repaints the widget, so the screen no longer shows
++        // the selection.
++        m_last_repainted_selection = m_selection;
++    }
+     stop_timer();
+     if (on_focusout)
+         on_focusout();
+@@ -1985,6 +1993,18 @@
+         set_override_cursor(Gfx::StandardCursor::None);
+ }
+ 
++void TextEditor::update_selection_rects(TextRange const& range)
++{
++    if (!range.is_valid() || line_count() == 0 || !is_visual_data_up_to_date())
++        return;
++
++    auto normalized = range.normalized();
++    auto first_line = min(normalized.start().line(), line_count() - 1);
++    auto last_line = min(normalized.end().line(), line_count() - 1);
++    for (auto line_index = first_line; line_index <= last_line; ++line_index)
++        update(line_widget_rect(line_index));
++}
++
+ void TextEditor::did_update_selection()
+ {
+     m_cut_action->set_enabled(is_editable() && has_selection() && !text_is_secret());
+@@ -1992,9 +2012,18 @@
+     if (on_selection_change)
+         on_selection_change();
+ 
+-    if (is_wrapping_enabled()) {
+-        // FIXME: Try to repaint less.
++    // Selection highlighting is drawn per physical line, so repaint the lines
++    // that were selected before and the lines that are selected now. If the
++    // visual layout is stale the line rects are not trustworthy; repaint
++    // everything in that case.
++    if (!is_visual_data_up_to_date()) {
+         update();
++        return;
++    }
++    if (m_selection != m_last_repainted_selection) {
++        update_selection_rects(m_last_repainted_selection);
++        update_selection_rects(m_selection);
++        m_last_repainted_selection = m_selection;
+     }
+ }
+ 
+@@ -2059,6 +2088,7 @@
+     set_cursor(m_selection.end());
+     scroll_position_into_view(normalized_selection().start());
+     update();
++    m_last_repainted_selection = m_selection;
+ }
+ 
+ void TextEditor::clear_selection()
+@@ -2067,6 +2097,7 @@
+         return;
+     m_selection.clear();
+     update();
++    m_last_repainted_selection = m_selection;
+ }
+ 
+ void TextEditor::recompute_all_visual_lines()
+@@ -2308,10 +2339,12 @@
+     m_undo_action->set_text(make_action_text("&Undo"sv, document().undo_stack().undo_action_text()));
+     m_redo_action->set_text(make_action_text("&Redo"sv, document().undo_stack().redo_action_text()));
+ 
+-    // FIXME: This is currently firing more often than it should.
+-    //        Ideally we'd only send this out when the undo stack modified state actually changes.
++    auto is_modified = document().is_modified();
++    if (is_modified == m_last_notified_modified_state)
++        return;
++    m_last_notified_modified_state = is_modified;
+     if (on_modified_change)
+-        on_modified_change(document().is_modified());
++        on_modified_change(is_modified);
+ }
+ 
+ void TextEditor::populate_line_data()
+@@ -2358,6 +2391,7 @@
+         m_selection.clear();
+     recompute_all_visual_lines();
+     update();
++    m_last_repainted_selection = m_selection;
+     m_document->register_client(*this);
+ }
+ 
+diff --git a/Userland/Libraries/LibGUI/TextEditor.h b/Userland/Libraries/LibGUI/TextEditor.h
+--- a/Userland/Libraries/LibGUI/TextEditor.h
++++ b/Userland/Libraries/LibGUI/TextEditor.h
+@@ -223,6 +223,7 @@
+ 
+     TextRange& selection() { return m_selection; }
+     void did_update_selection();
++    void update_selection_rects(TextRange const&);
+     void did_change(AllowCallback = AllowCallback::Yes);
+     void update_cursor();
+ 
+@@ -411,6 +412,12 @@
+     size_t m_soft_tab_width { 4 };
+     int m_horizontal_content_padding { 3 };
+     TextRange m_selection {};
++    // The part of m_selection that has already been repainted. Selection changes
++    // repaint only the lines in the old and the new range.
++    TextRange m_last_repainted_selection {};
++    // Last value passed to on_modified_change, so the callback only fires when
++    // the undo stack's modified state actually changes.
++    bool m_last_notified_modified_state { false };
+ 
+     struct GutterIndicator {
+         PaintGutterIndicator draw_indicator;
