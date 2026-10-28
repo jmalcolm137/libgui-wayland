@@ -1,0 +1,168 @@
+diff --git a/Userland/Libraries/LibGUI/FileSystemModel.cpp b/Userland/Libraries/LibGUI/FileSystemModel.cpp
+--- a/Userland/Libraries/LibGUI/FileSystemModel.cpp
++++ b/Userland/Libraries/LibGUI/FileSystemModel.cpp
+@@ -694,42 +694,24 @@
+ 
+ using BitmapBackgroundAction = Threading::BackgroundAction<NonnullRefPtr<Gfx::Bitmap>>;
+ 
+-// Mutex protected thumbnail cache data shared between threads.
++// Mutex-protected thumbnail state. The decode callbacks run on the UI thread;
++// only the CPU-side scaling runs on the background thread.
+ struct ThumbnailCache {
+     // Null pointers indicate an image that couldn't be loaded due to errors.
+     HashMap<ByteString, RefPtr<Gfx::Bitmap>> thumbnail_cache {};
++    HashMap<ByteString, NonnullRefPtr<Core::Promise<ImageDecoderClient::DecodedImage>>> decoding_thumbnails {};
+     HashMap<ByteString, NonnullRefPtr<BitmapBackgroundAction>> loading_thumbnails {};
+ };
+ 
+ static Threading::MutexProtected<ThumbnailCache> s_thumbnail_cache {};
+-static Threading::MutexProtected<RefPtr<ImageDecoderClient::Client>> s_image_decoder_client {};
++// The ImageDecoder client belongs to the UI event loop, so decode requests are
++// issued there and their promises are resolved by the same event loop that
++// drives the model.
++static RefPtr<ImageDecoderClient::Client> s_image_decoder_client;
+ 
+-static ErrorOr<NonnullRefPtr<Gfx::Bitmap>> render_thumbnail(StringView path)
++static ErrorOr<NonnullRefPtr<Gfx::Bitmap>> scale_thumbnail(NonnullRefPtr<Gfx::Bitmap> bitmap)
+ {
+-    Core::EventLoop event_loop;
+     Gfx::IntSize const thumbnail_size { 32, 32 };
+-
+-    auto file = TRY(Core::MappedFile::map(path));
+-    auto decoded_image = TRY(s_image_decoder_client.with_locked([=, &file](auto& maybe_client) -> ErrorOr<Optional<ImageDecoderClient::DecodedImage>> {
+-        if (!maybe_client) {
+-            maybe_client = TRY(ImageDecoderClient::Client::try_create());
+-            maybe_client->on_death = []() {
+-                s_image_decoder_client.with_locked([](auto& client) {
+-                    client = nullptr;
+-                });
+-            };
+-        }
+-
+-        auto mime_type = Core::guess_mime_type_based_on_filename(path);
+-
+-        // FIXME: Refactor thumbnail rendering to be more async-aware. Possibly return this promise to the caller.
+-        auto decoded_image = TRY(maybe_client->decode_image(file->bytes(), {}, {}, thumbnail_size, mime_type)->await());
+-
+-        return decoded_image;
+-    }));
+-
+-    auto bitmap = decoded_image.value().frames[0].bitmap;
+-
+     auto thumbnail = TRY(Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, thumbnail_size));
+ 
+     auto destination = bitmap->rect().scaled_to_fit_within(thumbnail->rect());
+@@ -754,8 +736,8 @@
+             node.thumbnail = (*it).value;
+             return TriState::True;
+         }
+-        // Loading is in progress.
+-        if (cache.loading_thumbnails.contains(path))
++        // Loading is in progress (decoding, or scaling the decoded pixels).
++        if (cache.decoding_thumbnails.contains(path) || cache.loading_thumbnails.contains(path))
+             return TriState::False;
+         return TriState::Unknown;
+     });
+@@ -768,9 +750,6 @@
+ 
+     auto weak_this = make_weak_ptr();
+ 
+-    auto const action = [path](auto&) {
+-        return render_thumbnail(path);
+-    };
+     auto const update_progress = [weak_this](bool with_success) {
+         using namespace AK::TimeLiterals;
+         if (auto strong_this = weak_this.strong_ref(); !strong_this.is_null()) {
+@@ -794,7 +773,7 @@
+         s_thumbnail_cache.with_locked([path, thumbnail, &finished_generating_thumbnails](auto& cache) {
+             cache.thumbnail_cache.set(path, thumbnail);
+             cache.loading_thumbnails.remove(path);
+-            finished_generating_thumbnails = cache.loading_thumbnails.is_empty();
++            finished_generating_thumbnails = cache.loading_thumbnails.is_empty() && cache.decoding_thumbnails.is_empty();
+         });
+ 
+         if (auto strong_this = weak_this.strong_ref(); finished_generating_thumbnails && !strong_this.is_null())
+@@ -805,7 +784,7 @@
+         return {};
+     };
+ 
+-    auto const on_error = [path, update_progress](Error error) -> void {
++    auto const on_scale_error = [path, update_progress](Error error) -> void {
+         // Note: We need to defer that to avoid the function removing its last reference
+         //       i.e. trying to destroy itself, which is prohibited.
+         Core::EventLoop::current().deferred_invoke([path, error = Error::copy(error)]() mutable {
+@@ -821,9 +800,71 @@
+         update_progress(false);
+     };
+ 
+-    s_thumbnail_cache.with_locked([path, action, on_complete, on_error](auto& cache) {
+-        cache.loading_thumbnails.set(path, BitmapBackgroundAction::construct(move(action), move(on_complete), move(on_error)));
+-    });
++    auto on_decode_error = [path, update_progress](Error& error) -> void {
++        // The promise may be the only owner of this callback; defer the cache
++        // update so the promise is not destroyed while it is being rejected.
++        Core::EventLoop::current().deferred_invoke([path, error = Error::copy(error)]() mutable {
++            s_thumbnail_cache.with_locked([path, error = move(error)](auto& cache) {
++                if (error != Error::from_errno(ECANCELED)) {
++                    cache.thumbnail_cache.set(path, nullptr);
++                    dbgln("Failed to load thumbnail for {}: {}", path, error);
++                }
++                cache.decoding_thumbnails.remove(path);
++            });
++        });
++
++        update_progress(false);
++    };
++
++    auto on_decoded = [path, on_complete, on_scale_error, on_decode_error](ImageDecoderClient::DecodedImage& decoded_image) -> ErrorOr<void> {
++        if (decoded_image.frames.is_empty()) {
++            auto error = Error::from_string_literal("ImageDecoder returned no frames");
++            on_decode_error(error);
++            return {};
++        }
++
++        auto bitmap = decoded_image.frames[0].bitmap;
++        auto action = [bitmap = move(bitmap)](auto&) {
++            return scale_thumbnail(bitmap);
++        };
++
++        // Defer the cache swap: this callback is owned by the decode promise,
++        // and removing the last reference to that promise from inside
++        // resolve()/reject() is not safe.
++        Core::EventLoop::current().deferred_invoke([path, action = move(action), on_complete, on_scale_error]() mutable {
++            s_thumbnail_cache.with_locked([path, action = move(action), on_complete, on_scale_error](auto& cache) mutable {
++                cache.decoding_thumbnails.remove(path);
++                cache.loading_thumbnails.set(path, BitmapBackgroundAction::construct(move(action), move(on_complete), move(on_scale_error)));
++            });
++        });
++
++        return {};
++    };
++
++    auto file = Core::MappedFile::map(path);
++    if (file.is_error()) {
++        s_thumbnail_cache.with_locked([path](auto& cache) { cache.thumbnail_cache.set(path, nullptr); });
++        update_progress(false);
++        return false;
++    }
++
++    if (!s_image_decoder_client) {
++        auto client = ImageDecoderClient::Client::try_create();
++        if (client.is_error()) {
++            s_thumbnail_cache.with_locked([path](auto& cache) { cache.thumbnail_cache.set(path, nullptr); });
++            update_progress(false);
++            return false;
++        }
++        s_image_decoder_client = client.release_value();
++        s_image_decoder_client->on_death = [] {
++            s_image_decoder_client = nullptr;
++        };
++    }
++
++    auto mime_type = Core::guess_mime_type_based_on_filename(path);
++    auto promise = s_image_decoder_client->decode_image(file.value()->bytes(), move(on_decoded), move(on_decode_error), Gfx::IntSize { 32, 32 }, mime_type);
++    if (!promise->is_resolved() && !promise->is_rejected())
++        s_thumbnail_cache.with_locked([path, promise](auto& cache) { cache.decoding_thumbnails.set(path, promise); });
+ 
+     return false;
+ }
