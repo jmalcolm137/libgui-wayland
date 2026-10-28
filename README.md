@@ -153,3 +153,21 @@ scripts/build-libgui.sh                # patches + LibGfx/LibGUI/LibWM/Calculato
 (input, clipboard, menus, PDFViewer, 3DFileViewer GL, Piano) automatically; pass `--no-tests` to
 skip.
 
+To keep a log and get a Jev triage card when the build or a test fails:
+
+```sh
+scripts/build-with-triage.sh          # same arguments as build-libgui.sh
+```
+
+The wrapper tees the run to `build/logs/`, preserves the build's exit status, and on failure
+sends a reduced excerpt (errors, failed checks, patch problems, and the tail) to Jev. The card
+classifies the failure, names the likely subsystem, and suggests a next action. It needs an
+authenticated `jev` (`jev auth set`); when Jev is unavailable the build result is unchanged and
+triage is skipped. Set `TRIAGE=0` to capture the log without triage.
+
+`scripts/triage-failure.py` can also triage an existing log directly, with `--json` for
+machine-readable output. `scripts/test-triage-failure.sh` checks the extraction, redaction and
+Jev-call paths offline (no API key required). Jev is an advisory classifier: treat
+low-confidence answers as "investigate", and keep patch application, `grep` checks, and image
+comparisons deterministic.
+
