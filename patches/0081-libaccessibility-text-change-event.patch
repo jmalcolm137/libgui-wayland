@@ -1,0 +1,187 @@
+diff --git a/Userland/Libraries/LibAccessibility/Server.h b/Userland/Libraries/LibAccessibility/Server.h
+--- a/Userland/Libraries/LibAccessibility/Server.h
++++ b/Userland/Libraries/LibAccessibility/Server.h
+@@ -85,8 +85,10 @@
+ };
+ 
+ // A live view of the application's widget tree. It is called on the D-Bus
+-// thread/loop and must be cheap and non-blocking.
+-using Snapshot = Function<Node()>;
++// thread/loop and must be cheap and non-blocking. `include_text` is false for
++// path/state lookups, so a large editor's text is not rebuilt just to send an
++// event.
++using Snapshot = Function<Node(bool include_text)>;
+ 
+ class Server {
+ public:
+@@ -98,7 +100,7 @@
+ 
+     // Optional event notifications. Backends without a transport ignore them.
+     virtual void notify_state_changed(void*, StringView, bool) { }
+-    virtual void notify_text_changed(void*, StringView) { }
++    virtual void notify_text_changed(void*) { }
+ };
+ 
+ }
+diff --git a/Userland/Libraries/LibAccessibility/Linux/DBusServer.h b/Userland/Libraries/LibAccessibility/Linux/DBusServer.h
+--- a/Userland/Libraries/LibAccessibility/Linux/DBusServer.h
++++ b/Userland/Libraries/LibAccessibility/Linux/DBusServer.h
+@@ -18,7 +18,7 @@
+     virtual ~DBusServer() override;
+ 
+     virtual void notify_state_changed(void*, StringView, bool) override;
+-    virtual void notify_text_changed(void*, StringView) override;
++    virtual void notify_text_changed(void*) override;
+ 
+     struct FlatNode {
+         ByteString path;
+@@ -92,7 +92,7 @@
+     static int handle_editable_cut_text(sd_bus_message*, void*, sd_bus_error*);
+     static int handle_editable_paste_text(sd_bus_message*, void*, sd_bus_error*);
+ 
+-    FlattenedSnapshot flatten();
++    FlattenedSnapshot flatten(bool include_text = true);
+     ByteString path_for_tag(void*);
+ 
+     Snapshot m_snapshot;
+diff --git a/Userland/Libraries/LibAccessibility/Linux/DBusServer.cpp b/Userland/Libraries/LibAccessibility/Linux/DBusServer.cpp
+--- a/Userland/Libraries/LibAccessibility/Linux/DBusServer.cpp
++++ b/Userland/Libraries/LibAccessibility/Linux/DBusServer.cpp
+@@ -378,9 +378,9 @@
+     return suffix.to_number<int>().value_or(-1);
+ }
+ 
+-DBusServer::FlattenedSnapshot DBusServer::flatten()
++DBusServer::FlattenedSnapshot DBusServer::flatten(bool include_text)
+ {
+-    Node root = m_snapshot();
++    Node root = m_snapshot(include_text);
+     Vector<FlatNode> nodes;
+ 
+     Function<void(Node const&, int)> add = [&](Node const& node, int parent) {
+@@ -408,7 +408,7 @@
+ {
+     if (!tag)
+         return {};
+-    auto snapshot = flatten();
++    auto snapshot = flatten(false);
+     for (auto const& node : snapshot.nodes) {
+         if (node.source && node.source->tag == tag)
+             return node.path;
+@@ -445,16 +445,17 @@
+     sd_bus_message_unref(message);
+ }
+ 
+-void DBusServer::notify_text_changed(void* tag, StringView text)
++void DBusServer::notify_text_changed(void* tag)
+ {
+     if (!m_bus)
+         return;
+     auto path = path_for_tag(tag);
+     if (path.is_empty())
+         return;
+-    auto text_string = MUST(String::from_utf8(text));
+-    auto text_bytes = text_string.to_byte_string();
+ 
++    // The event is a notification, not a copy of the document. The AT-SPI
++    // client can query the Text interface for the content; sending a large
++    // editor's full text here blocked the UI thread on every change.
+     sd_bus_message* message = nullptr;
+     if (sd_bus_message_new_signal(m_bus, &message, path.characters(), "org.a11y.atspi.Event.Object", "TextChanged") < 0)
+         return;
+@@ -462,9 +463,9 @@
+     if (result >= 0)
+         result = sd_bus_message_append(message, "i", 0);
+     if (result >= 0)
+-        result = sd_bus_message_append(message, "i", static_cast<int>(text.length()));
++        result = sd_bus_message_append(message, "i", 0);
+     if (result >= 0)
+-        result = sd_bus_message_append(message, "v", "s", text_bytes.characters());
++        result = sd_bus_message_append(message, "v", "s", "");
+     if (result >= 0)
+         result = sd_bus_message_open_container(message, 'a', "{sv}");
+     if (result >= 0)
+diff --git a/Userland/Libraries/LibGUI/AccessibilityServer.cpp b/Userland/Libraries/LibGUI/AccessibilityServer.cpp
+--- a/Userland/Libraries/LibGUI/AccessibilityServer.cpp
++++ b/Userland/Libraries/LibGUI/AccessibilityServer.cpp
+@@ -66,7 +66,7 @@
+     return {};
+ }
+ 
+-static Accessibility::Node snapshot_widget(Widget& widget)
++static Accessibility::Node snapshot_widget(Widget& widget, bool include_text)
+ {
+     Accessibility::Node node;
+     node.role = role_for(widget);
+@@ -95,28 +95,32 @@
+ 
+     if (is<Label>(widget)) {
+         node.is_text = true;
+-        node.text = static_cast<Label const&>(widget).text();
++        if (include_text)
++            node.text = static_cast<Label const&>(widget).text();
+     } else if (is<AbstractButton>(widget)) {
+         node.is_text = true;
+-        node.text = static_cast<AbstractButton const&>(widget).text();
++        if (include_text)
++            node.text = static_cast<AbstractButton const&>(widget).text();
+     } else if (is<TextEditor>(widget)) {
+         auto& editor = static_cast<TextEditor&>(widget);
+         node.is_text = true;
+         node.editable = editor.is_editable();
+-        node.text = MUST(String::from_byte_string(editor.text()));
+-        node.set_text = [&editor](String text) {
+-            editor.set_text(text);
+-        };
++        if (include_text) {
++            node.text = MUST(String::from_byte_string(editor.text()));
++            node.set_text = [&editor](String text) {
++                editor.set_text(text);
++            };
++        }
+     }
+ 
+     for (auto& child : widget.child_widgets()) {
+         if (child.is_visible())
+-            node.children.append(snapshot_widget(child));
++            node.children.append(snapshot_widget(child, include_text));
+     }
+     return node;
+ }
+ 
+-static Accessibility::Node snapshot()
++static Accessibility::Node snapshot(bool include_text)
+ {
+     Accessibility::Node root;
+     root.role = Accessibility::Role::Application;
+@@ -136,7 +140,7 @@
+             frame.states |= Accessibility::StateFocused | Accessibility::StateActive;
+         if (window.main_widget()) {
+             auto& main = *window.main_widget();
+-            frame.children.append(snapshot_widget(main));
++            frame.children.append(snapshot_widget(main, include_text));
+             // The window is the AT-SPI frame; expose the main widget's children
+             // directly rather than an uninteresting root panel. Move them out
+             // first: assigning frame.children from one of its own elements would
+@@ -154,7 +158,7 @@
+ {
+     if (s_server)
+         return;
+-    s_server = Accessibility::Server::create(snapshot);
++    s_server = Accessibility::Server::create([](bool include_text) { return snapshot(include_text); });
+ }
+ 
+ void AccessibilityServer::shutdown()
+@@ -170,10 +174,8 @@
+ 
+ void AccessibilityServer::notify_text_changed(TextEditor& editor)
+ {
+-    if (!s_server)
+-        return;
+-    auto text = editor.text();
+-    s_server->notify_text_changed(&editor, StringView { text.characters(), text.length() });
++    if (s_server)
++        s_server->notify_text_changed(&editor);
+ }
+ 
+ }
