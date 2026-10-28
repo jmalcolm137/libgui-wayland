@@ -1,0 +1,19 @@
+diff --git a/Userland/Libraries/LibCore/EventLoopImplementationUnix.cpp b/Userland/Libraries/LibCore/EventLoopImplementationUnix.cpp
+--- a/Userland/Libraries/LibCore/EventLoopImplementationUnix.cpp
++++ b/Userland/Libraries/LibCore/EventLoopImplementationUnix.cpp
+@@ -699,6 +699,15 @@
+ 
+     auto& thread_data = *thread_data_ptr;
+     auto it = thread_data.notifier_by_ptr.find(&notifier);
++    // The notifier can outlive the thread data it was registered with: at process
++    // exit the main thread's thread_local ThreadData is destroyed first, and a
++    // late EventLoop::current() (the inert teardown loop) then creates a new one
++    // for the same thread. A static connection destroyed after that point asks
++    // for its notifier to be disabled, but the new ThreadData never saw it.
++    // There is nothing left to unregister.
++    if (it == thread_data.notifier_by_ptr.end())
++        return;
++
+     size_t notifier_index = it->value;
+     thread_data.notifier_by_ptr.remove(it);
+ 
