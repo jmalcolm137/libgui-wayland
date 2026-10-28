@@ -1,0 +1,116 @@
+diff --git a/Userland/Libraries/LibGUI/TextDocument.h b/Userland/Libraries/LibGUI/TextDocument.h
+--- a/Userland/Libraries/LibGUI/TextDocument.h
++++ b/Userland/Libraries/LibGUI/TextDocument.h
+@@ -139,6 +139,11 @@
+ 
+     HashTable<Client*> m_clients;
+     bool m_client_notifications_enabled { true };
++    // Bulk document edits defer the per-change notification until the edit is
++    // complete; line insert/remove notifications still reach the clients so
++    // their per-line state stays in sync.
++    bool m_did_change_notifications_deferred { false };
++    bool m_did_change_pending { false };
+ 
+     UndoStack m_undo_stack;
+ 
+diff --git a/Userland/Libraries/LibGUI/TextDocument.cpp b/Userland/Libraries/LibGUI/TextDocument.cpp
+--- a/Userland/Libraries/LibGUI/TextDocument.cpp
++++ b/Userland/Libraries/LibGUI/TextDocument.cpp
+@@ -168,6 +168,12 @@
+ 
+ void TextDocument::notify_did_change()
+ {
++    if (m_did_change_notifications_deferred) {
++        m_did_change_pending = true;
++        m_regex_needs_update = true;
++        return;
++    }
++
+     if (m_client_notifications_enabled) {
+         for (auto* client : m_clients)
+             client->document_did_change();
+@@ -1050,13 +1056,61 @@
+     m_document.set_all_cursors(m_range.start());
+ }
+ 
+-TextPosition TextDocument::insert_at(TextPosition const& position, StringView text, Client const* client)
++TextPosition TextDocument::insert_at(TextPosition const& position, StringView text, Client const*)
+ {
+-    TextPosition cursor = position;
+-    Utf8View utf8_view(text);
+-    for (auto code_point : utf8_view)
+-        cursor = insert_at(cursor, code_point, client);
+-    return cursor;
++    if (text.is_empty())
++        return position;
++
++    auto line_index = position.line();
++    auto column = position.column();
++    size_t start = 0;
++
++    // Do not notify the editor once per character. A paste is one logical edit;
++    // update_content_size() and the visual-line pass run once when it is done.
++    m_did_change_notifications_deferred = true;
++
++    for (;;) {
++        auto newline = text.find('\n', start);
++        auto segment = text.substring_view(start, newline.has_value() ? *newline - start : text.length() - start);
++
++        auto& target = line(line_index);
++        Vector<u32> code_points;
++        code_points.ensure_capacity(target.length() + segment.length());
++        if (column > 0)
++            code_points.append(target.code_points(), column);
++
++        size_t inserted = 0;
++        for (auto code_point : Utf8View(segment)) {
++            code_points.append(code_point);
++            ++inserted;
++        }
++        if (target.length() > column)
++            code_points.append(target.code_points() + column, target.length() - column);
++        target.set_text(*this, move(code_points));
++        column += inserted;
++
++        if (!newline.has_value())
++            break;
++
++        // The newline splits the line after the inserted segment; the tail
++        // becomes a new line and the next segment is inserted at its start.
++        auto new_line = make<TextDocumentLine>(*this);
++        if (target.length() > column)
++            new_line->append(*this, target.code_points() + column, target.length() - column);
++        target.truncate(*this, column);
++        insert_line(line_index + 1, move(new_line));
++        ++line_index;
++        column = 0;
++        start = *newline + 1;
++    }
++
++    m_did_change_notifications_deferred = false;
++    if (m_did_change_pending) {
++        m_did_change_pending = false;
++        notify_did_change();
++    }
++
++    return { line_index, column };
+ }
+ 
+ TextPosition TextDocument::insert_at(TextPosition const& position, u32 code_point, Client const*)
+diff --git a/Userland/Libraries/LibGUI/TextEditor.cpp b/Userland/Libraries/LibGUI/TextEditor.cpp
+--- a/Userland/Libraries/LibGUI/TextEditor.cpp
++++ b/Userland/Libraries/LibGUI/TextEditor.cpp
+@@ -2310,6 +2310,13 @@
+ void TextEditor::document_did_insert_line(size_t line_index)
+ {
+     m_line_data.insert(line_index, make<LineData>());
++    // A bulk insertion inserts many lines inside a ReflowDeferrer. Recomputing
++    // and repainting for each one is quadratic; the enclosing edit recomputes
++    // once when it completes.
++    if (m_reflow_deferred) {
++        m_reflow_requested = true;
++        return;
++    }
+     recompute_all_visual_lines();
+     update();
+ }
