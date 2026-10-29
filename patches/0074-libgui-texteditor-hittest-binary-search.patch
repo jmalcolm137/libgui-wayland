@@ -1,14 +1,8 @@
+diff --git a/Userland/Libraries/LibGUI/TextEditor.cpp b/Userland/Libraries/LibGUI/TextEditor.cpp
+index c5c952bbe9..39527092da 100644
 --- a/Userland/Libraries/LibGUI/TextEditor.cpp
 +++ b/Userland/Libraries/LibGUI/TextEditor.cpp
-@@ -13,6 +13,7 @@
- #include <AK/StringBuilder.h>
- #include <AK/TemporaryChange.h>
- #include <LibCore/Timer.h>
-+#include <LibGUI/AccessibilityServer.h>
- #include <LibGUI/Action.h>
- #include <LibGUI/AutocompleteProvider.h>
- #include <LibGUI/Clipboard.h>
-@@ -173,29 +174,34 @@
+@@ -174,29 +174,34 @@ TextPosition TextEditor::text_position_at_content_position(Gfx::IntPoint content
  
      size_t line_index = 0;
  
@@ -44,11 +38,6 @@
 +        // line that owns this y position.
 +        while (line_index > 0 && m_line_data[line_index]->visual_rect.height() == 0)
 +            --line_index;
-+
-+        // Clicks below the text belong to the last visible line.
-+        size_t last_visible_line_index = line_count() > 0 ? line_count() - 1 : 0;
-+        while (last_visible_line_index > 0 && m_line_data[last_visible_line_index]->visual_rect.height() == 0)
-+            --last_visible_line_index;
  
 -            auto& rect = m_line_data[i]->visual_rect;
 -            if (rect.contains_vertically(position.y())) {
@@ -58,16 +47,13 @@
 -            if (position.y() >= rect.bottom())
 -                line_index = last_visible_line_index;
 -        }
++        // Clicks below the text belong to the last visible line.
++        size_t last_visible_line_index = line_count() > 0 ? line_count() - 1 : 0;
++        while (last_visible_line_index > 0 && m_line_data[last_visible_line_index]->visual_rect.height() == 0)
++            --last_visible_line_index;
++
 +        if (position.y() >= m_line_data[last_visible_line_index]->visual_rect.bottom())
 +            line_index = last_visible_line_index;
          line_index = max((size_t)0, min(line_index, last_visible_line_index));
      }
  
-@@ -2281,6 +2287,7 @@
- {
-     did_change(allow_callback);
-     update();
-+    AccessibilityServer::notify_text_changed(*this);
- }
- 
- void TextEditor::document_did_update_undo_stack()

@@ -1,17 +1,18 @@
 diff --git a/Userland/Libraries/LibGUI/TextEditor.cpp b/Userland/Libraries/LibGUI/TextEditor.cpp
+index 39527092da..245ae75163 100644
 --- a/Userland/Libraries/LibGUI/TextEditor.cpp
 +++ b/Userland/Libraries/LibGUI/TextEditor.cpp
-@@ -400,7 +400,8 @@
-     if (m_selection.start().is_valid() && m_selection.start() != m_cursor)
+@@ -401,7 +401,8 @@ void TextEditor::mousedown_event(MouseEvent& event)
          m_selection.set_end(m_cursor);
  
+     // FIXME: Only update the relevant rects.
 -    update();
 +    // did_update_selection() repaints the lines covered by the old and the new
 +    // selection; the cursor move above already repainted the cursor lines.
      did_update_selection();
  }
  
-@@ -422,7 +423,6 @@
+@@ -423,7 +424,6 @@ void TextEditor::mousemove_event(MouseEvent& event)
          set_cursor_to_text_position(constrained);
          m_selection.set_end(m_cursor);
          did_update_selection();
@@ -19,7 +20,7 @@ diff --git a/Userland/Libraries/LibGUI/TextEditor.cpp b/Userland/Libraries/LibGU
          return;
      }
  
-@@ -1279,6 +1279,8 @@
+@@ -1280,6 +1280,8 @@ void TextEditor::indent_selection()
          m_selection.set_start({ selection_start.line(), selection_start.column() + m_soft_tab_width });
          m_selection.set_end({ selection_end.line(), selection_end.column() + m_soft_tab_width });
          set_cursor({ m_cursor.line(), m_cursor.column() + m_soft_tab_width });
@@ -28,7 +29,7 @@ diff --git a/Userland/Libraries/LibGUI/TextEditor.cpp b/Userland/Libraries/LibGU
      }
  }
  
-@@ -1296,6 +1298,8 @@
+@@ -1297,6 +1299,8 @@ void TextEditor::unindent_selection()
              m_selection.set_end({ selection_end.line(), selection_end.column() - current_line().leading_spaces() });
          }
          execute<UnindentSelection>(m_soft_tab_width, TextRange(selection_start, selection_end));
@@ -37,7 +38,7 @@ diff --git a/Userland/Libraries/LibGUI/TextEditor.cpp b/Userland/Libraries/LibGU
      }
  }
  
-@@ -1669,8 +1673,12 @@
+@@ -1670,8 +1674,12 @@ void TextEditor::focusin_event(FocusEvent& event)
  
  void TextEditor::focusout_event(FocusEvent&)
  {
@@ -51,7 +52,7 @@ diff --git a/Userland/Libraries/LibGUI/TextEditor.cpp b/Userland/Libraries/LibGU
      stop_timer();
      if (on_focusout)
          on_focusout();
-@@ -1985,6 +1993,18 @@
+@@ -1986,15 +1994,36 @@ void TextEditor::set_editing_cursor()
          set_override_cursor(Gfx::StandardCursor::None);
  }
  
@@ -70,10 +71,9 @@ diff --git a/Userland/Libraries/LibGUI/TextEditor.cpp b/Userland/Libraries/LibGU
  void TextEditor::did_update_selection()
  {
      m_cut_action->set_enabled(is_editable() && has_selection() && !text_is_secret());
-@@ -1992,9 +2012,18 @@
+     m_copy_action->set_enabled(has_selection() && !text_is_secret());
      if (on_selection_change)
          on_selection_change();
- 
 -    if (is_wrapping_enabled()) {
 -        // FIXME: Try to repaint less.
 +    // Selection highlighting is drawn per physical line, so repaint the lines
@@ -91,7 +91,7 @@ diff --git a/Userland/Libraries/LibGUI/TextEditor.cpp b/Userland/Libraries/LibGU
      }
  }
  
-@@ -2059,6 +2088,7 @@
+@@ -2059,6 +2088,7 @@ void TextEditor::set_selection(TextRange const& selection)
      set_cursor(m_selection.end());
      scroll_position_into_view(normalized_selection().start());
      update();
@@ -99,7 +99,7 @@ diff --git a/Userland/Libraries/LibGUI/TextEditor.cpp b/Userland/Libraries/LibGU
  }
  
  void TextEditor::clear_selection()
-@@ -2067,6 +2097,7 @@
+@@ -2067,6 +2097,7 @@ void TextEditor::clear_selection()
          return;
      m_selection.clear();
      update();
@@ -107,7 +107,7 @@ diff --git a/Userland/Libraries/LibGUI/TextEditor.cpp b/Userland/Libraries/LibGU
  }
  
  void TextEditor::recompute_all_visual_lines()
-@@ -2308,10 +2339,12 @@
+@@ -2315,10 +2346,12 @@ void TextEditor::document_did_update_undo_stack()
      m_undo_action->set_text(make_action_text("&Undo"sv, document().undo_stack().undo_action_text()));
      m_redo_action->set_text(make_action_text("&Redo"sv, document().undo_stack().redo_action_text()));
  
@@ -123,7 +123,7 @@ diff --git a/Userland/Libraries/LibGUI/TextEditor.cpp b/Userland/Libraries/LibGU
  }
  
  void TextEditor::populate_line_data()
-@@ -2358,6 +2391,7 @@
+@@ -2365,6 +2398,7 @@ void TextEditor::set_document(TextDocument& document)
          m_selection.clear();
      recompute_all_visual_lines();
      update();
@@ -132,9 +132,10 @@ diff --git a/Userland/Libraries/LibGUI/TextEditor.cpp b/Userland/Libraries/LibGU
  }
  
 diff --git a/Userland/Libraries/LibGUI/TextEditor.h b/Userland/Libraries/LibGUI/TextEditor.h
+index 791db0673a..87bffe64ee 100644
 --- a/Userland/Libraries/LibGUI/TextEditor.h
 +++ b/Userland/Libraries/LibGUI/TextEditor.h
-@@ -223,6 +223,7 @@
+@@ -223,6 +223,7 @@ public:
  
      TextRange& selection() { return m_selection; }
      void did_update_selection();
@@ -142,7 +143,7 @@ diff --git a/Userland/Libraries/LibGUI/TextEditor.h b/Userland/Libraries/LibGUI/
      void did_change(AllowCallback = AllowCallback::Yes);
      void update_cursor();
  
-@@ -411,6 +412,12 @@
+@@ -411,6 +412,12 @@ private:
      size_t m_soft_tab_width { 4 };
      int m_horizontal_content_padding { 3 };
      TextRange m_selection {};

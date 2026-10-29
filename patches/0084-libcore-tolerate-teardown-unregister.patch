@@ -1,10 +1,12 @@
 diff --git a/Userland/Libraries/LibCore/EventLoopImplementationUnix.cpp b/Userland/Libraries/LibCore/EventLoopImplementationUnix.cpp
+index 14b905782d..ec2392fa30 100644
 --- a/Userland/Libraries/LibCore/EventLoopImplementationUnix.cpp
 +++ b/Userland/Libraries/LibCore/EventLoopImplementationUnix.cpp
-@@ -699,6 +699,15 @@
+@@ -699,7 +699,14 @@ void EventLoopManagerUnix::unregister_notifier(Notifier& notifier)
  
      auto& thread_data = *thread_data_ptr;
      auto it = thread_data.notifier_by_ptr.find(&notifier);
+-    VERIFY(it != thread_data.notifier_by_ptr.end());
 +    // The notifier can outlive the thread data it was registered with: at process
 +    // exit the main thread's thread_local ThreadData is destroyed first, and a
 +    // late EventLoop::current() (the inert teardown loop) then creates a new one
@@ -13,7 +15,6 @@ diff --git a/Userland/Libraries/LibCore/EventLoopImplementationUnix.cpp b/Userla
 +    // There is nothing left to unregister.
 +    if (it == thread_data.notifier_by_ptr.end())
 +        return;
-+
+ 
      size_t notifier_index = it->value;
      thread_data.notifier_by_ptr.remove(it);
- 
