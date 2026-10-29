@@ -742,26 +742,18 @@ static void pointer_button(void* data, wl_pointer*, uint32_t serial, uint32_t, u
 
 static void pointer_axis(void* data, wl_pointer*, uint32_t, uint32_t axis, wl_fixed_t value)
 {
-    static_cast<WaylandClient*>(data)->on_pointer_axis_event(axis, wl_fixed_to_double(value));
+    double delta = wl_fixed_to_double(value);
+    if (axis == WL_POINTER_AXIS_VERTICAL_SCROLL)
+        static_cast<WaylandClient*>(data)->on_pointer_axis_delta(0, delta);
+    else
+        static_cast<WaylandClient*>(data)->on_pointer_axis_delta(delta, 0);
 }
 
-static void pointer_frame(void* data, wl_pointer*)
-{
-    static_cast<WaylandClient*>(data)->on_pointer_frame();
-}
-
+static void pointer_frame(void*, wl_pointer*) { }
 static void pointer_axis_source(void*, wl_pointer*, uint32_t) { }
 static void pointer_axis_stop(void*, wl_pointer*, uint32_t, uint32_t) { }
-
-static void pointer_axis_discrete(void* data, wl_pointer*, uint32_t axis, int32_t discrete)
-{
-    static_cast<WaylandClient*>(data)->on_pointer_axis_discrete_event(axis, discrete);
-}
-
-static void pointer_axis_value120(void* data, wl_pointer*, uint32_t axis, int32_t value120)
-{
-    static_cast<WaylandClient*>(data)->on_pointer_axis_value120_event(axis, value120);
-}
+static void pointer_axis_discrete(void*, wl_pointer*, uint32_t, int32_t) { }
+static void pointer_axis_value120(void*, wl_pointer*, uint32_t, int32_t) { }
 static void pointer_axis_relative_direction(void*, wl_pointer*, uint32_t, uint32_t) { }
 static void pointer_warp(void*, wl_pointer*, wl_fixed_t, wl_fixed_t) { }
 
@@ -1120,17 +1112,6 @@ void WaylandClient::on_pointer_leave()
     m_pointer_surface = nullptr;
     m_axis_accum_x = 0;
     m_axis_accum_y = 0;
-    m_axis_v120_accum_x = 0;
-    m_axis_v120_accum_y = 0;
-    m_pending_axis_x = 0;
-    m_pending_axis_y = 0;
-    m_pending_discrete_x = 0;
-    m_pending_discrete_y = 0;
-    m_pending_value120_x = 0;
-    m_pending_value120_y = 0;
-    m_pending_has_discrete = false;
-    m_pending_has_value120 = false;
-    m_axis_flush_scheduled = false;
 }
 
 void WaylandClient::on_pointer_motion(Gfx::IntPoint position)
@@ -1256,97 +1237,21 @@ void WaylandClient::on_pointer_axis(i32 x, i32 y)
         m_input.mouse_wheel(m_pointer_window, m_pointer_position.translated(0, -inset), m_pointer_buttons, current_modifiers(), x, y);
 }
 
-void WaylandClient::schedule_axis_flush()
+void WaylandClient::on_pointer_axis_delta(double x, double y)
 {
-    if (m_axis_flush_scheduled)
-        return;
-    m_axis_flush_scheduled = true;
-    Core::deferred_invoke([this] {
-        m_axis_flush_scheduled = false;
-        on_pointer_frame();
-    });
-}
-
-void WaylandClient::on_pointer_axis_event(u32 axis, double value)
-{
+    // Wayland delivers smooth axis values that are often fractional (trackpads
+    // and high-resolution wheels). SerenityOS widgets expect whole scroll steps,
+    // so accumulate and emit the integral part, carrying the remainder.
+    m_axis_accum_x += x;
+    m_axis_accum_y += y;
+    auto step_x = static_cast<i32>(m_axis_accum_x);
+    auto step_y = static_cast<i32>(m_axis_accum_y);
     if (getenv("LIBWM_AXIS_DEBUG"))
-        dbgln("LibWM/Wayland: axis event {} value {}", axis, value);
-    if (axis == WL_POINTER_AXIS_VERTICAL_SCROLL)
-        m_pending_axis_y += value;
-    else
-        m_pending_axis_x += value;
-    schedule_axis_flush();
-}
-
-void WaylandClient::on_pointer_axis_discrete_event(u32 axis, i32 discrete)
-{
-    if (axis == WL_POINTER_AXIS_VERTICAL_SCROLL)
-        m_pending_discrete_y += discrete;
-    else
-        m_pending_discrete_x += discrete;
-    m_pending_has_discrete = true;
-    schedule_axis_flush();
-}
-
-void WaylandClient::on_pointer_axis_value120_event(u32 axis, i32 value120)
-{
-    if (axis == WL_POINTER_AXIS_VERTICAL_SCROLL)
-        m_pending_value120_y += value120;
-    else
-        m_pending_value120_x += value120;
-    m_pending_has_value120 = true;
-    schedule_axis_flush();
-}
-
-void WaylandClient::on_pointer_frame()
-{
-    if (getenv("LIBWM_AXIS_DEBUG"))
-        dbgln("LibWM/Wayland: pointer frame");
-    i32 step_x = 0;
-    i32 step_y = 0;
-
-    // A discrete wheel notch is 120 units. Prefer value120/discrete over the
-    // smooth pixel axis: wlroots sends both for a wheel, and consuming both
-    // would scroll twice as far. High-resolution wheels are accumulated across
-    // frames so they still produce whole GUI steps.
-    if (m_pending_has_value120 || m_pending_has_discrete) {
-        auto value120_x = m_pending_has_value120 ? m_pending_value120_x : m_pending_discrete_x;
-        auto value120_y = m_pending_has_value120 ? m_pending_value120_y : m_pending_discrete_y;
-        m_axis_v120_accum_x += value120_x;
-        m_axis_v120_accum_y += value120_y;
-        step_x = static_cast<i32>(m_axis_v120_accum_x / 120.0);
-        step_y = static_cast<i32>(m_axis_v120_accum_y / 120.0);
-        m_axis_v120_accum_x -= step_x * 120.0;
-        m_axis_v120_accum_y -= step_y * 120.0;
-    } else {
-        // Smooth wheel/touchpad deltas are in pixels. Use the conventional
-        // 15-pixel notch and carry the remainder between frames. Discrete
-        // value120 events above take precedence, so a wheel notch is exactly one
-        // step even when the compositor also sends the smooth axis event.
-        m_axis_accum_x += m_pending_axis_x / 15.0;
-        m_axis_accum_y += m_pending_axis_y / 15.0;
-        step_x = static_cast<i32>(m_axis_accum_x);
-        step_y = static_cast<i32>(m_axis_accum_y);
-        m_axis_accum_x -= step_x;
-        m_axis_accum_y -= step_y;
-    }
-
-    if (getenv("LIBWM_AXIS_DEBUG")) {
-        dbgln("LibWM/Wayland: axis pending {}x{} v120 {}x{} -> step {}x{}",
-            m_pending_axis_x, m_pending_axis_y, m_pending_value120_x, m_pending_value120_y, step_x, step_y);
-    }
-
-    m_pending_axis_x = 0;
-    m_pending_axis_y = 0;
-    m_pending_discrete_x = 0;
-    m_pending_discrete_y = 0;
-    m_pending_value120_x = 0;
-    m_pending_value120_y = 0;
-    m_pending_has_discrete = false;
-    m_pending_has_value120 = false;
-
+        dbgln("LibWM/Wayland: axis delta {}x{} -> step {}x{}", x, y, step_x, step_y);
     if (step_x == 0 && step_y == 0)
         return;
+    m_axis_accum_x -= step_x;
+    m_axis_accum_y -= step_y;
     on_pointer_axis(step_x, step_y);
 }
 
