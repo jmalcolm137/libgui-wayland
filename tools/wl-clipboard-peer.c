@@ -24,9 +24,11 @@ static struct wl_data_device *device;
 static struct wl_data_source *source;
 static struct wl_data_offer *current_offer;
 static int got_selection;
-static char const *set_mime = "text/plain";
-static unsigned char *set_data;
-static size_t set_size;
+#define MAX_FORMATS 16
+static char const *set_mimes[MAX_FORMATS];
+static unsigned char *set_datas[MAX_FORMATS];
+static size_t set_sizes[MAX_FORMATS];
+static int set_count;
 static char const *want_mime;
 static char mimes[32][128];
 static int mime_count;
@@ -51,9 +53,36 @@ static int mimes_has(char const *m)
 
 static void source_send(void *data, struct wl_data_source *src, const char *mime, int32_t fd)
 {
-    (void)data; (void)src; (void)mime;
-    if (set_data && set_size)
-        (void)write(fd, set_data, set_size);
+    (void)data; (void)src;
+    unsigned char *bytes = NULL;
+    size_t size = 0;
+
+    for (int i = 0; i < set_count; ++i) {
+        if (!strcmp(set_mimes[i], mime)) {
+            bytes = set_datas[i];
+            size = set_sizes[i];
+            break;
+        }
+    }
+
+    // text/plain is offered under a few aliases; serve the same bytes for them.
+    if (!bytes && (!strcmp(mime, "text/plain;charset=utf-8") || !strcmp(mime, "UTF8_STRING") || !strcmp(mime, "STRING"))) {
+        for (int i = 0; i < set_count; ++i) {
+            if (!strcmp(set_mimes[i], "text/plain")) {
+                bytes = set_datas[i];
+                size = set_sizes[i];
+                break;
+            }
+        }
+    }
+
+    if (!bytes && set_count) {
+        bytes = set_datas[0];
+        size = set_sizes[0];
+    }
+
+    if (bytes && size)
+        (void)write(fd, bytes, size);
     close(fd);
 }
 static void source_cancelled(void *data, struct wl_data_source *src)
@@ -149,23 +178,37 @@ static int read_file(char const *path, unsigned char **out, size_t *out_size)
 int main(int argc, char **argv)
 {
     if (argc < 2) {
-        fprintf(stderr, "usage: %s set TEXT | set-file MIME PATH | get [MIME]\n", argv[0]);
+        fprintf(stderr, "usage: %s set TEXT | set-file MIME PATH | set-formats MIME PATH [MIME PATH ...] | get [MIME]\n", argv[0]);
         return 2;
     }
-    int mode = 0; // 0=get, 1=set text, 2=set file
+    int mode = 0; // 0=get, 1=set text, 2=set file, 3=set formats
     if (!strcmp(argv[1], "set")) {
         if (argc < 3) return 2;
         mode = 1;
-        set_mime = "text/plain";
-        set_data = (unsigned char *)argv[2];
-        set_size = strlen(argv[2]);
+        set_mimes[0] = "text/plain";
+        set_datas[0] = (unsigned char *)argv[2];
+        set_sizes[0] = strlen(argv[2]);
+        set_count = 1;
     } else if (!strcmp(argv[1], "set-file")) {
-        if (argc < 4 || read_file(argv[3], &set_data, &set_size) != 0) {
+        if (argc < 4 || read_file(argv[3], &set_datas[0], &set_sizes[0]) != 0) {
             fprintf(stderr, "peer: cannot read file\n");
             return 1;
         }
         mode = 2;
-        set_mime = argv[2];
+        set_mimes[0] = argv[2];
+        set_count = 1;
+    } else if (!strcmp(argv[1], "set-formats")) {
+        mode = 3;
+        for (int i = 2; i + 1 < argc && set_count < MAX_FORMATS; i += 2) {
+            if (read_file(argv[i + 1], &set_datas[set_count], &set_sizes[set_count]) != 0) {
+                fprintf(stderr, "peer: cannot read file\n");
+                return 1;
+            }
+            set_mimes[set_count] = argv[i];
+            set_count++;
+        }
+        if (set_count == 0)
+            return 2;
     } else if (!strcmp(argv[1], "get")) {
         mode = 0;
         want_mime = argc >= 3 ? argv[2] : NULL;
@@ -190,8 +233,13 @@ int main(int argc, char **argv)
     if (mode != 0) {
         source = wl_data_device_manager_create_data_source(manager);
         wl_data_source_add_listener(source, &source_listener, NULL);
-        wl_data_source_offer(source, set_mime);
-        if (!strcmp(set_mime, "text/plain")) {
+        int offers_plain_text = 0;
+        for (int i = 0; i < set_count; ++i) {
+            wl_data_source_offer(source, set_mimes[i]);
+            if (!strcmp(set_mimes[i], "text/plain"))
+                offers_plain_text = 1;
+        }
+        if (offers_plain_text) {
             wl_data_source_offer(source, "text/plain;charset=utf-8");
             wl_data_source_offer(source, "UTF8_STRING");
         }

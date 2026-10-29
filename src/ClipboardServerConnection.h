@@ -10,8 +10,10 @@
 #include <AK/NonnullOwnPtr.h>
 #include <AK/NonnullRefPtr.h>
 #include <AK/Optional.h>
+#include <AK/Vector.h>
 #include <LibCore/AnonymousBuffer.h>
 #include <LibCore/Socket.h>
+#include <LibGUI/ClipboardEntry.h>
 #include <LibGfx/Bitmap.h>
 #include <LibGfx/ImageFormats/ImageDecoder.h>
 #include <LibGfx/ImageFormats/PNGWriter.h>
@@ -99,65 +101,188 @@ private:
         });
     }
 
-    virtual Messages::ClipboardServer::GetClipboardDataResponse get_clipboard_data() override
+    static bool is_plain_text(StringView mime_type)
     {
-        ByteString wayland_mime;
-        auto received = WaylandClient::the().read_clipboard(wayland_mime);
-        if (received.is_error() || received.value().is_empty())
-            return { Core::AnonymousBuffer {}, ByteString {}, HashMap<ByteString, ByteString> {} };
+        return mime_type == "text/plain"sv || mime_type.starts_with("text/plain;"sv) || mime_type == "UTF8_STRING"sv || mime_type == "STRING"sv;
+    }
 
-        auto bytes = received.release_value();
-        HashMap<ByteString, ByteString> metadata;
-        auto serenity_mime = wayland_mime;
+    static bool is_html(StringView mime_type)
+    {
+        return mime_type == "text/html"sv || mime_type.starts_with("text/html;"sv);
+    }
 
-        // text/plain is normalized by read_clipboard(); text/uri-list passes
-        // through; image/png is transcoded to Serenity's raw image format.
-        if (wayland_mime == "image/png"sv) {
-            auto image = png_to_serenity_image(bytes.bytes(), metadata);
-            if (image.is_error()) {
-                dbgln("LibWM: clipboard PNG decode failed: {}", image.error());
-                return { Core::AnonymousBuffer {}, ByteString {}, HashMap<ByteString, ByteString> {} };
+    // The clipboard as a list of representations. While we own the selection this is what we published; otherwise the
+    // offers are read back from Wayland, one canonical entry per type.
+    Vector<GUI::ClipboardEntry> current_entries() const
+    {
+        auto& client = WaylandClient::the();
+        if (client.owns_clipboard() && !m_entries.is_empty())
+            return m_entries;
+
+        auto mimes = client.clipboard_mime_types();
+        Vector<GUI::ClipboardEntry> entries;
+        if (mimes.is_empty())
+            return entries;
+
+        auto find = [&](auto predicate) -> Optional<ByteString> {
+            for (auto const& mime : mimes) {
+                if (predicate(mime))
+                    return mime;
             }
-            bytes = image.release_value();
-            serenity_mime = ByteString("image/x-serenityos");
+            return {};
+        };
+
+        auto fetch = [&](ByteString const& mime, ByteString canonical_mime) {
+            ByteString actual_mime;
+            auto data = client.read_clipboard_for_mime(mime, actual_mime);
+            if (data.is_error())
+                return;
+            entries.append({ data.release_value(), move(canonical_mime), {} });
+        };
+
+        if (auto mime = find([](auto const& candidate) { return is_plain_text(candidate); }); mime.has_value())
+            fetch(*mime, ByteString("text/plain"));
+        if (auto mime = find([](auto const& candidate) { return is_html(candidate); }); mime.has_value())
+            fetch(*mime, ByteString("text/html"));
+        if (auto mime = find([](auto const& candidate) { return candidate == "text/uri-list"sv; }); mime.has_value())
+            fetch(*mime, ByteString("text/uri-list"));
+
+        // Prefer PNG over the raw Serenity format: the transfer carries no
+        // metadata, so decoding the PNG is the only way to restore it.
+        if (auto mime = find([](auto const& candidate) { return candidate == "image/png"sv; }); mime.has_value()) {
+            ByteString actual_mime;
+            auto png = client.read_clipboard_for_mime(*mime, actual_mime);
+            if (!png.is_error()) {
+                HashMap<ByteString, ByteString> metadata;
+                auto raw = png_to_serenity_image(png.value().bytes(), metadata);
+                if (!raw.is_error())
+                    entries.append({ raw.release_value(), ByteString("image/x-serenityos"), move(metadata) });
+                else
+                    entries.append({ png.release_value(), ByteString("image/png"), {} });
+            }
+        } else if (auto mime = find([](auto const& candidate) { return candidate == "image/x-serenityos"sv; }); mime.has_value()) {
+            fetch(*mime, ByteString("image/x-serenityos"));
         }
 
-        auto buffer = Core::AnonymousBuffer::create_with_size(bytes.size());
-        if (buffer.is_error())
+        for (auto const& mime : mimes) {
+            if (is_plain_text(mime) || is_html(mime) || mime == "text/uri-list"sv || mime.starts_with("image/"sv))
+                continue;
+            fetch(mime, mime);
+        }
+
+        return entries;
+    }
+
+    static GUI::ClipboardEntry const* pick_primary(Vector<GUI::ClipboardEntry> const& entries)
+    {
+        GUI::ClipboardEntry const* first = nullptr;
+
+        for (auto const& entry : entries) {
+            if (entry.data.is_empty())
+                continue;
+            if (!first)
+                first = &entry;
+            if (is_plain_text(entry.mime_type))
+                return &entry;
+        }
+        for (auto const& entry : entries) {
+            if (!entry.data.is_empty() && is_html(entry.mime_type))
+                return &entry;
+        }
+        for (auto const& entry : entries) {
+            if (!entry.data.is_empty() && entry.mime_type == "text/uri-list"sv)
+                return &entry;
+        }
+        for (auto const& entry : entries) {
+            if (!entry.data.is_empty() && entry.mime_type.starts_with("image/"sv))
+                return &entry;
+        }
+        return first;
+    }
+
+    virtual Messages::ClipboardServer::GetClipboardDataResponse get_clipboard_data() override
+    {
+        auto entries = current_entries();
+        auto const* primary = pick_primary(entries);
+        if (!primary)
             return { Core::AnonymousBuffer {}, ByteString {}, HashMap<ByteString, ByteString> {} };
-        memcpy(buffer.value().data<void>(), bytes.data(), bytes.size());
-        return { buffer.release_value(), move(serenity_mime), move(metadata) };
+
+        if (primary->data.is_empty())
+            return { Core::AnonymousBuffer {}, primary->mime_type, primary->metadata };
+
+        auto buffer = Core::AnonymousBuffer::create_with_size(primary->data.size());
+        if (buffer.is_error())
+            return { Core::AnonymousBuffer {}, primary->mime_type, primary->metadata };
+        memcpy(buffer.value().data<void>(), primary->data.data(), primary->data.size());
+        return { buffer.release_value(), primary->mime_type, primary->metadata };
+    }
+
+    virtual Messages::ClipboardServer::GetClipboardEntriesResponse get_clipboard_entries() override
+    {
+        return { current_entries() };
     }
 
     virtual void set_clipboard_data(Core::AnonymousBuffer const& data, ByteString const& mime_type, HashMap<ByteString, ByteString> const& metadata) override
     {
+        ByteBuffer bytes;
+        if (data.is_valid()) {
+            auto copied = ByteBuffer::copy(data.data<void>(), data.size());
+            if (copied.is_error())
+                return;
+            bytes = copied.release_value();
+        }
+
+        Vector<GUI::ClipboardEntry> entries;
+        entries.append({ move(bytes), mime_type, metadata });
+        set_clipboard_entries(entries);
+    }
+
+    virtual void set_clipboard_entries(Vector<GUI::ClipboardEntry> const& entries) override
+    {
+        m_entries = entries;
+
         HashMap<ByteString, ByteBuffer> offers;
 
-        if (data.is_valid() && data.size() > 0) {
-            ReadonlyBytes bytes { data.data<u8>(), data.size() };
+        auto copy = [](ByteBuffer const& data) -> Optional<ByteBuffer> {
+            auto copied = ByteBuffer::copy(data.bytes());
+            if (copied.is_error())
+                return {};
+            return copied.release_value();
+        };
 
-            if (mime_type == "image/x-serenityos"sv) {
-                if (auto png = serenity_image_to_png(bytes, metadata); !png.is_error())
+        for (auto const& entry : entries) {
+            if (entry.data.is_empty())
+                continue;
+
+            if (entry.mime_type == "image/x-serenityos"sv) {
+                if (auto png = serenity_image_to_png(entry.data.bytes(), entry.metadata); !png.is_error())
                     offers.set(ByteString("image/png"), png.release_value());
                 else
                     dbgln("LibWM: could not transcode image/x-serenityos to PNG: {}", png.error());
                 // Also offer the raw form, so LibWM-to-LibWM copies stay lossless.
-                if (auto raw = ByteBuffer::copy(bytes); !raw.is_error())
+                if (auto raw = copy(entry.data); raw.has_value())
                     offers.set(ByteString("image/x-serenityos"), raw.release_value());
-            } else if (mime_type == "text/plain"sv) {
+            } else if (is_plain_text(entry.mime_type)) {
                 for (auto const& alias : { "text/plain"sv, "text/plain;charset=utf-8"sv, "UTF8_STRING"sv, "STRING"sv }) {
-                    if (auto copy = ByteBuffer::copy(bytes); !copy.is_error())
-                        offers.set(ByteString(alias), copy.release_value());
+                    if (auto raw = copy(entry.data); raw.has_value())
+                        offers.set(ByteString(alias), raw.release_value());
+                }
+            } else if (is_html(entry.mime_type)) {
+                for (auto const& alias : { "text/html"sv, "text/html;charset=utf-8"sv }) {
+                    if (auto raw = copy(entry.data); raw.has_value())
+                        offers.set(ByteString(alias), raw.release_value());
                 }
             } else {
                 // text/uri-list and any other type pass through unchanged.
-                if (auto copy = ByteBuffer::copy(bytes); !copy.is_error())
-                    offers.set(mime_type, copy.release_value());
+                if (auto raw = copy(entry.data); raw.has_value())
+                    offers.set(entry.mime_type, raw.release_value());
             }
         }
 
         WaylandClient::the().write_clipboard(move(offers));
     }
+
+    Vector<GUI::ClipboardEntry> m_entries;
 };
 
 }

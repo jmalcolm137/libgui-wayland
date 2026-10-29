@@ -52,8 +52,9 @@ programming model.
   a typed-path picker open, and double-clicking to traverse a directory and open a file;
   `scripts/run-pdfviewer-test.sh`). Scroll/animation polish
   remains.
-- **M6 (partly)** — clipboard and menus: done for `text/plain`, `text/uri-list`, and
-  `image/png` ↔ `image/x-serenityos` (all verified headlessly in both directions), plus a
+- **M6 (partly)** — clipboard and menus: done for `text/plain`, `text/html`, `text/uri-list`, and
+  `image/png` ↔ `image/x-serenityos`, including multiple representations on one clipboard item
+  (all verified headlessly in both directions), plus a
   server-rendered **menubar and dropdown menus** with hover highlighting (clicking `File → Quit`
   works; `Help → About` opens the dialog) and **nested submenus** with full keyboard navigation
   (`F10`/`Alt`+accelerator, arrows, `Enter`, `Escape`). Window state

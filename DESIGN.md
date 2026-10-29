@@ -436,7 +436,7 @@ X11/Serenity got from server pointer grabs.
 | Portal | LibWM implementation |
 |---|---|
 | `window` | `WM::WindowServer` (the core of this project) |
-| `clipboard` | native Wayland `wl_data_device`/`wl_data_source`/`wl_data_offer`; Serenity text mime ↔ Wayland text mimes (§4.5) |
+| `clipboard` | native Wayland `wl_data_device`/`wl_data_source`/`wl_data_offer`; multi-representation Serenity clipboard items ↔ Wayland mime offers (§4.5) |
 | `config` | file-backed ConfigServer (`~/.config/…` INI), serving `ConfigServerEndpoint` |
 | `image` | in-process `LibGfx` image decoders, serving `ImageDecoderServerEndpoint` |
 | `filesystemaccess` | `xdg-desktop-portal` (D-Bus) where present, else a LibGUI `FilePicker` fallback; command-line file arguments work without it |
@@ -591,16 +591,24 @@ session. Startup required two more in-process portals besides the WindowServer:
 
 The clipboard bridges the SerenityOS clipboard protocol to Wayland's data device:
 
+* **Representations.** The Serenity clipboard protocol carries a list of representations
+  (`GUI::ClipboardEntry`: bytes, mime type, metadata), not a single item. `Clipboard::set_entries`
+  publishes the list and `Clipboard::fetch_entries` reads it back. The older single-item
+  `set_data`/`set_plain_text`/`set_bitmap` calls are wrappers over one-entry lists, and
+  `fetch_data_and_type` returns the preferred entry.
 * **Reads.** LibWM watches `wl_data_device.data_offer`/`selection`, records the offered mime
-  types, and receives the best one into a pipe. Preference is text
-  (`text/plain;charset=utf-8` → `text/plain` → `UTF8_STRING`) then `text/uri-list` then
-  `image/png`; text is normalized to `text/plain`, `text/uri-list` passes through, and
-  `image/png` is transcoded with LibGfx into Serenity's raw `image/x-serenityos` (pixels +
-  `width/height/scale/format/pitch` metadata) so `Clipboard::as_bitmap()` works.
-* **Writes.** `set_clipboard_data` builds the set of representations to offer: `text/plain`
-  (plus `text/plain;charset=utf-8`/`UTF8_STRING`/`STRING` aliases), `text/uri-list` and other
-  types pass through unchanged, and `image/x-serenityos` is encoded to `image/png` (and also
-  offered raw, so LibWM-to-LibWM image copies stay lossless).
+  types, and fetches every canonical representation: one text form
+  (`text/plain;charset=utf-8` → `text/plain` → `UTF8_STRING`), `text/html` (plus its charset
+  alias), `text/uri-list`, and an image. Text is normalized to `text/plain`; `image/png` is
+  transcoded with LibGfx into Serenity's raw `image/x-serenityos` (pixels +
+  `width/height/scale/format/pitch` metadata) so `Clipboard::as_bitmap()` works. Other types
+  pass through.
+* **Writes.** `set_clipboard_entries` builds the Wayland offers from every entry: plain text
+  gains the `text/plain;charset=utf-8`/`UTF8_STRING`/`STRING` aliases, `text/html` gains a
+  charset alias, `text/uri-list` and other types pass through unchanged, and
+  `image/x-serenityos` is encoded to `image/png` (and also offered raw, so LibWM-to-LibWM
+  image copies stay lossless). A rich copy therefore offers text/plain, text/html, and the
+  image at the same time.
 * **Same thread as input, on purpose.** `set_selection` requires a serial from a *recent input
   event on the same connection*, so the data device lives on the connection that owns the
   seat. LibWM therefore serves all portals from a single server thread with one
@@ -610,7 +618,7 @@ The clipboard bridges the SerenityOS clipboard protocol to Wayland's data device
   behaviour.)
 
 Both directions are verified headlessly for **text**, **`image/png` ↔ `image/x-serenityos`**,
-and **`text/uri-list`** against a native `libwayland-client` peer
+**`text/uri-list`**, and **multiple representations at once** against a native `libwayland-client` peer
 (`tools/wl-clipboard-peer.c`): the peer owns the selection, our app reads it (logging what
 LibGUI sees), then the peer reads what our app published. This runs as part of the build
 (`scripts/run-clipboard-test.sh`).

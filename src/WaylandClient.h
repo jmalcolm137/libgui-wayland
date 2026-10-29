@@ -125,10 +125,16 @@ public:
     // Called when the compositor's selection changes; the mime type is a
     // preferred Serenity-side type (e.g. "text/plain").
     void set_clipboard_changed_callback(Function<void(ByteString const&)> callback) { m_clipboard_changed = move(callback); }
+    // The MIME types the current selection offers, in the source's order.
+    Vector<ByteString> clipboard_mime_types() const;
     // Fetch the current selection, preferring text then files/images. Blocks until the source closes the pipe.
     ErrorOr<ByteBuffer> read_clipboard(ByteString& out_mime_type);
+    // Fetch one specific representation of the current selection. Blocks until the source closes the pipe.
+    ErrorOr<ByteBuffer> read_clipboard_for_mime(ByteString const& mime_type, ByteString& out_mime_type);
     // Advertise a set of mime-type -> bytes representations as the selection.
     void write_clipboard(HashMap<ByteString, ByteBuffer> offers);
+    // Whether this client currently owns the selection.
+    bool owns_clipboard() const { return m_data_source && !m_clipboard_offers.is_empty(); }
 
     // Window <-> xdg_toplevel lifecycle.
     void create_window(i32 window_id, Gfx::IntPoint position, Gfx::IntSize, ByteString const& title, bool has_alpha, bool resizable, i32 window_type, i32 window_mode, i32 parent_window_id, Gfx::IntRect const& launch_origin = {});

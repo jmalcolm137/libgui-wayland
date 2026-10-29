@@ -24,6 +24,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     auto before = GUI::Clipboard::the().fetch_data_and_type();
     dbgln("CLIPBOARD-TEST: read mime='{}' bytes={}", before.mime_type, before.data.size());
+    for (auto const& entry : GUI::Clipboard::the().fetch_entries())
+        dbgln("CLIPBOARD-TEST: entry mime='{}' bytes={}", entry.mime_type, entry.data.size());
     if (before.mime_type == "image/x-serenityos"sv) {
         auto bitmap = before.as_bitmap();
         dbgln("CLIPBOARD-TEST: decoded image {}x{}",
@@ -45,6 +47,18 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     } else if (mode == "uri-list"sv) {
         GUI::Clipboard::the().set_data("file:///tmp/libwm-a\nfile:///tmp/libwm-b\n"sv.bytes(), "text/uri-list"sv);
         dbgln("CLIPBOARD-TEST: wrote uri-list");
+    } else if (mode == "formats"sv) {
+        auto append = [](Vector<GUI::ClipboardEntry>& entries, StringView contents, ByteString mime_type) {
+            auto data = ByteBuffer::copy(contents.bytes());
+            if (!data.is_error())
+                entries.append({ data.release_value(), move(mime_type), {} });
+        };
+
+        Vector<GUI::ClipboardEntry> entries;
+        append(entries, "libwm-plain-hello"sv, "text/plain");
+        append(entries, "<b>libwm-rich-hello</b>"sv, "text/html");
+        GUI::Clipboard::the().set_entries(move(entries));
+        dbgln("CLIPBOARD-TEST: wrote formats");
     } else {
         GUI::Clipboard::the().set_plain_text("libwm-clipboard-hello"sv);
         dbgln("CLIPBOARD-TEST: wrote text");

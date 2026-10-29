@@ -1,0 +1,417 @@
+diff --git a/Userland/Libraries/LibGUI/ClipboardEntry.h b/Userland/Libraries/LibGUI/ClipboardEntry.h
+new file mode 100644
+index 00000000..ab813907
+--- /dev/null
++++ b/Userland/Libraries/LibGUI/ClipboardEntry.h
+@@ -0,0 +1,58 @@
++/*
++ * Copyright (c) 2026, libgui-wayland contributors
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#pragma once
++
++#include <AK/ByteBuffer.h>
++#include <AK/ByteString.h>
++#include <AK/Error.h>
++#include <AK/HashMap.h>
++#include <AK/JsonObject.h>
++#include <AK/Try.h>
++#include <LibGfx/Forward.h>
++#include <LibIPC/Decoder.h>
++#include <LibIPC/Encoder.h>
++
++namespace GUI {
++
++// One representation of the clipboard contents. A clipboard item may carry several of these at once: a copied
++// fragment of rich text is usually text/plain and text/html together, and an image may additionally carry a file
++// list. The portal stores the list; consumers pick the representation they understand.
++struct ClipboardEntry {
++    ByteBuffer data;
++    ByteString mime_type;
++    HashMap<ByteString, ByteString> metadata;
++
++    RefPtr<Gfx::Bitmap> as_bitmap() const;
++
++    static ErrorOr<ClipboardEntry> from_json(JsonObject const&);
++    ErrorOr<JsonObject> to_json() const;
++};
++
++}
++
++namespace IPC {
++
++template<>
++inline ErrorOr<void> encode(Encoder& encoder, GUI::ClipboardEntry const& entry)
++{
++    TRY(encoder.encode(entry.data));
++    TRY(encoder.encode(entry.mime_type));
++    TRY(encoder.encode(entry.metadata));
++    return {};
++}
++
++template<>
++inline ErrorOr<GUI::ClipboardEntry> decode(Decoder& decoder)
++{
++    auto data = TRY(decoder.decode<ByteBuffer>());
++    auto mime_type = TRY(decoder.decode<ByteString>());
++    using Metadata = HashMap<ByteString, ByteString>;
++    auto metadata = TRY(decoder.decode<Metadata>());
++    return GUI::ClipboardEntry { move(data), move(mime_type), move(metadata) };
++}
++
++}
+diff --git a/Userland/Libraries/LibGUI/Clipboard.h b/Userland/Libraries/LibGUI/Clipboard.h
+index 6a60c538..326c63c0 100644
+--- a/Userland/Libraries/LibGUI/Clipboard.h
++++ b/Userland/Libraries/LibGUI/Clipboard.h
+@@ -12,6 +12,7 @@
+ #include <AK/Function.h>
+ #include <AK/HashMap.h>
+ #include <AK/JsonObject.h>
++#include <LibGUI/ClipboardEntry.h>
+ #include <LibGUI/Forward.h>
+ #include <LibGfx/Forward.h>
+ 
+@@ -29,26 +30,22 @@ public:
+         virtual void clipboard_content_did_change(ByteString const& mime_type) = 0;
+     };
+ 
+-    struct DataAndType {
+-        ByteBuffer data;
+-        ByteString mime_type;
+-        HashMap<ByteString, ByteString> metadata;
++    using DataAndType = ClipboardEntry;
+ 
+-        RefPtr<Gfx::Bitmap> as_bitmap() const;
++    // The complete set of representations, in the order the source offered them.
++    Vector<ClipboardEntry> fetch_entries() const;
+ 
+-        static ErrorOr<Clipboard::DataAndType> from_json(JsonObject const& object);
+-        ErrorOr<JsonObject> to_json() const;
+-    };
++    // The single representation best suited to a caller that understands one type only.
++    DataAndType fetch_data_and_type() const;
++    ByteString fetch_mime_type() const { return fetch_data_and_type().mime_type; }
+ 
+     static ErrorOr<void> initialize(Badge<Application>);
+     static Clipboard& the();
+ 
+-    DataAndType fetch_data_and_type() const;
+-    ByteString fetch_mime_type() const { return fetch_data_and_type().mime_type; }
+-
+     void set_data(ReadonlyBytes data, ByteString const& mime_type = "text/plain", HashMap<ByteString, ByteString> const& metadata = {});
+     void set_plain_text(StringView text) { set_data(text.bytes()); }
+     void set_bitmap(Gfx::Bitmap const&, HashMap<ByteString, ByteString> const& additional_metadata = {});
++    void set_entries(Vector<ClipboardEntry> entries);
+     void clear();
+ 
+     void clipboard_data_changed(Badge<ConnectionToClipboardServer>, ByteString const& mime_type);
+diff --git a/Userland/Libraries/LibGUI/Clipboard.cpp b/Userland/Libraries/LibGUI/Clipboard.cpp
+--- a/Userland/Libraries/LibGUI/Clipboard.cpp
++++ b/Userland/Libraries/LibGUI/Clipboard.cpp
+@@ -78,6 +78,11 @@
+     return s_the;
+ }
+ 
++Vector<ClipboardEntry> Clipboard::fetch_entries() const
++{
++    return connection().get_clipboard_entries();
++}
++
+ Clipboard::DataAndType Clipboard::fetch_data_and_type() const
+ {
+     auto response = connection().get_clipboard_data();
+@@ -97,7 +102,7 @@
+     return { data.release_value(), type, metadata_clone_or_error.release_value() };
+ }
+ 
+-RefPtr<Gfx::Bitmap> Clipboard::DataAndType::as_bitmap() const
++RefPtr<Gfx::Bitmap> ClipboardEntry::as_bitmap() const
+ {
+     if (mime_type != "image/x-serenityos")
+         return nullptr;
+@@ -148,12 +153,12 @@
+     return bitmap;
+ }
+ 
+-ErrorOr<Clipboard::DataAndType> Clipboard::DataAndType::from_json(JsonObject const& object)
++ErrorOr<ClipboardEntry> ClipboardEntry::from_json(JsonObject const& object)
+ {
+     if (!object.has("data"sv) && !object.has("mime_type"sv))
+         return Error::from_string_literal("JsonObject does not contain necessary fields");
+ 
+-    DataAndType result;
++    ClipboardEntry result;
+     result.data = object.get_byte_string("data"sv)->to_byte_buffer();
+     result.mime_type = *object.get_byte_string("mime_type"sv);
+ 
+@@ -169,7 +174,7 @@
+     return result;
+ }
+ 
+-ErrorOr<JsonObject> Clipboard::DataAndType::to_json() const
++ErrorOr<JsonObject> ClipboardEntry::to_json() const
+ {
+     JsonObject object;
+     object.set("data", TRY(ByteString::from_utf8(data.bytes())));
+@@ -189,19 +194,20 @@
+ 
+ void Clipboard::set_data(ReadonlyBytes data, ByteString const& type, HashMap<ByteString, ByteString> const& metadata)
+ {
+-    if (data.is_empty()) {
+-        connection().async_set_clipboard_data({}, type, metadata.clone().release_value_but_fixme_should_propagate_errors());
++    auto buffer = ByteBuffer::copy(data);
++    if (buffer.is_error()) {
++        dbgln("GUI::Clipboard::set_data() failed to copy the clipboard buffer");
+         return;
+     }
+ 
+-    auto buffer_or_error = Core::AnonymousBuffer::create_with_size(data.size());
+-    if (buffer_or_error.is_error()) {
+-        dbgln("GUI::Clipboard::set_data() failed to create a buffer");
+-        return;
+-    }
+-    auto buffer = buffer_or_error.release_value();
+-    memcpy(buffer.data<void>(), data.data(), data.size());
+-    connection().async_set_clipboard_data(move(buffer), type, metadata.clone().release_value_but_fixme_should_propagate_errors());
++    Vector<ClipboardEntry> entries;
++    entries.append({ buffer.release_value(), type, metadata });
++    set_entries(move(entries));
++}
++
++void Clipboard::set_entries(Vector<ClipboardEntry> entries)
++{
++    connection().async_set_clipboard_entries(move(entries));
+ }
+ 
+ void Clipboard::set_bitmap(Gfx::Bitmap const& bitmap, HashMap<ByteString, ByteString> const& additional_metadata)
+@@ -217,7 +223,7 @@
+ 
+ void Clipboard::clear()
+ {
+-    connection().async_set_clipboard_data({}, {}, {});
++    set_entries({});
+ }
+ 
+ void Clipboard::clipboard_data_changed(Badge<ConnectionToClipboardServer>, ByteString const& mime_type)
+diff --git a/Userland/Services/Clipboard/ClipboardServer.ipc b/Userland/Services/Clipboard/ClipboardServer.ipc
+index f5ce4673..e7af30c9 100644
+--- a/Userland/Services/Clipboard/ClipboardServer.ipc
++++ b/Userland/Services/Clipboard/ClipboardServer.ipc
+@@ -1,7 +1,10 @@
+ #include <LibCore/AnonymousBuffer.h>
++#include <LibGUI/ClipboardEntry.h>
+ 
+ endpoint ClipboardServer
+ {
+     get_clipboard_data() => (Core::AnonymousBuffer data, [UTF8] ByteString mime_type, HashMap<ByteString, ByteString> metadata)
++    get_clipboard_entries() => (Vector<GUI::ClipboardEntry> entries)
+     set_clipboard_data(Core::AnonymousBuffer data, [UTF8] ByteString mime_type, HashMap<ByteString, ByteString> metadata) =|
++    set_clipboard_entries(Vector<GUI::ClipboardEntry> entries) =|
+ }
+diff --git a/Userland/Services/Clipboard/ConnectionFromClient.cpp b/Userland/Services/Clipboard/ConnectionFromClient.cpp
+index 978993ed..cb7a5eaf 100644
+--- a/Userland/Services/Clipboard/ConnectionFromClient.cpp
++++ b/Userland/Services/Clipboard/ConnectionFromClient.cpp
+@@ -32,13 +32,44 @@ void ConnectionFromClient::die()
+ 
+ void ConnectionFromClient::set_clipboard_data(Core::AnonymousBuffer const& data, ByteString const& mime_type, HashMap<ByteString, ByteString> const& metadata)
+ {
+-    Storage::the().set_data(data, mime_type, metadata);
++    ByteBuffer bytes;
++    if (data.is_valid()) {
++        auto copied = ByteBuffer::copy(data.data<void>(), data.size());
++        if (copied.is_error())
++            return;
++        bytes = copied.release_value();
++    }
++
++    Vector<GUI::ClipboardEntry> entries;
++    entries.append({ move(bytes), mime_type, metadata });
++    set_clipboard_entries(entries);
++}
++
++void ConnectionFromClient::set_clipboard_entries(Vector<GUI::ClipboardEntry> const& entries)
++{
++    Storage::the().set_entries(entries);
++}
++
++Messages::ClipboardServer::GetClipboardEntriesResponse ConnectionFromClient::get_clipboard_entries()
++{
++    auto entries = Storage::the().entries();
++    return { move(entries) };
+ }
+ 
+ Messages::ClipboardServer::GetClipboardDataResponse ConnectionFromClient::get_clipboard_data()
+ {
+-    auto& storage = Storage::the();
+-    return { storage.buffer(), storage.mime_type(), storage.metadata().clone().release_value_but_fixme_should_propagate_errors() };
++    auto const* primary = Storage::the().primary_entry();
++    if (!primary)
++        return { Core::AnonymousBuffer {}, ByteString {}, HashMap<ByteString, ByteString> {} };
++
++    if (primary->data.is_empty())
++        return { Core::AnonymousBuffer {}, primary->mime_type, primary->metadata };
++
++    auto buffer = Core::AnonymousBuffer::create_with_size(primary->data.size());
++    if (buffer.is_error())
++        return { Core::AnonymousBuffer {}, primary->mime_type, primary->metadata };
++    memcpy(buffer.value().data<void>(), primary->data.data(), primary->data.size());
++    return { buffer.release_value(), primary->mime_type, primary->metadata };
+ }
+ 
+ void ConnectionFromClient::notify_about_clipboard_change()
+diff --git a/Userland/Services/Clipboard/ConnectionFromClient.h b/Userland/Services/Clipboard/ConnectionFromClient.h
+index bfee4054..8a1aead3 100644
+--- a/Userland/Services/Clipboard/ConnectionFromClient.h
++++ b/Userland/Services/Clipboard/ConnectionFromClient.h
+@@ -30,7 +30,9 @@ private:
+     explicit ConnectionFromClient(NonnullOwnPtr<Core::LocalSocket>, int client_id);
+ 
+     virtual Messages::ClipboardServer::GetClipboardDataResponse get_clipboard_data() override;
++    virtual Messages::ClipboardServer::GetClipboardEntriesResponse get_clipboard_entries() override;
+     virtual void set_clipboard_data(Core::AnonymousBuffer const&, ByteString const&, HashMap<ByteString, ByteString> const&) override;
++    virtual void set_clipboard_entries(Vector<GUI::ClipboardEntry> const&) override;
+ };
+ 
+ }
+diff --git a/Userland/Services/Clipboard/Storage.cpp b/Userland/Services/Clipboard/Storage.cpp
+index b1c3e7b3..ca3c40dd 100644
+--- a/Userland/Services/Clipboard/Storage.cpp
++++ b/Userland/Services/Clipboard/Storage.cpp
+@@ -14,12 +14,67 @@ Storage& Storage::the()
+     return s_the;
+ }
+ 
+-void Storage::set_data(Core::AnonymousBuffer data, ByteString const& mime_type, HashMap<ByteString, ByteString> const& metadata)
++static bool mime_is_plain_text(StringView mime_type)
+ {
+-    m_buffer = move(data);
+-    m_data_size = data.size();
+-    m_mime_type = mime_type;
+-    m_metadata = metadata;
++    return mime_type == "text/plain"sv || mime_type.starts_with("text/plain;"sv) || mime_type == "UTF8_STRING"sv || mime_type == "STRING"sv;
++}
++
++GUI::ClipboardEntry const* Storage::primary_entry() const
++{
++    GUI::ClipboardEntry const* first = nullptr;
++
++    for (auto const& entry : m_entries) {
++        if (entry.data.is_empty())
++            continue;
++        if (!first)
++            first = &entry;
++        if (mime_is_plain_text(entry.mime_type))
++            return &entry;
++    }
++
++    for (auto const& entry : m_entries) {
++        if (entry.data.is_empty())
++            continue;
++        if (entry.mime_type == "text/html"sv || entry.mime_type.starts_with("text/html;"sv))
++            return &entry;
++    }
++
++    for (auto const& entry : m_entries) {
++        if (entry.data.is_empty())
++            continue;
++        if (entry.mime_type == "text/uri-list"sv)
++            return &entry;
++    }
++
++    for (auto const& entry : m_entries) {
++        if (entry.data.is_empty())
++            continue;
++        if (entry.mime_type.starts_with("image/"sv))
++            return &entry;
++    }
++
++    return first;
++}
++
++bool Storage::has_data() const
++{
++    for (auto const& entry : m_entries) {
++        if (!entry.data.is_empty())
++            return true;
++    }
++    return false;
++}
++
++ByteString Storage::mime_type() const
++{
++    if (auto const* primary = primary_entry())
++        return primary->mime_type;
++    return {};
++}
++
++void Storage::set_entries(Vector<GUI::ClipboardEntry> entries)
++{
++    m_entries = move(entries);
+ 
+     if (on_content_change)
+         on_content_change();
+diff --git a/Userland/Services/Clipboard/Storage.h b/Userland/Services/Clipboard/Storage.h
+index 69088335..35aa5ecd 100644
+--- a/Userland/Services/Clipboard/Storage.h
++++ b/Userland/Services/Clipboard/Storage.h
+@@ -8,8 +8,8 @@
+ 
+ #include <AK/ByteString.h>
+ #include <AK/Function.h>
+-#include <AK/HashMap.h>
+-#include <LibCore/AnonymousBuffer.h>
++#include <AK/Vector.h>
++#include <LibGUI/ClipboardEntry.h>
+ 
+ namespace Clipboard {
+ 
+@@ -18,38 +18,21 @@ public:
+     static Storage& the();
+     ~Storage() = default;
+ 
+-    bool has_data() const { return m_buffer.is_valid(); }
++    Vector<GUI::ClipboardEntry> const& entries() const { return m_entries; }
+ 
+-    ByteString const& mime_type() const { return m_mime_type; }
+-    HashMap<ByteString, ByteString> const& metadata() const { return m_metadata; }
++    // The representation a caller that understands only one type should see.
++    GUI::ClipboardEntry const* primary_entry() const;
++    bool has_data() const;
++    ByteString mime_type() const;
+ 
+-    u8 const* data() const
+-    {
+-        if (!has_data())
+-            return nullptr;
+-        return m_buffer.data<u8>();
+-    }
+-
+-    size_t data_size() const
+-    {
+-        if (has_data())
+-            return m_data_size;
+-        return 0;
+-    }
+-
+-    void set_data(Core::AnonymousBuffer, ByteString const& mime_type, HashMap<ByteString, ByteString> const& metadata);
++    void set_entries(Vector<GUI::ClipboardEntry>);
+ 
+     Function<void()> on_content_change;
+ 
+-    Core::AnonymousBuffer const& buffer() const { return m_buffer; }
+-
+ private:
+     Storage() = default;
+ 
+-    ByteString m_mime_type;
+-    Core::AnonymousBuffer m_buffer;
+-    size_t m_data_size { 0 };
+-    HashMap<ByteString, ByteString> m_metadata;
++    Vector<GUI::ClipboardEntry> m_entries;
+ };
+ 
+ }

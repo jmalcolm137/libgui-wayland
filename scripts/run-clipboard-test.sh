@@ -101,6 +101,35 @@ run_scenario uris uri-list set-file text/uri-list "$RUNTIME/uris.txt"
 check_contains "uri-list: app read the peer's list"  "read mime='text/uri-list'" "$RUNTIME/app-uris.log"
 check_contains "uri-list: peer read the app's list"  "file:///tmp/libwm-a" "$RUNTIME/get-uris.out"
 
+# --- multiple representations at once ---------------------------------------
+printf 'peer-plain-hello' > "$RUNTIME/peer-plain.txt"
+printf '<b>peer-rich-hello</b>' > "$RUNTIME/peer-rich.html"
+
+WAYLAND_DISPLAY=clip-test "$PEER_BIN" set-formats \
+    text/plain "$RUNTIME/peer-plain.txt" text/html "$RUNTIME/peer-rich.html" \
+    > "$RUNTIME/peer-formats.log" 2>&1 &
+PEER_PID=$!
+for _ in $(seq 1 50); do grep -q "serving selection" "$RUNTIME/peer-formats.log" 2>/dev/null && break; sleep 0.1; done
+
+WAYLAND_DISPLAY=clip-test SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
+    LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    "$APP" formats > "$RUNTIME/app-formats.log" 2>&1 &
+APP_PID=$!
+for _ in $(seq 1 50); do grep -q "wrote formats" "$RUNTIME/app-formats.log" 2>/dev/null && break; sleep 0.1; done
+sleep 0.3
+
+WAYLAND_DISPLAY=clip-test timeout 5 "$PEER_BIN" get text/html > "$RUNTIME/get-html.out" 2>&1 || true
+WAYLAND_DISPLAY=clip-test timeout 5 "$PEER_BIN" get text/plain > "$RUNTIME/get-plain.out" 2>&1 || true
+
+wait "$APP_PID" 2>/dev/null || true
+kill "$PEER_PID" 2>/dev/null || true
+wait "$PEER_PID" 2>/dev/null || true
+
+check_contains "formats: app read the peer's text/plain"  "entry mime='text/plain' bytes=16" "$RUNTIME/app-formats.log"
+check_contains "formats: app read the peer's text/html"   "entry mime='text/html' bytes=22" "$RUNTIME/app-formats.log"
+check_contains "formats: peer read the app's HTML"        "<b>libwm-rich-hello</b>" "$RUNTIME/get-html.out"
+check_contains "formats: peer read the app's plain text"  "libwm-plain-hello" "$RUNTIME/get-plain.out"
+
 if [[ $failures -ne 0 ]]; then
     KEEP=1
     echo "==> $failures check(s) failed"

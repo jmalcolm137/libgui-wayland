@@ -2258,9 +2258,31 @@ void WaylandClient::on_popup_done(xdg_popup* popup)
     }
 }
 
-ErrorOr<ByteBuffer> WaylandClient::read_clipboard(ByteString& out_mime_type)
+Vector<ByteString> WaylandClient::clipboard_mime_types() const
+{
+    // If we own the selection, the offers are the canonical list: the data-source
+    // round trip would block the same event loop that has to answer it.
+    if (m_data_source && !m_clipboard_offers.is_empty()) {
+        Vector<ByteString> mimes;
+        mimes.ensure_capacity(m_clipboard_offers.size());
+        for (auto const& it : m_clipboard_offers)
+            mimes.append(it.key);
+        return mimes;
+    }
+
+    if (!m_current_offer)
+        return {};
+
+    if (auto it = m_offer_mime_types.find(reinterpret_cast<u64>(m_current_offer)); it != m_offer_mime_types.end())
+        return it->value;
+    return {};
+}
+
+ErrorOr<ByteBuffer> WaylandClient::read_clipboard_for_mime(ByteString const& wanted_mime, ByteString& out_mime_type)
 {
     out_mime_type = { };
+    if (wanted_mime.is_empty())
+        return Error::from_string_literal("LibWM: no MIME type requested");
 
     // If we are the clipboard owner, serve the stored offers directly. A
     // Wayland round trip through our own data source would require dispatching
@@ -2268,30 +2290,32 @@ ErrorOr<ByteBuffer> WaylandClient::read_clipboard(ByteString& out_mime_type)
     // the 2 s timeout turned large copies into a long stall (and could take the
     // client's clipboard connection down with it).
     if (m_data_source && !m_clipboard_offers.is_empty()) {
-        for (auto const& preferred : { "text/plain"sv, "text/plain;charset=utf-8"sv, "UTF8_STRING"sv, "text/uri-list"sv, "image/png"sv, "image/x-serenityos"sv }) {
-            auto it = m_clipboard_offers.find(ByteString(preferred));
-            if (it != m_clipboard_offers.end()) {
-                out_mime_type = it->key;
-                return ByteBuffer::copy(it->value);
+        if (auto it = m_clipboard_offers.find(wanted_mime); it != m_clipboard_offers.end()) {
+            out_mime_type = it->key;
+            return ByteBuffer::copy(it->value);
+        }
+
+        // text/plain is offered under a few aliases; accept any of them.
+        if (wanted_mime == "text/plain"sv || wanted_mime.starts_with("text/plain;"sv)) {
+            for (auto const& alias : { "text/plain"sv, "text/plain;charset=utf-8"sv, "UTF8_STRING"sv, "STRING"sv }) {
+                if (auto it = m_clipboard_offers.find(ByteString(alias)); it != m_clipboard_offers.end()) {
+                    out_mime_type = ByteString("text/plain");
+                    return ByteBuffer::copy(it->value);
+                }
             }
         }
-        auto it = m_clipboard_offers.begin();
-        out_mime_type = it->key;
-        return ByteBuffer::copy(it->value);
+
+        return Error::from_string_literal("LibWM: selection does not offer the requested MIME type");
     }
 
     if (!m_current_offer || !m_display)
         return Error::from_string_literal("LibWM: no clipboard selection");
 
-    ByteString mime = preferred_mime_for(m_current_offer);
-    if (mime.is_empty())
-        return Error::from_string_literal("LibWM: selection offers no usable type");
-
     int fds[2];
     if (pipe(fds) != 0)
         return Error::from_errno(errno);
 
-    wl_data_offer_receive(m_current_offer, mime.characters(), fds[1]);
+    wl_data_offer_receive(m_current_offer, wanted_mime.characters(), fds[1]);
     wl_display_flush(m_display);
     close(fds[1]);
 
@@ -2316,10 +2340,36 @@ ErrorOr<ByteBuffer> WaylandClient::read_clipboard(ByteString& out_mime_type)
     }
     close(fds[0]);
 
+    auto mime = wanted_mime;
     if (mime.starts_with("text/plain"sv))
         mime = ByteString("text/plain");
     out_mime_type = move(mime);
     return data;
+}
+
+ErrorOr<ByteBuffer> WaylandClient::read_clipboard(ByteString& out_mime_type)
+{
+    out_mime_type = { };
+
+    ByteString mime;
+    if (m_data_source && !m_clipboard_offers.is_empty()) {
+        for (auto const& preferred : { "text/plain"sv, "text/plain;charset=utf-8"sv, "UTF8_STRING"sv, "text/uri-list"sv, "image/png"sv, "image/x-serenityos"sv }) {
+            if (m_clipboard_offers.contains(ByteString(preferred))) {
+                mime = ByteString(preferred);
+                break;
+            }
+        }
+        if (mime.is_empty())
+            mime = m_clipboard_offers.begin()->key;
+    } else {
+        if (!m_current_offer)
+            return Error::from_string_literal("LibWM: no clipboard selection");
+        mime = preferred_mime_for(m_current_offer);
+        if (mime.is_empty())
+            return Error::from_string_literal("LibWM: selection offers no usable type");
+    }
+
+    return read_clipboard_for_mime(mime, out_mime_type);
 }
 
 void WaylandClient::write_clipboard(HashMap<ByteString, ByteBuffer> offers)

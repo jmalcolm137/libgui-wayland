@@ -11,7 +11,9 @@ public:
     virtual ~ClipboardServerDefaultStub() = default;
 
     virtual Messages::ClipboardServer::GetClipboardDataResponse get_clipboard_data() override { return Messages::ClipboardServer::GetClipboardDataResponse(nullptr); }
+    virtual Messages::ClipboardServer::GetClipboardEntriesResponse get_clipboard_entries() override { return Messages::ClipboardServer::GetClipboardEntriesResponse(nullptr); }
     virtual void set_clipboard_data([[maybe_unused]] Core::AnonymousBuffer const& data, [[maybe_unused]] ByteString const& mime_type, [[maybe_unused]] HashMap<ByteString, ByteString> const& metadata) override { }
+    virtual void set_clipboard_entries([[maybe_unused]] Vector<GUI::ClipboardEntry> const& entries) override { }
 };
 
 } // namespace LibWM
