@@ -1130,6 +1130,7 @@ void WaylandClient::on_pointer_leave()
     m_pending_value120_y = 0;
     m_pending_has_discrete = false;
     m_pending_has_value120 = false;
+    m_axis_flush_scheduled = false;
 }
 
 void WaylandClient::on_pointer_motion(Gfx::IntPoint position)
@@ -1255,12 +1256,26 @@ void WaylandClient::on_pointer_axis(i32 x, i32 y)
         m_input.mouse_wheel(m_pointer_window, m_pointer_position.translated(0, -inset), m_pointer_buttons, current_modifiers(), x, y);
 }
 
+void WaylandClient::schedule_axis_flush()
+{
+    if (m_axis_flush_scheduled)
+        return;
+    m_axis_flush_scheduled = true;
+    Core::deferred_invoke([this] {
+        m_axis_flush_scheduled = false;
+        on_pointer_frame();
+    });
+}
+
 void WaylandClient::on_pointer_axis_event(u32 axis, double value)
 {
+    if (getenv("LIBWM_AXIS_DEBUG"))
+        dbgln("LibWM/Wayland: axis event {} value {}", axis, value);
     if (axis == WL_POINTER_AXIS_VERTICAL_SCROLL)
         m_pending_axis_y += value;
     else
         m_pending_axis_x += value;
+    schedule_axis_flush();
 }
 
 void WaylandClient::on_pointer_axis_discrete_event(u32 axis, i32 discrete)
@@ -1270,6 +1285,7 @@ void WaylandClient::on_pointer_axis_discrete_event(u32 axis, i32 discrete)
     else
         m_pending_discrete_x += discrete;
     m_pending_has_discrete = true;
+    schedule_axis_flush();
 }
 
 void WaylandClient::on_pointer_axis_value120_event(u32 axis, i32 value120)
@@ -1279,10 +1295,13 @@ void WaylandClient::on_pointer_axis_value120_event(u32 axis, i32 value120)
     else
         m_pending_value120_x += value120;
     m_pending_has_value120 = true;
+    schedule_axis_flush();
 }
 
 void WaylandClient::on_pointer_frame()
 {
+    if (getenv("LIBWM_AXIS_DEBUG"))
+        dbgln("LibWM/Wayland: pointer frame");
     i32 step_x = 0;
     i32 step_y = 0;
 
@@ -1300,11 +1319,12 @@ void WaylandClient::on_pointer_frame()
         m_axis_v120_accum_x -= step_x * 120.0;
         m_axis_v120_accum_y -= step_y * 120.0;
     } else {
-        // SDE's compositor sends wheel/touchpad axis deltas already in scroll
-        // steps (1.0 per notch), with fractional values for high-resolution
-        // devices. Accumulate those units directly and carry the remainder.
-        m_axis_accum_x += m_pending_axis_x;
-        m_axis_accum_y += m_pending_axis_y;
+        // Smooth wheel/touchpad deltas are in pixels. Use the conventional
+        // 15-pixel notch and carry the remainder between frames. Discrete
+        // value120 events above take precedence, so a wheel notch is exactly one
+        // step even when the compositor also sends the smooth axis event.
+        m_axis_accum_x += m_pending_axis_x / 15.0;
+        m_axis_accum_y += m_pending_axis_y / 15.0;
         step_x = static_cast<i32>(m_axis_accum_x);
         step_y = static_cast<i32>(m_axis_accum_y);
         m_axis_accum_x -= step_x;

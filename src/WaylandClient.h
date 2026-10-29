@@ -264,6 +264,7 @@ public:
     void on_pointer_axis_discrete_event(u32 axis, i32 discrete);
     void on_pointer_axis_value120_event(u32 axis, i32 value120);
     void on_pointer_frame();
+    void schedule_axis_flush();
     void on_keyboard_keymap(int fd, u32 size);
     void on_keyboard_modifiers(u32 depressed, u32 latched, u32 locked, u32 group, u32 serial);
     void on_keyboard_key(u32 key, bool pressed);
@@ -516,6 +517,7 @@ private:
     i32 m_pending_value120_y { 0 };
     bool m_pending_has_discrete { false };
     bool m_pending_has_value120 { false };
+    bool m_axis_flush_scheduled { false };
 
     Gfx::IntSize m_physical_size;
     Gfx::IntSize m_screen_size;
