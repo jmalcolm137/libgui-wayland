@@ -12,6 +12,7 @@
 #include <LibGfx/Bitmap.h>
 #include <LibGfx/Color.h>
 #include <LibMain/Main.h>
+#include <unistd.h>
 
 // Reads the compositor clipboard, logs what it saw, then publishes something in
 // the requested mode ("", "image", or "uri-list"). Used to exercise the native
@@ -21,6 +22,10 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     LibWM::initialize();
 
     auto app = TRY(GUI::Application::create(arguments));
+
+    // The portal learns the selection asynchronously on its own thread; give it a
+    // moment before the initial snapshot so the test does not race the compositor.
+    usleep(300 * 1000);
 
     auto before = GUI::Clipboard::the().fetch_data_and_type();
     dbgln("CLIPBOARD-TEST: read mime='{}' bytes={}", before.mime_type, before.data.size());
