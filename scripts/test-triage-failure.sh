@@ -37,6 +37,14 @@ LibWM: no Wayland connection on the main thread: LibWM: wl_display_connect faile
 LibWM: running without a Wayland compositor: LibWM: wl_display_connect failed (no compositor?)
 EOF
 
+cat > "$TMP/noisy.log" <<'EOF'
+warning: libevent-2.1.13-2 is up to date -- skipping
+ /usr/bin/install -c -m 644 XtAddTimeOut.3 XtSetSelectionTimeout.3 XtDispatchEventToWidget.3 '/out/share/man/man3'
+warning: patch cow-decoration-hint.patch did not apply (already applied?)
+error: imake did not generate config/Makefile (log: /out/build/cde/.makefiles.log)
+make[1]: *** [Makefile:62: cde] Error 1
+EOF
+
 python3 - "$TMP/large.log" <<'PY'
 import sys
 path = sys.argv[1]
@@ -48,6 +56,7 @@ PY
 
 "$TRIAGE" "$TMP/patch.log" --print-request > "$TMP/patch.request.json"
 "$TRIAGE" "$TMP/headless.log" --print-request > "$TMP/headless.request.json"
+"$TRIAGE" "$TMP/noisy.log" --print-request > "$TMP/noisy.request.json"
 "$TRIAGE" "$TMP/large.log" --max-chars 2000 --print-request > "$TMP/large.request.json"
 
 cat > "$TMP/fake-jev" <<'EOF'
@@ -100,6 +109,16 @@ check("environment clues extracted",
       any("no compositor" in line.lower() for line in headless["environment_errors"]))
 check("secret redacted",
       "should-not-leak" not in patch["log_excerpt"] and "<redacted>" in patch["log_excerpt"])
+
+noisy = json.loads((tmp / "noisy.request.json").read_text())["state"]
+check("package warnings are not patch problems",
+      not any("skipping" in line for line in noisy["patch_problems"]))
+check("non-fatal patch warning separated",
+      any("cow-decoration-hint" in line for line in noisy["patch_warnings"]))
+check("man-page filenames are not env errors",
+      not any("XtAddTimeOut" in line for line in noisy["environment_errors"]))
+check("configure error retained",
+      "imake did not generate config/Makefile" in noisy["log_excerpt"])
 
 large = json.loads((tmp / "large.request.json").read_text())["state"]
 check("excerpt respects --max-chars", len(large["log_excerpt"]) <= 2000)

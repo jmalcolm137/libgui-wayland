@@ -44,8 +44,14 @@ ERROR = re.compile(
     re.IGNORECASE,
 )
 PATCH_PROBLEM = re.compile(
-    r"(assumed applied|unverifiable|does not apply|patch.*(?:failed|error)|"
-    r"WARNING:.*(?:pin|patch))",
+    r"(assumed applied|unverifiable|does not apply|"
+    r"\bpatch(?:es)?\b.*\b(?:failed|error)\b)",
+    re.IGNORECASE,
+)
+# Non-fatal: "did not apply (already applied?)" means the build continued.
+PATCH_WARNING = re.compile(
+    r"(\bdid not apply\b|"
+    r"WARNING:.*\b(?:pin|pinned|patch|patches)\b)",
     re.IGNORECASE,
 )
 PATCH_TOTAL = re.compile(r"patches: \d+ applied", re.IGNORECASE)
@@ -53,9 +59,10 @@ FAILED_CHECK = re.compile(r"\bFAIL(?:ED)?\b")
 # Upstream evidence that the harness never got a working transport. These
 # explain the FAIL lines below them, so they take priority over test_failure.
 ENV_ERROR = re.compile(
-    r"(no compositor|no Wayland connection|wl_display_connect failed|"
-    r"WAYLAND_DISPLAY|XDG_RUNTIME_DIR|Could not connect|Connection refused|"
-    r"Address already in use|permission denied|timed out|Timeout)",
+    r"(\bno compositor\b|\bno Wayland connection\b|\bwl_display_connect failed\b|"
+    r"\bWAYLAND_DISPLAY\b|\bXDG_RUNTIME_DIR\b|\bCould not connect\b|"
+    r"\bConnection refused\b|\bAddress already in use\b|\bpermission denied\b|"
+    r"\btimed out\b|\bTimeout\b)",
     re.IGNORECASE,
 )
 # Keep credentials that a command may have echoed out of the excerpt.
@@ -165,6 +172,7 @@ def collect_state(
     lines = text.split("\n")
 
     patch_problems: list[str] = []
+    patch_warnings: list[str] = []
     patch_totals: list[str] = []
     failed_checks: list[str] = []
     environment_errors: list[str] = []
@@ -174,6 +182,8 @@ def collect_state(
             continue
         if PATCH_PROBLEM.search(stripped):
             patch_problems.append(stripped[:300])
+        elif PATCH_WARNING.search(stripped):
+            patch_warnings.append(stripped[:300])
         elif PATCH_TOTAL.search(stripped):
             patch_totals.append(stripped[:300])
         if FAILED_CHECK.search(stripped):
@@ -223,6 +233,7 @@ def collect_state(
         "serenity_head": git_head(SERENITY),
         "serenity_pin": pinned_revision(),
         "patch_problems": patch_problems[:12],
+        "patch_warnings": patch_warnings[:12],
         "patch_totals": patch_totals[:2],
         "failed_checks": failed_checks[:20],
         "environment_errors": environment_errors[:10],
@@ -243,14 +254,19 @@ def build_request(state: dict, model: str | None) -> dict:
                 "wl_display_connect failed, absent socket, timeout), choose "
                 "environment even when checks fail; those FAIL lines are downstream "
                 "symptoms. Prefer patch_drift when `patch_problems` reports "
-                "unverifiable, missing, or non-applying patches. Prefer build_order "
+                "unverifiable, missing, or non-applying patches. Do not choose "
+                "patch_drift for `patch_warnings` that say a patch 'did not apply "
+                "(already applied?)' when the build continued. Prefer build_order "
                 "when a generated endpoint header is missing on a fresh build. "
-                "Prefer test_failure only when a check ran against a working app "
-                "and the assertion itself failed."
+                "Prefer configure_error when the log ends with a configure, imake, "
+                "CMake, or Makefile-generation failure. Prefer test_failure only "
+                "when a check ran against a working app and the assertion itself "
+                "failed."
             ),
             "criteria": {
                 "patch_drift": "A patch does not apply, is unverifiable, or may be missing after a Serenity revision change.",
                 "build_order": "A generated header or build target is missing because of ordering, e.g. FileSystemAccessClientEndpoint.h.",
+                "configure_error": "configure, imake, CMake, or generated Makefile setup failed before compilation.",
                 "compile_error": "A C++ compiler error in project or Serenity source.",
                 "link_error": "A missing symbol, library, or undefined reference at link time.",
                 "test_failure": "A unit or headless integration check reported FAIL.",
@@ -264,7 +280,9 @@ def build_request(state: dict, model: str | None) -> dict:
                 "Which part of the stack most likely owns the failure? "
                 "Use paths and symbols in `log_excerpt`. Prefer compositor when "
                 "`environment_errors` shows no Wayland connection; prefer libwm "
-                "when the app's own rendering or input code failed."
+                "when the app's own rendering or input code failed; prefer "
+                "build_system for configure, imake, CMake, or generated-Makefile "
+                "failures."
             ),
             "criteria": {
                 "libwm": "LibWM, WaylandClient, WindowServerConnection, input, clipboard, menus, or portals.",
@@ -291,6 +309,7 @@ def build_request(state: dict, model: str | None) -> dict:
             "criteria": {
                 "refresh_patch": "Regenerate the failing patch hunks against the current Serenity revision, then rebuild.",
                 "build_generators": "Rerun the two-phase build so generated endpoint headers exist before the shim.",
+                "fix_build_setup": "Fix the configure, imake, CMake, or generated Makefile setup, then rerun.",
                 "fix_source": "Change C++ source or a patch in response to the reported error.",
                 "fix_environment": "Start the compositor or fix WAYLAND_DISPLAY/XDG_RUNTIME_DIR, then rerun the test.",
                 "rerun": "Rerun once on a clean runtime directory; the failure looks transient.",
@@ -393,6 +412,10 @@ HINTS = {
         "Run the build again: the two-phase build generates endpoint headers "
         "first. If it repeats, check the GENERATED targets in build-libgui.sh."
     ),
+    "fix_build_setup": (
+        "Inspect the configure/imake/CMake log; the generated Makefile was not "
+        "produced, so this is build setup rather than C++ source."
+    ),
     "fix_source": "Fix the reported source error; the excerpt above is the starting point.",
     "fix_environment": (
         "Start the compositor and check WAYLAND_DISPLAY/XDG_RUNTIME_DIR; the app "
@@ -458,6 +481,7 @@ def print_json(response: dict, state: dict, log_path: str) -> None:
             "excerpt_lines": excerpt_line_count(state),
         },
         "patch_problems": state["patch_problems"],
+        "patch_warnings": state["patch_warnings"],
         "failed_checks": state["failed_checks"],
         "environment_errors": state["environment_errors"],
     }
