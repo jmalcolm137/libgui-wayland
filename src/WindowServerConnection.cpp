@@ -824,11 +824,16 @@ void WindowServerConnection::popup_menu(i32 menu_id, Gfx::IntPoint screen_positi
         parent = m_active_window_id;
     if (parent < 0)
         return;
-    // The client passes the button's screen position plus its (local) rect; the
-    // menu is placed from the screen position (the rect is only its size).
+    // LibGUI computes the button position in screen coordinates, but a Wayland
+    // popup is positioned relative to its parent surface. Convert by removing
+    // the parent window's screen origin, which the compositor reported to us.
+    auto position = screen_position;
+    if (auto* w = window(parent))
+        position.translate_by(-w->rect.location());
+
     auto anchor = button_rect.is_empty()
-        ? Gfx::IntRect { screen_position, { 1, 1 } }
-        : Gfx::IntRect { screen_position, button_rect.size() };
+        ? Gfx::IntRect { position, { 1, 1 } }
+        : Gfx::IntRect { position, button_rect.size() };
     m_menu.open_root(menu_id, parent, anchor);
 }
 
