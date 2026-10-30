@@ -35,6 +35,8 @@ struct wl_output;
 struct wl_pointer;
 struct wl_registry;
 struct wl_seat;
+struct zwp_text_input_manager_v3;
+struct zwp_text_input_v3;
 struct wl_shm;
 struct wl_subcompositor;
 struct wl_subsurface;
@@ -190,6 +192,7 @@ public:
     void set_subcompositor(wl_subcompositor* subcompositor) { m_subcompositor = subcompositor; }
     void set_shm(wl_shm* shm) { m_shm = shm; }
     void add_seat(wl_seat* seat);
+    void ensure_text_input();
     void add_wm_base(xdg_wm_base* wm_base);
     void set_decoration_manager(zxdg_decoration_manager_v1* manager) { m_decoration_manager = manager; }
     void set_viewporter(wp_viewporter* viewporter) { m_viewporter = viewporter; }
@@ -252,6 +255,22 @@ public:
     // The compositor tells the client where it placed a window.
     void set_toplevel_position_callback(Function<void(i32 window_id, Gfx::IntPoint position)> callback) { m_toplevel_position_changed = move(callback); }
     void set_data_device_manager(wl_data_device_manager* manager);
+
+    // --- Text input / IME (zwp_text_input_v3) ---
+    // The compositor relays preedit and committed text from the input method to the focused client. The app enables
+    // text input only while a text field has focus, and supplies the caret rectangle so candidate windows can follow it.
+    using TextInputCommit = Function<void(String const&)>;
+    using TextInputPreedit = Function<void(String const&, i32 cursor_begin, i32 cursor_end)>;
+    using TextInputDeleteSurrounding = Function<void(i32 before_length, i32 after_length)>;
+    void set_text_input_callbacks(TextInputCommit, TextInputPreedit, TextInputDeleteSurrounding);
+    void set_text_input_enabled(bool);
+    bool text_input_enabled() const { return m_text_input_enabled; }
+    void set_text_input_cursor_rect(Gfx::IntRect const& rect);
+    void set_text_input_manager(zwp_text_input_manager_v3*);
+    void on_text_input_enter();
+    void on_text_input_commit(String);
+    void on_text_input_preedit(String, i32 cursor_begin, i32 cursor_end);
+    void on_text_input_delete_surrounding(i32 before_length, i32 after_length);
     void add_output(wl_output* output);
     void set_xdg_output_manager(zxdg_output_manager_v1* manager);
     void on_output_logical_size(wl_output*, Gfx::IntSize logical_size);
@@ -443,6 +462,13 @@ private:
     wl_subcompositor* m_subcompositor { nullptr };
     wl_shm* m_shm { nullptr };
     wl_seat* m_seat { nullptr };
+    zwp_text_input_manager_v3* m_text_input_manager { nullptr };
+    zwp_text_input_v3* m_text_input { nullptr };
+    bool m_text_input_enabled { false };
+    Gfx::IntRect m_text_input_cursor_rect;
+    TextInputCommit m_text_input_commit;
+    TextInputPreedit m_text_input_preedit;
+    TextInputDeleteSurrounding m_text_input_delete_surrounding;
     wl_pointer* m_pointer { nullptr };
     wl_keyboard* m_keyboard { nullptr };
     wl_output* m_output { nullptr };

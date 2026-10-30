@@ -24,6 +24,7 @@
 #include <xkbcommon/xkbcommon.h>
 
 #include "serenity-window-client-protocol.h"
+#include "text-input-unstable-v3-client-protocol.h"
 #include "viewporter-client-protocol.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "xdg-decoration-client-protocol.h"
@@ -71,6 +72,86 @@ static ByteString const& application_id()
 
 // --- registry -----------------------------------------------------------------
 
+// --- zwp_text_input_v3 --------------------------------------------------------
+
+static void text_input_enter(void* data, zwp_text_input_v3*, wl_surface*)
+{
+    static_cast<WaylandClient*>(data)->on_text_input_enter();
+}
+
+static void text_input_leave(void* data, zwp_text_input_v3*, wl_surface*)
+{
+    (void)data;
+}
+
+static void text_input_preedit_string(void* data, zwp_text_input_v3*, char const* text, int32_t cursor_begin, int32_t cursor_end)
+{
+    auto& self = *static_cast<WaylandClient*>(data);
+    self.on_text_input_preedit(text ? String::from_utf8_with_replacement_character(StringView { text, strlen(text) }) : String {}, cursor_begin, cursor_end);
+}
+
+static void text_input_commit_string(void* data, zwp_text_input_v3*, char const* text)
+{
+    auto& self = *static_cast<WaylandClient*>(data);
+    if (text)
+        self.on_text_input_commit(String::from_utf8_with_replacement_character(StringView { text, strlen(text) }));
+}
+
+static void text_input_delete_surrounding_text(void* data, zwp_text_input_v3*, uint32_t before_length, uint32_t after_length)
+{
+    auto& self = *static_cast<WaylandClient*>(data);
+    self.on_text_input_delete_surrounding(static_cast<i32>(before_length), static_cast<i32>(after_length));
+}
+
+static void text_input_done(void*, zwp_text_input_v3*, uint32_t) { }
+static void text_input_action(void*, zwp_text_input_v3*, uint32_t, uint32_t) { }
+static void text_input_language(void*, zwp_text_input_v3*, char const*) { }
+static void text_input_preedit_hint(void*, zwp_text_input_v3*, uint32_t, uint32_t, uint32_t) { }
+
+static zwp_text_input_v3_listener const s_text_input_listener = {
+    .enter = text_input_enter,
+    .leave = text_input_leave,
+    .preedit_string = text_input_preedit_string,
+    .commit_string = text_input_commit_string,
+    .delete_surrounding_text = text_input_delete_surrounding_text,
+    .done = text_input_done,
+    .action = text_input_action,
+    .language = text_input_language,
+    .preedit_hint = text_input_preedit_hint,
+};
+
+void WaylandClient::on_text_input_enter()
+{
+    if (!m_text_input_enabled || !m_text_input)
+        return;
+    // A field enabled before the input method connected is reactivated when the compositor reports the new focus.
+    zwp_text_input_v3_enable(m_text_input);
+    zwp_text_input_v3_set_content_type(m_text_input, ZWP_TEXT_INPUT_V3_CONTENT_HINT_NONE, ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_NORMAL);
+    if (!m_text_input_cursor_rect.is_empty())
+        zwp_text_input_v3_set_cursor_rectangle(m_text_input, m_text_input_cursor_rect.x(), m_text_input_cursor_rect.y(), m_text_input_cursor_rect.width(), m_text_input_cursor_rect.height());
+    zwp_text_input_v3_commit(m_text_input);
+    if (m_display)
+        wl_display_flush(m_display);
+}
+
+void WaylandClient::on_text_input_commit(String text)
+{
+    if (m_text_input_commit)
+        m_text_input_commit(text);
+}
+
+void WaylandClient::on_text_input_preedit(String text, i32 cursor_begin, i32 cursor_end)
+{
+    if (m_text_input_preedit)
+        m_text_input_preedit(text, cursor_begin, cursor_end);
+}
+
+void WaylandClient::on_text_input_delete_surrounding(i32 before_length, i32 after_length)
+{
+    if (m_text_input_delete_surrounding)
+        m_text_input_delete_surrounding(before_length, after_length);
+}
+
 static void registry_global(void* data, wl_registry* registry, uint32_t name, char const* interface, uint32_t version)
 {
     auto& self = *static_cast<WaylandClient*>(data);
@@ -100,6 +181,8 @@ static void registry_global(void* data, wl_registry* registry, uint32_t name, ch
         self.set_layer_shell(reinterpret_cast<zwlr_layer_shell_v1*>(wl_registry_bind(registry, name, &zwlr_layer_shell_v1_interface, min(version, 4u))));
     } else if (!strcmp(interface, serenity_window_manager_interface.name)) {
         self.set_serenity_window_manager(reinterpret_cast<serenity_window_manager*>(wl_registry_bind(registry, name, &serenity_window_manager_interface, min(version, 2u))));
+    } else if (!strcmp(interface, zwp_text_input_manager_v3_interface.name)) {
+        self.set_text_input_manager(reinterpret_cast<zwp_text_input_manager_v3*>(wl_registry_bind(registry, name, &zwp_text_input_manager_v3_interface, 1)));
     }
 }
 
@@ -994,6 +1077,63 @@ void WaylandClient::add_seat(wl_seat* seat)
     m_seat = seat;
     wl_seat_add_listener(seat, &s_seat_listener, this);
     maybe_create_data_device();
+    ensure_text_input();
+}
+
+void WaylandClient::set_text_input_manager(zwp_text_input_manager_v3* manager)
+{
+    m_text_input_manager = manager;
+    ensure_text_input();
+}
+
+void WaylandClient::ensure_text_input()
+{
+    if (m_text_input || !m_text_input_manager || !m_seat)
+        return;
+    m_text_input = zwp_text_input_manager_v3_get_text_input(m_text_input_manager, m_seat);
+    if (m_text_input)
+        zwp_text_input_v3_add_listener(m_text_input, &s_text_input_listener, this);
+}
+
+void WaylandClient::set_text_input_callbacks(TextInputCommit commit, TextInputPreedit preedit, TextInputDeleteSurrounding delete_surrounding)
+{
+    m_text_input_commit = move(commit);
+    m_text_input_preedit = move(preedit);
+    m_text_input_delete_surrounding = move(delete_surrounding);
+}
+
+void WaylandClient::set_text_input_enabled(bool enabled)
+{
+    if (m_text_input_enabled == enabled)
+        return;
+    m_text_input_enabled = enabled;
+    if (!m_text_input)
+        return;
+
+    if (enabled) {
+        zwp_text_input_v3_enable(m_text_input);
+        zwp_text_input_v3_set_content_type(m_text_input, ZWP_TEXT_INPUT_V3_CONTENT_HINT_NONE, ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_NORMAL);
+        if (!m_text_input_cursor_rect.is_empty())
+            zwp_text_input_v3_set_cursor_rectangle(m_text_input, m_text_input_cursor_rect.x(), m_text_input_cursor_rect.y(), m_text_input_cursor_rect.width(), m_text_input_cursor_rect.height());
+    } else {
+        zwp_text_input_v3_disable(m_text_input);
+    }
+    zwp_text_input_v3_commit(m_text_input);
+    if (m_display)
+        wl_display_flush(m_display);
+}
+
+void WaylandClient::set_text_input_cursor_rect(Gfx::IntRect const& rect)
+{
+    if (m_text_input_cursor_rect == rect)
+        return;
+    m_text_input_cursor_rect = rect;
+    if (!m_text_input || !m_text_input_enabled)
+        return;
+    zwp_text_input_v3_set_cursor_rectangle(m_text_input, rect.x(), rect.y(), rect.width(), rect.height());
+    zwp_text_input_v3_commit(m_text_input);
+    if (m_display)
+        wl_display_flush(m_display);
 }
 
 void WaylandClient::set_data_device_manager(wl_data_device_manager* manager)

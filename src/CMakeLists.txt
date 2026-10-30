@@ -22,6 +22,17 @@ add_custom_command(
     VERBATIM
 )
 
+set(TEXT_INPUT_XML "${WAYLAND_PROTOCOLS_DIR}/unstable/text-input/text-input-unstable-v3.xml")
+add_custom_command(
+    OUTPUT
+        "${WM_WAYLAND_DIR}/text-input-unstable-v3-client-protocol.h"
+        "${WM_WAYLAND_DIR}/text-input-unstable-v3-protocol.c"
+    COMMAND "${WAYLAND_SCANNER}" client-header "${TEXT_INPUT_XML}" "${WM_WAYLAND_DIR}/text-input-unstable-v3-client-protocol.h"
+    COMMAND "${WAYLAND_SCANNER}" private-code "${TEXT_INPUT_XML}" "${WM_WAYLAND_DIR}/text-input-unstable-v3-protocol.c"
+    DEPENDS "${TEXT_INPUT_XML}"
+    VERBATIM
+)
+
 set(XDG_DECORATION_XML "${WAYLAND_PROTOCOLS_DIR}/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml")
 add_custom_command(
     OUTPUT
@@ -87,6 +98,7 @@ add_library(windowserver SHARED
     WindowServerConnection.cpp
     "${SERENITY_PROJECT_ROOT}/Userland/Services/ImageDecoder/ConnectionFromClient.cpp"
     "${WM_WAYLAND_DIR}/xdg-shell-protocol.c"
+    "${WM_WAYLAND_DIR}/text-input-unstable-v3-protocol.c"
     "${WM_WAYLAND_DIR}/xdg-decoration-protocol.c"
     "${WM_WAYLAND_DIR}/xdg-output-protocol.c"
     "${WM_WAYLAND_DIR}/viewporter-protocol.c"
