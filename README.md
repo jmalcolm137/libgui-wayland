@@ -84,11 +84,12 @@ programming model.
 
 ## Remaining work
 
-- **Crisp fractional HiDPI (M8).** LibWM already binds `wp_viewporter` and takes the real
-  logical size from `zxdg_output_v1`. Rendering the client's backing store at the output's
-  device scale (and declaring it via `wp_viewport`/buffer scale) would remove the softness on
-  the fractional (1.75×) panel; today the logical buffer is presented 1:1 and the compositor
-  upscales it.
+- **Crisp fractional HiDPI (M8).** LibWM renders the client backing store at the output's
+  integer device scale and declares it with `wl_surface.set_buffer_scale`; `LibGUI` exposes
+  that scale through `Window::backing_store_scale()`. `SDE_CLIENT_SCALE` overrides it
+  (`0` forces 1x, a positive value selects that scale). Fractional output scales still
+  round to the nearest integer; `wp_viewporter` handles the remaining ratio in the
+  compositor.
 - **Menus (M6 remainder).** Scrolling for long menus, and drawing menu-item icons (the model
   already carries them; only the renderer ignores them).
 - **Config persistence.** The in-process Config portal is in memory only; values are not

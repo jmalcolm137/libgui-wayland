@@ -1,0 +1,29 @@
+Subject: [PATCH] LibGUI: expose the backing-store scale
+
+The browser frontend needs to know the client-side packing scale so it can ask
+the engine to paint web content at the same resolution as the LibGUI chrome.
+
+diff --git a/Userland/Libraries/LibGUI/Window.cpp b/Userland/Libraries/LibGUI/Window.cpp
+--- a/Userland/Libraries/LibGUI/Window.cpp
++++ b/Userland/Libraries/LibGUI/Window.cpp
+@@ -45,6 +45,10 @@ void Window::set_backing_store_scale(int scale)
+ {
+     s_backing_store_scale = scale < 1 ? 1 : scale;
+ }
++int Window::backing_store_scale()
++{
++    return s_backing_store_scale;
++}
+ 
+ class WindowBackingStore {
+ public:
+diff --git a/Userland/Libraries/LibGUI/Window.h b/Userland/Libraries/LibGUI/Window.h
+--- a/Userland/Libraries/LibGUI/Window.h
++++ b/Userland/Libraries/LibGUI/Window.h
+@@ -38,6 +38,7 @@ public:
+     // bitmap. Set by the LibWindowServer shim from the output scale.
+     static void set_backing_store_scale(int scale);
++    static int backing_store_scale();
+ 
+     bool is_modified() const;
+     void set_modified(bool);

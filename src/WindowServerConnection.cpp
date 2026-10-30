@@ -175,8 +175,11 @@ void WindowServerConnection::send_fast_greet()
     // with everything else, keeping the UI in proportion. Set SDE_CLIENT_SCALE=0 to
     // force 1x (debugging).
     int client_scale = wayland.output_scale();
-    if (auto const* env = getenv("SDE_CLIENT_SCALE"); env && *env && *env == '0')
-        client_scale = 1;
+    if (auto const* env = getenv("SDE_CLIENT_SCALE"); env && *env) {
+        // A positive value selects a scale explicitly (useful for testing); 0 forces 1x.
+        auto requested = atoi(env);
+        client_scale = requested > 0 ? requested : 1;
+    }
     GUI::Window::set_backing_store_scale(client_scale);
     WaylandClient::the().set_client_scale(client_scale);
 
