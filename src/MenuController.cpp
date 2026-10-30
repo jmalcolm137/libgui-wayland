@@ -167,7 +167,12 @@ void MenuController::remove_menu_item(i32 menu_id, i32 identifier)
     auto* menu = find_menu(menu_id);
     if (!menu)
         return;
-    menu->items.remove_first_matching([&](auto const& item) { return item.identifier == identifier; });
+    bool removed = menu->items.remove_first_matching([&](auto const& item) { return item.identifier == identifier; });
+    if (!removed) {
+        // Separators have no identifier in the wire protocol, so a remove for one cannot match. Drop every separator
+        // instead of leaving them to accumulate at the top of a menu that is rebuilt.
+        menu->items.remove_all_matching([](auto const& item) { return item.is_separator; });
+    }
     if (menu->window_id != -1 && menubar_changed)
         menubar_changed(menu->window_id);
 }
