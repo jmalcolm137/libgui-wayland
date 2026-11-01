@@ -2216,7 +2216,10 @@ void WaylandClient::create_popup(i32 popup_id, i32 parent_window_id, i32 parent_
             return;
         if (parent_window->is_layer) {
             layer_parent = true;
-            auto local = anchor.location() - parent_window->requested_position;
+            // WindowServerConnection has already made the anchor relative to the parent surface. A layer window's
+            // requested_position is its screen origin, so subtracting it here discards the origin and leaves menus
+            // at the window-local position (the Taskbar menu used to open near the top of the screen).
+            auto local = anchor.location();
             layer_position = parent_window->layer_output_position.translated(local.x(), local.y());
         } else {
             parent_xdg = parent_window->xdg_surface_object;
