@@ -1,0 +1,26 @@
+Subject: [PATCH] LibGUI: refuse a second concurrent drag operation
+
+A page can report another drag start while a DragOperation's nested event loop
+is still pumping events. That used to trip the single-drag VERIFY and take the
+application down; return Cancelled instead.
+
+---
+diff --git a/Userland/Libraries/LibGUI/DragOperation.cpp b/Userland/Libraries/LibGUI/DragOperation.cpp
+index 5170bb8c..ca8646e3 100644
+--- a/Userland/Libraries/LibGUI/DragOperation.cpp
++++ b/Userland/Libraries/LibGUI/DragOperation.cpp
+@@ -23,7 +23,13 @@ DragOperation::DragOperation(Core::EventReceiver* parent)
+ 
+ DragOperation::Outcome DragOperation::exec()
+ {
+-    VERIFY(!s_current_drag_operation);
++    // Only one native drag can be active at a time. A second operation started while the first is running (for
++    // example, from a page that reported another drag while the nested event loop was still alive) is refused instead
++    // of taking the whole application down.
++    if (s_current_drag_operation) {
++        m_outcome = Outcome::Cancelled;
++        return m_outcome;
++    }
+     VERIFY(!m_event_loop);
+     VERIFY(m_mime_data);
+ 
