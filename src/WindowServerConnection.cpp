@@ -670,6 +670,11 @@ void WindowServerConnection::set_minimized(i32 window_id, bool minimized)
         WaylandClient::the().set_minimized(window_id);
 }
 
+void WindowServerConnection::set_always_on_top(i32 window_id, bool always_on_top)
+{
+    WaylandClient::the().set_always_on_top(window_id, always_on_top);
+}
+
 void WindowServerConnection::move_window_to_front(i32)
 {
 }

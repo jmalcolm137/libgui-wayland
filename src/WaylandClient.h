@@ -155,6 +155,7 @@ public:
     void set_fullscreen(i32 window_id, bool fullscreen);
     void set_maximized(i32 window_id, bool maximized);
     void set_minimized(i32 window_id);
+    void set_always_on_top(i32 window_id, bool always_on_top);
 
     // The window's icon, pushed to the compositor over serenity-window when it
     // offers the manager (SerenityOS: Window::icon()). An invalid icon clears it.

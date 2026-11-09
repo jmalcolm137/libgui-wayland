@@ -153,6 +153,7 @@ private:
     void set_fullscreen(i32 window_id, bool fullscreen) override;
     void set_maximized(i32 window_id, bool maximized) override;
     void set_minimized(i32 window_id, bool minimized) override;
+    void set_always_on_top(i32 window_id, bool always_on_top) override;
     void move_window_to_front(i32 window_id) override;
     Messages::WindowServer::GetGlobalCursorPositionResponse get_global_cursor_position() override;
     Messages::WindowServer::GetColorUnderCursorResponse get_color_under_cursor() override;

@@ -180,7 +180,7 @@ static void registry_global(void* data, wl_registry* registry, uint32_t name, ch
     } else if (!strcmp(interface, zwlr_layer_shell_v1_interface.name)) {
         self.set_layer_shell(reinterpret_cast<zwlr_layer_shell_v1*>(wl_registry_bind(registry, name, &zwlr_layer_shell_v1_interface, min(version, 4u))));
     } else if (!strcmp(interface, serenity_window_manager_interface.name)) {
-        self.set_serenity_window_manager(reinterpret_cast<serenity_window_manager*>(wl_registry_bind(registry, name, &serenity_window_manager_interface, min(version, 2u))));
+        self.set_serenity_window_manager(reinterpret_cast<serenity_window_manager*>(wl_registry_bind(registry, name, &serenity_window_manager_interface, min(version, 3u))));
     } else if (!strcmp(interface, zwp_text_input_manager_v3_interface.name)) {
         self.set_text_input_manager(reinterpret_cast<zwp_text_input_manager_v3*>(wl_registry_bind(registry, name, &zwp_text_input_manager_v3_interface, 1)));
     }
@@ -2898,6 +2898,19 @@ void WaylandClient::set_minimized(i32 window_id)
         if (!window_surface->toplevel)
             return;
         xdg_toplevel_set_minimized(window_surface->toplevel);
+        wl_display_flush(m_display);
+    }
+}
+
+void WaylandClient::set_always_on_top(i32 window_id, bool always_on_top)
+{
+    if (auto* window_surface = find(window_id)) {
+        if (!window_surface->chrome)
+            return;
+        // Older compositors bind the chrome at version 2 and have no request for it.
+        if (wl_proxy_get_version(reinterpret_cast<wl_proxy*>(window_surface->chrome)) < 3)
+            return;
+        serenity_toplevel_set_always_on_top(window_surface->chrome, always_on_top ? 1 : 0);
         wl_display_flush(m_display);
     }
 }
