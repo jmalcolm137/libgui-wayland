@@ -52,6 +52,12 @@ private:
         : IPC::Connection<WindowServerEndpoint, WindowClientEndpoint>(*this, move(socket))
         , WindowClientEndpoint::Proxy<WindowServerEndpoint>(*this, {})
     {
+        // This end lives on the LibWM server thread and writes input events and
+        // replies back to the GUI thread. A blocking write here would stop it
+        // reading the client's requests, so the two threads would deadlock.
+        (void)this->socket().set_blocking(false);
+        set_send_timeout(1000);
+
         // The current theme may be knowable only from the host settings -- there is no
         // live broker file unless a theme was changed this session -- and the settings
         // are delivered after this constructor runs. Recompute when they arrive.

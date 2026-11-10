@@ -1,0 +1,190 @@
+LibIPC: bound window-portal sends so a stalled peer cannot freeze the UI
+
+The GUI thread writes WindowServer messages inline with event handling. If
+LibWM stops draining that socket, a blocking write freezes the application,
+and because the same thread also dispatches Wayland events, the compositor's
+queue to the client fills too: neither side can recover.
+
+Make both ends of the window portal non-blocking and give asynchronous sends
+a one-second budget. If the peer is already known to be wedged, drop further
+updates immediately instead of spending the timeout on each one. Sync sends
+keep waiting because their callers MUST() the result.
+
+--- a/Userland/Libraries/LibIPC/Message.h
++++ b/Userland/Libraries/LibIPC/Message.h
+@@ -44,7 +44,9 @@
+ 
+     ErrorOr<void> append_file_descriptor(int fd);
+ 
+-    ErrorOr<void> transfer_message(Core::LocalSocket& socket);
++    // timeout_ms < 0 waits indefinitely; otherwise a send that cannot complete
++    // returns ETIMEDOUT instead of blocking the caller forever.
++    ErrorOr<void> transfer_message(Core::LocalSocket& socket, int timeout_ms = -1);
+ 
+ private:
+     Vector<u8, 1024> m_data;
+--- a/Userland/Libraries/LibIPC/Message.cpp
++++ b/Userland/Libraries/LibIPC/Message.cpp
+@@ -7,6 +7,8 @@
+ #include <AK/Checked.h>
+ #include <LibCore/Socket.h>
+ #include <LibIPC/Message.h>
++#include <poll.h>
++#include <unistd.h>
+ 
+ namespace IPC {
+ 
+@@ -36,7 +38,33 @@
+     return {};
+ }
+ 
+-ErrorOr<void> MessageBuffer::transfer_message(Core::LocalSocket& socket)
++static ErrorOr<bool> wait_for_writable(Core::LocalSocket& socket, int timeout_ms)
++{
++    auto fd = socket.fd();
++    if (!fd.has_value())
++        return Error::from_errno(ENOTCONN);
++
++    struct pollfd pfd {
++        .fd = *fd,
++        .events = POLLOUT,
++        .revents = 0,
++    };
++
++    int result = 0;
++    do {
++        result = ::poll(&pfd, 1, timeout_ms);
++    } while (result < 0 && errno == EINTR);
++
++    if (result < 0)
++        return Error::from_errno(errno);
++    if (result == 0)
++        return false;
++    if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL))
++        return Error::from_errno(EPIPE);
++    return true;
++}
++
++ErrorOr<void> MessageBuffer::transfer_message(Core::LocalSocket& socket, int timeout_ms)
+ {
+     Checked<MessageSizeType> checked_message_size { m_data.size() };
+     checked_message_size -= sizeof(MessageSizeType);
+@@ -60,6 +88,17 @@
+     // A stream socket may reject a write larger than its send buffer with
+     // EMSGSIZE. Keep the next write within a size the socket accepts.
+     size_t max_write_size = bytes_to_write.size();
++    size_t const original_size = bytes_to_write.size();
++    bool wrote_any = false;
++
++    // With a bounded send, do not even start a message the peer cannot take:
++    // a partially written message would corrupt the stream if we then gave up.
++    if (timeout_ms >= 0) {
++        auto writable = TRY(wait_for_writable(socket, timeout_ms));
++        if (!writable)
++            return Error::from_errno(ETIMEDOUT);
++    }
++
+     while (!bytes_to_write.is_empty()) {
+         auto chunk = bytes_to_write.slice(0, min(max_write_size, bytes_to_write.size()));
+         ErrorOr<ssize_t> maybe_nwritten = 0;
+@@ -79,10 +118,14 @@
+                 // called from arbitrary callbacks, and pumping them from inside
+                 // a send can destroy the state the sender is using.
+                 if (error.code() == EAGAIN || error.code() == EWOULDBLOCK) {
+-                    if (auto result = socket.wait_for_writable(); result.is_error()) {
+-                        if (result.error().is_errno() && (result.error().code() == EPIPE || result.error().code() == ENOTCONN))
+-                            return Error::from_string_literal("IPC::transfer_message: Disconnected from peer");
+-                        return result.release_error();
++                    auto writable = TRY(wait_for_writable(socket, timeout_ms));
++                    if (!writable) {
++                        // Never leave a half-written message behind: if the
++                        // caller drops it, the peer would see a truncated
++                        // stream. Report a disconnect in that case.
++                        if (wrote_any || bytes_to_write.size() != original_size)
++                            return Error::from_errno(EPIPE);
++                        return Error::from_errno(ETIMEDOUT);
+                     }
+                     continue;
+                 }
+@@ -108,6 +151,7 @@
+             }
+         }
+ 
++        wrote_any = true;
+         bytes_to_write = bytes_to_write.slice(maybe_nwritten.value());
+     }
+ 
+--- a/Userland/Libraries/LibIPC/Connection.h
++++ b/Userland/Libraries/LibIPC/Connection.h
+@@ -40,6 +40,11 @@
+     };
+     ErrorOr<void> post_message(Message const&, MessageKind = MessageKind::Async);
+ 
++    // A non-negative timeout makes asynchronous sends give up once the peer
++    // has not drained its socket for that many milliseconds. The caller keeps
++    // running instead of freezing the thread that owns the UI.
++    void set_send_timeout(int timeout_ms) { m_send_timeout_ms = timeout_ms; }
++
+     void shutdown();
+     virtual void die() { }
+ 
+@@ -80,6 +85,8 @@
+     ByteBuffer m_unprocessed_bytes;
+ 
+     u32 m_local_endpoint_magic { 0 };
++    int m_send_timeout_ms { -1 };
++    bool m_send_stalled { false };
+ 
+     NonnullOwnPtr<DeferredInvoker> m_deferred_invoker;
+ };
+--- a/Userland/Libraries/LibIPC/Connection.cpp
++++ b/Userland/Libraries/LibIPC/Connection.cpp
+@@ -65,13 +65,28 @@
+     if (!m_socket->is_open())
+         return Error::from_string_literal("Trying to post_message during IPC shutdown");
+ 
+-    // MessageKind is kept for API compatibility: transfer_message() now waits for
+-    // the socket to accept the whole message for both sync and async messages.
+-    (void)kind;
+-    if (auto result = buffer.transfer_message(*m_socket); result.is_error()) {
++    // Async messages are state updates: if the peer stops draining its socket,
++    // drop the update instead of wedging the thread that owns the UI. Sync
++    // senders MUST() the result, so they keep waiting; timing them out would
++    // turn a slow peer into an abort.
++    auto async_message = kind == MessageKind::Async;
++    auto timeout_ms = async_message ? m_send_timeout_ms : -1;
++    if (async_message && m_send_stalled)
++        timeout_ms = 0;
++
++    if (auto result = buffer.transfer_message(*m_socket, timeout_ms); result.is_error()) {
++        if (async_message && result.error().is_errno() && result.error().code() == ETIMEDOUT) {
++            // Once the peer is known to be wedged, do not spend another timeout
++            // on every update: skip them until one gets through again.
++            if (!m_send_stalled)
++                dbgln("IPC::ConnectionBase: dropping async messages; the peer is not draining its socket");
++            m_send_stalled = true;
++            return {};
++        }
+         shutdown_with_error(result.error());
+         return result.release_error();
+     }
++    m_send_stalled = false;
+ 
+     if (pthread_equal(pthread_self(), m_timer_owner_thread))
+         m_responsiveness_timer->start();
+--- a/Userland/Libraries/LibGUI/ConnectionToWindowServer.cpp
++++ b/Userland/Libraries/LibGUI/ConnectionToWindowServer.cpp
+@@ -56,6 +56,13 @@
+ ConnectionToWindowServer::ConnectionToWindowServer(NonnullOwnPtr<Core::LocalSocket> socket)
+     : IPC::ConnectionToServer<WindowClientEndpoint, WindowServerEndpoint>(*this, move(socket))
+ {
++    // The GUI thread writes window-server messages inline with event handling.
++    // If LibWM stops draining this socket, a blocking write would freeze the
++    // whole application (and with it the Wayland events that would let LibWM
++    // recover). Send without blocking and bound the wait for a full message.
++    (void)this->socket().set_blocking(false);
++    set_send_timeout(1000);
++
+     // NOTE: WindowServer automatically sends a "fast_greet" message to us when we connect.
+     //       All we have to do is wait for it to arrive. This avoids a round-trip during application startup.
+     auto message = wait_for_specific_message<Messages::WindowClient::FastGreet>();
