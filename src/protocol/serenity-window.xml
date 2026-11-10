@@ -195,14 +195,6 @@
       <arg name="mode" type="uint"/>
     </request>
 
-    <request name="set_always_on_top">
-      <description summary="keep this window above ordinary windows">
-        Ask the compositor to keep this toplevel above normal windows. The
-        compositor's own window menu offers the same state; 0 clears it.
-      </description>
-      <arg name="always_on_top" type="int"/>
-    </request>
-
     <request name="set_launch_origin">
       <description summary="the rect the window was launched from">
         The launcher hands the application the rect of the icon or menu item it
@@ -227,6 +219,14 @@
         of composing a second full-window buffer. 0 removes the strip.
       </description>
       <arg name="inset" type="int"/>
+    </request>
+
+    <request name="set_always_on_top">
+      <description summary="keep this window above ordinary windows">
+        Ask the compositor to keep this toplevel above normal windows. The
+        compositor's own window menu offers the same state; 0 clears it.
+      </description>
+      <arg name="always_on_top" type="int"/>
     </request>
 
     <event name="menubar_visibility">
