@@ -8,7 +8,7 @@
  
  class TerminalChangeListener : public Config::Listener {
  public:
-@@ -253,6 +254,16 @@
+@@ -253,6 +254,21 @@
  
      // We're the child process; run the startup command.
      if (shell_pid == 0) {
@@ -18,10 +18,14 @@
 +        // a non-interactive shell, which leaves SIGINT and SIGQUIT ignored (POSIX
 +        // requires it), and neither a shell nor anything it runs can un-ignore
 +        // them again -- which is why Ctrl-C did nothing in a shell started here,
-+        // or in any program that shell ran. Reset them before exec, as a login
-+        // session would.
++        // or in any program that shell ran. The terminal also starts with SIGCHLD
++        // ignored and SA_NOCLDWAIT so it need not reap its own shell; that
++        // disposition likewise survives exec, and any program the shell runs that
++        // spawns and waits on children then fails with ECHILD. Reset all of them
++        // before exec, as a login session would.
 +        signal(SIGINT, SIG_DFL);
 +        signal(SIGQUIT, SIG_DFL);
++        signal(SIGCHLD, SIG_DFL);
          if (!command_to_execute.is_empty())
              TRY(run_command(command_to_execute, keep_open));
          else
