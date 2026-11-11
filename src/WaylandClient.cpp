@@ -33,6 +33,22 @@
 
 namespace LibWM {
 
+// libwayland speaks in messages that must fit its 4 KiB connection buffer.
+// xdg_toplevel.set_title carries a string straight from page content, so an
+// oversized title makes the server reset the connection. Clamp at a UTF-8
+// boundary before handing strings to the protocol.
+static ByteString clamp_wayland_string(ByteString const& value, size_t max_bytes = 1024)
+{
+    if (value.length() <= max_bytes)
+        return value;
+
+    size_t length = max_bytes;
+    while (length > 0 && (static_cast<u8>(value[length]) & 0xc0) == 0x80)
+        --length;
+    return value.substring(0, length);
+}
+
+
 // Serialize access to a WindowSurface. The main thread dispatches Wayland
 // (frame callbacks, configures) while the LibWM server thread handles the
 // client's paint requests and backing-store handovers; both touch the same
@@ -1041,6 +1057,12 @@ void WaylandClient::dispatch()
         // The compositor is gone (or a protocol error occurred). Reading a dead
         // connection again would spin the notifier on an always-readable fd, so
         // stop and ask the application to exit for a clean teardown.
+        auto error = wl_display_get_error(m_display);
+        wl_interface const* interface = nullptr;
+        uint32_t id = 0;
+        auto code = wl_display_get_protocol_error(m_display, &interface, &id);
+        warnln("LibWM/Wayland: dispatch failed (errno {}, protocol error {} on {}#{})",
+            error, code, interface ? interface->name : "none", id);
         if (m_notifier)
             m_notifier->set_enabled(false);
         Core::EventLoop::current().quit(0);
@@ -2713,7 +2735,8 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::In
     xdg_surface_add_listener(xdg_surface_object, &s_xdg_surface_listener, this);
     auto* toplevel = xdg_surface_get_toplevel(xdg_surface_object);
     xdg_toplevel_add_listener(toplevel, &s_toplevel_listener, this);
-    xdg_toplevel_set_title(toplevel, title.characters());
+    auto clamped_title = clamp_wayland_string(title);
+    xdg_toplevel_set_title(toplevel, clamped_title.characters());
     xdg_toplevel_set_app_id(toplevel, application_id().characters());
     // A child window (a dialog) sets its transient parent, so the compositor can
     // keep it above its parent and track the modal chain.
@@ -2834,9 +2857,10 @@ void WaylandClient::destroy_window(i32 window_id)
 void WaylandClient::set_title(i32 window_id, ByteString const& title)
 {
     if (auto* window_surface = find(window_id)) {
-        window_surface->title = title;
+        auto clamped = clamp_wayland_string(title);
+        window_surface->title = clamped;
         if (window_surface->toplevel)
-            xdg_toplevel_set_title(window_surface->toplevel, title.characters());
+            xdg_toplevel_set_title(window_surface->toplevel, clamped.characters());
         wl_display_flush(m_display);
     }
 }

@@ -1,0 +1,50 @@
+LibGUI: optional quit backtraces for stress runs
+
+LADYBIRD_SDE_DEBUG_QUIT=1 makes Application::quit and the last-window quit
+path print a backtrace. The frontend stress/fuzz harness uses it to tell an
+application-level quit apart from a Wayland connection reset.
+
+--- a/Userland/Libraries/LibGUI/Application.cpp
++++ b/Userland/Libraries/LibGUI/Application.cpp
+@@ -5,6 +5,9 @@
+  */
+ 
+ #include <AK/NeverDestroyed.h>
++#include <execinfo.h>
++#include <stdlib.h>
++#include <unistd.h>
+ #include <LibConfig/Client.h>
+ #include <LibCore/EventLoop.h>
+ #include <LibGUI/Action.h>
+@@ -131,8 +134,19 @@
+     return m_event_loop->exec();
+ }
+ 
++static void dump_quit_stack(char const* reason)
++{
++    if (!getenv("LADYBIRD_SDE_DEBUG_QUIT"))
++        return;
++    warnln("LibGUI: {} - quitting the application", reason);
++    void* frames[32];
++    int count = backtrace(frames, 32);
++    backtrace_symbols_fd(frames, count, STDERR_FILENO);
++}
++
+ void Application::quit(int exit_code)
+ {
++    dump_quit_stack("Application::quit");
+     m_event_loop->quit(exit_code);
+ }
+ 
+@@ -209,8 +223,10 @@
+ 
+ void Application::did_delete_last_window(Badge<Window>)
+ {
+-    if (m_quit_when_last_window_deleted)
++    if (m_quit_when_last_window_deleted) {
++        dump_quit_stack("did_delete_last_window");
+         m_event_loop->quit(0);
++    }
+ }
+ 
+ void Application::set_system_palette(Core::AnonymousBuffer& buffer)
