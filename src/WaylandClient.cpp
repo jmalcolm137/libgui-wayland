@@ -1053,25 +1053,53 @@ void WaylandClient::dispatch()
 {
     if (!m_display)
         return;
-    if (wl_display_dispatch(m_display) < 0) {
-        // The compositor is gone (or a protocol error occurred). Reading a dead
-        // connection again would spin the notifier on an always-readable fd, so
-        // stop and ask the application to exit for a clean teardown.
-        auto error = wl_display_get_error(m_display);
-        wl_interface const* interface = nullptr;
-        uint32_t id = 0;
-        auto code = wl_display_get_protocol_error(m_display, &interface, &id);
-        warnln("LibWM/Wayland: dispatch failed (errno {}, protocol error {} on {}#{})",
-            error, code, interface ? interface->name : "none", id);
-        if (m_notifier)
-            m_notifier->set_enabled(false);
-        Core::EventLoop::current().quit(0);
+    if (wl_display_dispatch(m_display) >= 0) {
+        // Requests queued while handling events (notably xdg_wm_base.pong) must be
+        // flushed now; waiting for the next event would make the compositor think we
+        // are unresponsive.
+        wl_display_flush(m_display);
         return;
     }
-    // Requests queued while handling events (notably xdg_wm_base.pong) must be
-    // flushed now; waiting for the next event would make the compositor think we
-    // are unresponsive.
-    wl_display_flush(m_display);
+
+    // The compositor is gone or rejected a request. wl_display_dispatch flushes
+    // pending requests before it reads, so a compositor that closed the
+    // connection shows up as EPIPE on the write while the protocol error it
+    // queued first (an xdg-shell size error, say) is still unread. Read it
+    // without flushing so the log names what was rejected instead of only EPIPE.
+    auto error = wl_display_get_error(m_display);
+    wl_interface const* interface = nullptr;
+    uint32_t id = 0;
+    auto code = wl_display_get_protocol_error(m_display, &interface, &id);
+
+    if ((error == EPIPE || error == ECONNRESET) && wl_display_get_fd(m_display) >= 0) {
+        struct pollfd pfd {
+            wl_display_get_fd(m_display), POLLIN, 0
+        };
+        if (poll(&pfd, 1, 0) > 0 && wl_display_prepare_read(m_display) == 0) {
+            if (wl_display_read_events(m_display) == 0)
+                (void)wl_display_dispatch_pending(m_display);
+            else
+                wl_display_cancel_read(m_display);
+            error = wl_display_get_error(m_display);
+            interface = nullptr;
+            id = 0;
+            code = wl_display_get_protocol_error(m_display, &interface, &id);
+        }
+    }
+
+    auto reason = code != 0
+        ? ByteString::formatted("protocol error {} on {}#{}", code, interface ? interface->name : "object", id)
+        : ByteString::formatted("the compositor closed the connection (errno {})", error);
+    warnln("LibWM/Wayland: dispatch failed: {}", reason);
+
+    // Reading a dead connection again would spin the notifier on an
+    // always-readable fd, so stop it and ask the application to leave.
+    if (m_notifier)
+        m_notifier->set_enabled(false);
+    if (m_connection_lost)
+        m_connection_lost(reason);
+    else
+        Core::EventLoop::current().quit(0);
 }
 
 void WaylandClient::add_output(wl_output* output)

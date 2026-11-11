@@ -123,6 +123,13 @@ public:
 
     void set_input_callbacks(InputCallbacks callbacks) { m_input = move(callbacks); }
 
+    // The compositor connection failed (closed socket, protocol error, or a
+    // vanished compositor). Without a handler the current event loop is asked to
+    // exit, which is right for a single-window applet. An application that owns
+    // durable state (the browser session) installs a handler to record why it
+    // ended and save before quitting.
+    void set_connection_lost_callback(Function<void(ByteString const& reason)> callback) { m_connection_lost = move(callback); }
+
     // --- Clipboard (native Wayland data device) ---
     // Called when the compositor's selection changes; the mime type is a
     // preferred Serenity-side type (e.g. "text/plain").
@@ -527,6 +534,7 @@ private:
     RefPtr<Gfx::Bitmap> m_host_wallpaper;
 
     InputCallbacks m_input;
+    Function<void(ByteString const&)> m_connection_lost;
     i32 m_pointer_window { -1 };
     wl_surface* m_pointer_surface { nullptr };
     i32 m_focused_window { -1 };

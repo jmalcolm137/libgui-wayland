@@ -1,0 +1,71 @@
+LibIPC: let an application handle a lost server connection
+
+ConnectionToServer::die() called exit(0) with no message. For the browser that
+looks exactly like a crash: no exit line, no session save, and a window that
+simply vanishes when the window-manager portal connection drops.
+
+Give ConnectionBase a process-wide handler. ConnectionToServer reports which
+peer was lost and calls the handler instead of exit(0) when one is installed;
+otherwise the old exit(0) behaviour (and a log line) stays. The browser
+installs a handler that records the reason and saves the session.
+
+--- a/Userland/Libraries/LibIPC/Connection.h
++++ b/Userland/Libraries/LibIPC/Connection.h
+@@ -51,6 +51,14 @@
+     void shutdown();
+     virtual void die() { }
+ 
++    // A server connection died. ConnectionToServer's default is to exit(0),
++    // which leaves no trace and skips any application state save. An application
++    // that owns durable state installs this handler to record why it ended and
++    // save before quitting. It is called instead of exit(0); the handler must
++    // end the application itself.
++    using ConnectionLostHandler = Function<void(StringView connection_name)>;
++    static ConnectionLostHandler& connection_lost_handler();
++
+     Core::LocalSocket& socket() { return *m_socket; }
+ 
+ protected:
+--- a/Userland/Libraries/LibIPC/Connection.cpp
++++ b/Userland/Libraries/LibIPC/Connection.cpp
+@@ -43,6 +43,12 @@
+ 
+ ConnectionBase::~ConnectionBase() = default;
+ 
++ConnectionBase::ConnectionLostHandler& ConnectionBase::connection_lost_handler()
++{
++    static ConnectionLostHandler s_handler;
++    return s_handler;
++}
++
+ bool ConnectionBase::is_open() const
+ {
+     return m_socket->is_open();
+--- a/Userland/Libraries/LibIPC/ConnectionToServer.h
++++ b/Userland/Libraries/LibIPC/ConnectionToServer.h
+@@ -6,6 +6,7 @@
+ 
+ #pragma once
+ 
++#include <AK/Format.h>
+ #include <LibCore/SessionManagement.h>
+ #include <LibIPC/Connection.h>
+ 
+@@ -42,8 +43,17 @@
+     virtual void die() override
+     {
+         // Override this function if you don't want your app to exit if it loses the connection.
++        warnln("IPC: lost the connection to {}; exiting", connection_name());
++        if (auto& handler = this->connection_lost_handler(); handler) {
++            handler(connection_name());
++            return;
++        }
+         exit(0);
+     }
++
++    // Names the peer in the connection-lost message (and hands it to the
++    // application's handler). Subclasses may override for a clearer log.
++    virtual StringView connection_name() const { return "a server"sv; }
+ };
+ 
+ }
