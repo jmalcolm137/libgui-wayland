@@ -1,0 +1,41 @@
+LibGUI: do not re-enter clipboard change handlers
+
+Fetching the clipboard from a change callback can dispatch another clipboard
+event synchronously. That re-entered on_change (and every ClipboardClient) from
+inside AK::Function, tripping may_defer || !called_from_inside_function. Drop
+nested notifications; the outer call already sees the freshest contents.
+
+--- a/Userland/Libraries/LibGUI/Clipboard.cpp
++++ b/Userland/Libraries/LibGUI/Clipboard.cpp
+@@ -228,10 +228,21 @@
+ 
+ void Clipboard::clipboard_data_changed(Badge<ConnectionToClipboardServer>, ByteString const& mime_type)
+ {
++    // A callback commonly fetches the new contents synchronously, which can
++    // dispatch another clipboard event from inside this function. AK::Function
++    // refuses to re-enter the same callback, so a nested notification must not
++    // reach on_change or the clients; the outer call is already handling the
++    // freshest state.
++    if (m_handling_data_change)
++        return;
++    m_handling_data_change = true;
++
+     if (on_change)
+         on_change(mime_type);
+     for (auto* client : m_clients)
+         client->clipboard_content_did_change(mime_type);
++
++    m_handling_data_change = false;
+ }
+ 
+ Clipboard::ClipboardClient::ClipboardClient()
+--- a/Userland/Libraries/LibGUI/Clipboard.h
++++ b/Userland/Libraries/LibGUI/Clipboard.h
+@@ -59,6 +59,7 @@
+     Clipboard() = default;
+ 
+     HashTable<ClipboardClient*> m_clients;
++    bool m_handling_data_change { false };
+ };
+ 
+ }
