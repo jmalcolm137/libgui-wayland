@@ -1,0 +1,293 @@
+diff --git a/Userland/Libraries/LibVT/Terminal.cpp b/Userland/Libraries/LibVT/Terminal.cpp
+--- a/Userland/Libraries/LibVT/Terminal.cpp
++++ b/Userland/Libraries/LibVT/Terminal.cpp
+@@ -268,142 +268,170 @@
+         m_current_state.attribute.reset_style();
+         return;
+     }
+-    auto parse_color = [&]() -> Optional<Color> {
+-        if (params.size() < 2) {
++
++    // Parse the color arguments following 38 (foreground), 48 (background) or
++    // 58 (underline). `index` points at the color introducer and is advanced
++    // to the last consumed argument so the caller's loop can continue with
++    // any parameters that follow in the same SGR sequence.
++    auto parse_extended_color = [&](size_t& index) -> Optional<Color> {
++        if (index + 1 >= params.size()) {
+             dbgln("Color code has no type");
+             return {};
+         }
+-        u32 rgb = 0;
+-        switch (params[1]) {
+-        case 5: // 8-bit
+-            if (params.size() < 3) {
++
++        auto type = params[index + 1];
++        if (type == 5) { // 8-bit
++            if (index + 2 >= params.size()) {
+                 dbgln("8-bit color code has too few parameters");
+                 return {};
+             }
+-            if (params[2] > 255) {
++            auto value = params[index + 2];
++            index += 2;
++            if (value > 255) {
+                 dbgln("8-bit color code has out-of-bounds value");
+                 return {};
+             }
+-            return Color::indexed(params[2]);
+-        case 2: // 24-bit
+-            if (params.size() < 5) {
++            return Color::indexed(static_cast<u8>(value));
++        }
++
++        if (type == 2) { // 24-bit
++            if (index + 4 >= params.size()) {
+                 dbgln("24-bit color code has too few parameters");
+                 return {};
+             }
+-            for (size_t i = 0; i < 3; ++i) {
+-                rgb <<= 8;
+-                rgb |= params[i + 2];
++            auto r = params[index + 2];
++            auto g = params[index + 3];
++            auto b = params[index + 4];
++            index += 4;
++            if (r > 255 || g > 255 || b > 255) {
++                dbgln("24-bit color code has out-of-bounds value");
++                return {};
+             }
++            u32 rgb = (r << 16) | (g << 8) | b;
+             return Color::rgb(rgb);
+-        default:
+-            dbgln("Unknown color type {}", params[1]);
+-            return {};
+         }
++
++        dbgln("Unknown color type {}", type);
++        return {};
+     };
+ 
+-    if (params[0] == 38) {
+-        m_current_state.attribute.foreground_color = parse_color().value_or(m_current_state.attribute.foreground_color);
+-    } else if (params[0] == 48) {
+-        m_current_state.attribute.background_color = parse_color().value_or(m_current_state.attribute.background_color);
+-    } else {
+-        // A single escape sequence may set multiple parameters.
+-        for (auto param : params) {
+-            switch (param) {
+-            case 0:
+-                // Reset
+-                m_current_state.attribute.reset_style();
+-                break;
+-            case 1:
+-                m_current_state.attribute.flags |= Attribute::Flags::Bold;
+-                break;
+-            case 3:
+-                m_current_state.attribute.flags |= Attribute::Flags::Italic;
+-                break;
+-            case 4:
+-                m_current_state.attribute.flags |= Attribute::Flags::Underline;
+-                break;
+-            case 5:
+-                m_current_state.attribute.flags |= Attribute::Flags::Blink;
+-                break;
+-            case 7:
+-                m_current_state.attribute.flags |= Attribute::Flags::Negative;
+-                break;
+-            case 8:
+-                m_current_state.attribute.flags |= Attribute::Flags::Concealed;
+-                break;
+-            case 22:
+-                m_current_state.attribute.flags &= ~Attribute::Flags::Bold;
+-                break;
+-            case 23:
+-                m_current_state.attribute.flags &= ~Attribute::Flags::Italic;
+-                break;
+-            case 24:
+-                m_current_state.attribute.flags &= ~Attribute::Flags::Underline;
+-                break;
+-            case 25:
+-                m_current_state.attribute.flags &= ~Attribute::Flags::Blink;
+-                break;
+-            case 27:
+-                m_current_state.attribute.flags &= ~Attribute::Flags::Negative;
+-                break;
+-            case 28:
+-                m_current_state.attribute.flags &= ~Attribute::Flags::Concealed;
+-                break;
+-            case 30:
+-            case 31:
+-            case 32:
+-            case 33:
+-            case 34:
+-            case 35:
+-            case 36:
+-            case 37:
+-                // Foreground color
+-                m_current_state.attribute.foreground_color = Color::named(static_cast<Color::ANSIColor>(param - 30));
+-                break;
+-            case 39:
+-                // reset foreground
+-                m_current_state.attribute.foreground_color = Attribute::default_foreground_color;
+-                break;
+-            case 40:
+-            case 41:
+-            case 42:
+-            case 43:
+-            case 44:
+-            case 45:
+-            case 46:
+-            case 47:
+-                // Background color
+-                m_current_state.attribute.background_color = Color::named(static_cast<Color::ANSIColor>(param - 40));
+-                break;
+-            case 49:
+-                // reset background
+-                m_current_state.attribute.background_color = Attribute::default_background_color;
+-                break;
+-            case 90:
+-            case 91:
+-            case 92:
+-            case 93:
+-            case 94:
+-            case 95:
+-            case 96:
+-            case 97:
+-                // Bright foreground color
+-                m_current_state.attribute.foreground_color = Color::named(static_cast<Color::ANSIColor>(8 + param - 90));
+-                break;
+-            case 100:
+-            case 101:
+-            case 102:
+-            case 103:
+-            case 104:
+-            case 105:
+-            case 106:
+-            case 107:
+-                // Bright background color
+-                m_current_state.attribute.background_color = Color::named(static_cast<Color::ANSIColor>(8 + param - 100));
+-                break;
+-            default:
+-                dbgln("FIXME: SGR: p: {}", param);
+-            }
++    // A single escape sequence may set multiple parameters, and modern
++    // terminals (and libraries such as crossterm) commonly combine the
++    // foreground and background into one sequence:
++    //   ESC[38;2;r;g;b;48;2;r;g;bm
++    // so colors must be handled inside the loop rather than only when they
++    // are the first parameter.
++    for (size_t i = 0; i < params.size(); ++i) {
++        auto param = params[i];
++        switch (param) {
++        case 0:
++            // Reset
++            m_current_state.attribute.reset_style();
++            break;
++        case 1:
++            m_current_state.attribute.flags |= Attribute::Flags::Bold;
++            break;
++        case 3:
++            m_current_state.attribute.flags |= Attribute::Flags::Italic;
++            break;
++        case 4:
++            m_current_state.attribute.flags |= Attribute::Flags::Underline;
++            break;
++        case 5:
++            m_current_state.attribute.flags |= Attribute::Flags::Blink;
++            break;
++        case 7:
++            m_current_state.attribute.flags |= Attribute::Flags::Negative;
++            break;
++        case 8:
++            m_current_state.attribute.flags |= Attribute::Flags::Concealed;
++            break;
++        case 22:
++            m_current_state.attribute.flags &= ~Attribute::Flags::Bold;
++            break;
++        case 23:
++            m_current_state.attribute.flags &= ~Attribute::Flags::Italic;
++            break;
++        case 24:
++            m_current_state.attribute.flags &= ~Attribute::Flags::Underline;
++            break;
++        case 25:
++            m_current_state.attribute.flags &= ~Attribute::Flags::Blink;
++            break;
++        case 27:
++            m_current_state.attribute.flags &= ~Attribute::Flags::Negative;
++            break;
++        case 28:
++            m_current_state.attribute.flags &= ~Attribute::Flags::Concealed;
++            break;
++        case 30:
++        case 31:
++        case 32:
++        case 33:
++        case 34:
++        case 35:
++        case 36:
++        case 37:
++            // Foreground color
++            m_current_state.attribute.foreground_color = Color::named(static_cast<Color::ANSIColor>(param - 30));
++            break;
++        case 38:
++            if (auto color = parse_extended_color(i); color.has_value())
++                m_current_state.attribute.foreground_color = *color;
++            break;
++        case 39:
++            // reset foreground
++            m_current_state.attribute.foreground_color = Attribute::default_foreground_color;
++            break;
++        case 40:
++        case 41:
++        case 42:
++        case 43:
++        case 44:
++        case 45:
++        case 46:
++        case 47:
++            // Background color
++            m_current_state.attribute.background_color = Color::named(static_cast<Color::ANSIColor>(param - 40));
++            break;
++        case 48:
++            if (auto color = parse_extended_color(i); color.has_value())
++                m_current_state.attribute.background_color = *color;
++            break;
++        case 49:
++            // reset background
++            m_current_state.attribute.background_color = Attribute::default_background_color;
++            break;
++        case 58:
++            // Underline color is not represented by Attribute yet; consume
++            // its arguments so they are not interpreted as standalone SGR
++            // parameters.
++            (void)parse_extended_color(i);
++            break;
++        case 90:
++        case 91:
++        case 92:
++        case 93:
++        case 94:
++        case 95:
++        case 96:
++        case 97:
++            // Bright foreground color
++            m_current_state.attribute.foreground_color = Color::named(static_cast<Color::ANSIColor>(8 + param - 90));
++            break;
++        case 100:
++        case 101:
++        case 102:
++        case 103:
++        case 104:
++        case 105:
++        case 106:
++        case 107:
++            // Bright background color
++            m_current_state.attribute.background_color = Color::named(static_cast<Color::ANSIColor>(8 + param - 100));
++            break;
++        default:
++            dbgln("FIXME: SGR: p: {}", param);
+         }
+     }
+ }
