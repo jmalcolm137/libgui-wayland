@@ -69,14 +69,14 @@ static zwp_text_input_v3_listener const s_text_input_listener = {
 void WaylandClient::on_text_input_enter()
 {
     MutexLocker locker(m_mutex);
-    if (!m_text_input_enabled || !m_text_input)
+    if (!m_text_input.enabled || !m_text_input.device)
         return;
     // A field enabled before the input method connected is reactivated when the compositor reports the new focus.
-    zwp_text_input_v3_enable(m_text_input);
-    zwp_text_input_v3_set_content_type(m_text_input, ZWP_TEXT_INPUT_V3_CONTENT_HINT_NONE, ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_NORMAL);
-    if (!m_text_input_cursor_rect.is_empty())
-        zwp_text_input_v3_set_cursor_rectangle(m_text_input, m_text_input_cursor_rect.x(), m_text_input_cursor_rect.y(), m_text_input_cursor_rect.width(), m_text_input_cursor_rect.height());
-    zwp_text_input_v3_commit(m_text_input);
+    zwp_text_input_v3_enable(m_text_input.device);
+    zwp_text_input_v3_set_content_type(m_text_input.device, ZWP_TEXT_INPUT_V3_CONTENT_HINT_NONE, ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_NORMAL);
+    if (!m_text_input.cursor_rect.is_empty())
+        zwp_text_input_v3_set_cursor_rectangle(m_text_input.device, m_text_input.cursor_rect.x(), m_text_input.cursor_rect.y(), m_text_input.cursor_rect.width(), m_text_input.cursor_rect.height());
+    zwp_text_input_v3_commit(m_text_input.device);
     if (m_display)
         wl_display_flush(m_display);
 }
@@ -84,22 +84,22 @@ void WaylandClient::on_text_input_enter()
 void WaylandClient::on_text_input_commit(String text)
 {
     MutexLocker locker(m_mutex);
-    if (m_text_input_commit)
-        m_text_input_commit(text);
+    if (m_text_input.on_commit)
+        m_text_input.on_commit(text);
 }
 
 void WaylandClient::on_text_input_preedit(String text, i32 cursor_begin, i32 cursor_end)
 {
     MutexLocker locker(m_mutex);
-    if (m_text_input_preedit)
-        m_text_input_preedit(text, cursor_begin, cursor_end);
+    if (m_text_input.on_preedit)
+        m_text_input.on_preedit(text, cursor_begin, cursor_end);
 }
 
 void WaylandClient::on_text_input_delete_surrounding(i32 before_length, i32 after_length)
 {
     MutexLocker locker(m_mutex);
-    if (m_text_input_delete_surrounding)
-        m_text_input_delete_surrounding(before_length, after_length);
+    if (m_text_input.on_delete_surrounding)
+        m_text_input.on_delete_surrounding(before_length, after_length);
 }
 
 // --- wl_seat / wl_pointer / wl_keyboard --------------------------------------
@@ -389,7 +389,7 @@ static wl_keyboard_listener const s_keyboard_listener = {
 void WaylandClient::add_seat(wl_seat* seat)
 {
     MutexLocker locker(m_mutex);
-    m_seat = seat;
+    m_input_state.seat = seat;
     wl_seat_add_listener(seat, &s_seat_listener, this);
     maybe_create_data_device();
     ensure_text_input();
@@ -398,46 +398,46 @@ void WaylandClient::add_seat(wl_seat* seat)
 void WaylandClient::set_text_input_manager(zwp_text_input_manager_v3* manager)
 {
     MutexLocker locker(m_mutex);
-    m_text_input_manager = manager;
+    m_text_input.manager = manager;
     ensure_text_input();
 }
 
 void WaylandClient::ensure_text_input()
 {
     MutexLocker locker(m_mutex);
-    if (m_text_input || !m_text_input_manager || !m_seat)
+    if (m_text_input.device || !m_text_input.manager || !m_input_state.seat)
         return;
-    m_text_input = zwp_text_input_manager_v3_get_text_input(m_text_input_manager, m_seat);
-    if (m_text_input)
-        zwp_text_input_v3_add_listener(m_text_input, &s_text_input_listener, this);
+    m_text_input.device = zwp_text_input_manager_v3_get_text_input(m_text_input.manager, m_input_state.seat);
+    if (m_text_input.device)
+        zwp_text_input_v3_add_listener(m_text_input.device, &s_text_input_listener, this);
 }
 
 void WaylandClient::set_text_input_callbacks(TextInputCommit commit, TextInputPreedit preedit, TextInputDeleteSurrounding delete_surrounding)
 {
     MutexLocker locker(m_mutex);
-    m_text_input_commit = move(commit);
-    m_text_input_preedit = move(preedit);
-    m_text_input_delete_surrounding = move(delete_surrounding);
+    m_text_input.on_commit = move(commit);
+    m_text_input.on_preedit = move(preedit);
+    m_text_input.on_delete_surrounding = move(delete_surrounding);
 }
 
 void WaylandClient::set_text_input_enabled(bool enabled)
 {
     MutexLocker locker(m_mutex);
-    if (m_text_input_enabled == enabled)
+    if (m_text_input.enabled == enabled)
         return;
-    m_text_input_enabled = enabled;
-    if (!m_text_input)
+    m_text_input.enabled = enabled;
+    if (!m_text_input.device)
         return;
 
     if (enabled) {
-        zwp_text_input_v3_enable(m_text_input);
-        zwp_text_input_v3_set_content_type(m_text_input, ZWP_TEXT_INPUT_V3_CONTENT_HINT_NONE, ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_NORMAL);
-        if (!m_text_input_cursor_rect.is_empty())
-            zwp_text_input_v3_set_cursor_rectangle(m_text_input, m_text_input_cursor_rect.x(), m_text_input_cursor_rect.y(), m_text_input_cursor_rect.width(), m_text_input_cursor_rect.height());
+        zwp_text_input_v3_enable(m_text_input.device);
+        zwp_text_input_v3_set_content_type(m_text_input.device, ZWP_TEXT_INPUT_V3_CONTENT_HINT_NONE, ZWP_TEXT_INPUT_V3_CONTENT_PURPOSE_NORMAL);
+        if (!m_text_input.cursor_rect.is_empty())
+            zwp_text_input_v3_set_cursor_rectangle(m_text_input.device, m_text_input.cursor_rect.x(), m_text_input.cursor_rect.y(), m_text_input.cursor_rect.width(), m_text_input.cursor_rect.height());
     } else {
-        zwp_text_input_v3_disable(m_text_input);
+        zwp_text_input_v3_disable(m_text_input.device);
     }
-    zwp_text_input_v3_commit(m_text_input);
+    zwp_text_input_v3_commit(m_text_input.device);
     if (m_display)
         wl_display_flush(m_display);
 }
@@ -445,13 +445,13 @@ void WaylandClient::set_text_input_enabled(bool enabled)
 void WaylandClient::set_text_input_cursor_rect(Gfx::IntRect const& rect)
 {
     MutexLocker locker(m_mutex);
-    if (m_text_input_cursor_rect == rect)
+    if (m_text_input.cursor_rect == rect)
         return;
-    m_text_input_cursor_rect = rect;
-    if (!m_text_input || !m_text_input_enabled)
+    m_text_input.cursor_rect = rect;
+    if (!m_text_input.device || !m_text_input.enabled)
         return;
-    zwp_text_input_v3_set_cursor_rectangle(m_text_input, rect.x(), rect.y(), rect.width(), rect.height());
-    zwp_text_input_v3_commit(m_text_input);
+    zwp_text_input_v3_set_cursor_rectangle(m_text_input.device, rect.x(), rect.y(), rect.width(), rect.height());
+    zwp_text_input_v3_commit(m_text_input.device);
     if (m_display)
         wl_display_flush(m_display);
 }
@@ -462,107 +462,106 @@ void WaylandClient::on_seat_capabilities(u32 capabilities)
     // A capability that goes away takes the device object with it: the
     // compositor makes it inert, and it never delivers another event. Drop it, so
     // that the capability coming back (a keyboard plugged in again) gets a fresh
-    // one, with its keymap and enter. Keeping the dead one meant a client never
-    // received a key again after the last keyboard was unplugged.
-    if (!(capabilities & WL_SEAT_CAPABILITY_POINTER) && m_pointer) {
-        wl_pointer_destroy(m_pointer);
-        m_pointer = nullptr;
-        m_pointer_popup = -1;
-        m_pointer_window = -1;
+    // one, with its keymap and enter.
+    if (!(capabilities & WL_SEAT_CAPABILITY_POINTER) && m_input_state.pointer) {
+        wl_pointer_destroy(m_input_state.pointer);
+        m_input_state.pointer = nullptr;
+        m_input_state.pointer_popup = -1;
+        m_input_state.pointer_window = -1;
     }
-    if (!(capabilities & WL_SEAT_CAPABILITY_KEYBOARD) && m_keyboard) {
-        wl_keyboard_destroy(m_keyboard);
-        m_keyboard = nullptr;
-        m_focused_window = -1;
+    if (!(capabilities & WL_SEAT_CAPABILITY_KEYBOARD) && m_input_state.keyboard) {
+        wl_keyboard_destroy(m_input_state.keyboard);
+        m_input_state.keyboard = nullptr;
+        m_input_state.focused_window = -1;
     }
 
-    if ((capabilities & WL_SEAT_CAPABILITY_POINTER) && !m_pointer) {
-        m_pointer = wl_seat_get_pointer(m_seat);
-        wl_pointer_add_listener(m_pointer, &s_pointer_listener, this);
+    if ((capabilities & WL_SEAT_CAPABILITY_POINTER) && !m_input_state.pointer) {
+        m_input_state.pointer = wl_seat_get_pointer(m_input_state.seat);
+        wl_pointer_add_listener(m_input_state.pointer, &s_pointer_listener, this);
     }
-    if ((capabilities & WL_SEAT_CAPABILITY_KEYBOARD) && !m_keyboard) {
-        m_keyboard = wl_seat_get_keyboard(m_seat);
-        wl_keyboard_add_listener(m_keyboard, &s_keyboard_listener, this);
+    if ((capabilities & WL_SEAT_CAPABILITY_KEYBOARD) && !m_input_state.keyboard) {
+        m_input_state.keyboard = wl_seat_get_keyboard(m_input_state.seat);
+        wl_keyboard_add_listener(m_input_state.keyboard, &s_keyboard_listener, this);
     }
     dbgln("LibWM/Wayland: seat capabilities 0x{:x} (pointer={}, keyboard={})", capabilities,
-        m_pointer != nullptr, m_keyboard != nullptr);
+        m_input_state.pointer != nullptr, m_input_state.keyboard != nullptr);
 }
 
 void WaylandClient::on_pointer_enter(wl_surface* surface, Gfx::IntPoint position)
 {
     MutexLocker locker(m_mutex);
-    m_pointer_popup = popup_id_for_surface(surface);
-    m_pointer_window = m_pointer_popup >= 0 ? -1 : window_id_for_surface(surface);
-    m_pointer_surface = surface;
-    m_pointer_position = position;
+    m_input_state.pointer_popup = popup_id_for_surface(surface);
+    m_input_state.pointer_window = m_input_state.pointer_popup >= 0 ? -1 : window_id_for_surface(surface);
+    m_input_state.pointer_surface = surface;
+    m_input_state.pointer_position = position;
     dbgln("LibWM/Wayland: pointer entered {} {} at {},{}",
-        m_pointer_popup >= 0 ? "popup" : "window",
-        m_pointer_popup >= 0 ? m_pointer_popup : m_pointer_window,
+        m_input_state.pointer_popup >= 0 ? "popup" : "window",
+        m_input_state.pointer_popup >= 0 ? m_input_state.pointer_popup : m_input_state.pointer_window,
         position.x(), position.y());
 
-    if (m_pointer_popup >= 0) {
+    if (m_input_state.pointer_popup >= 0) {
         if (m_input.popup_motion)
-            m_input.popup_motion(m_pointer_popup, position);
+            m_input.popup_motion(m_input_state.pointer_popup, position);
         return;
     }
-    if (m_pointer_window >= 0 && m_input.window_entered)
-        m_input.window_entered(m_pointer_window);
+    if (m_input_state.pointer_window >= 0 && m_input.window_entered)
+        m_input.window_entered(m_input_state.pointer_window);
 }
 
 void WaylandClient::on_pointer_leave()
 {
     MutexLocker locker(m_mutex);
-    if (m_pointer_popup >= 0) {
-        m_pointer_popup = -1;
-        m_pointer_window = -1;
+    if (m_input_state.pointer_popup >= 0) {
+        m_input_state.pointer_popup = -1;
+        m_input_state.pointer_window = -1;
         return;
     }
-    if (m_pointer_window >= 0 && m_input.menubar_left)
-        m_input.menubar_left(m_pointer_window);
-    if (m_pointer_window >= 0 && m_input.window_left)
-        m_input.window_left(m_pointer_window);
-    m_pointer_window = -1;
-    m_pointer_surface = nullptr;
-    m_axis_accum_x = 0;
-    m_axis_accum_y = 0;
+    if (m_input_state.pointer_window >= 0 && m_input.menubar_left)
+        m_input.menubar_left(m_input_state.pointer_window);
+    if (m_input_state.pointer_window >= 0 && m_input.window_left)
+        m_input.window_left(m_input_state.pointer_window);
+    m_input_state.pointer_window = -1;
+    m_input_state.pointer_surface = nullptr;
+    m_input_state.axis_accum_x = 0;
+    m_input_state.axis_accum_y = 0;
 }
 
 void WaylandClient::on_pointer_motion(Gfx::IntPoint position)
 {
     MutexLocker locker(m_mutex);
-    m_pointer_position = position;
+    m_input_state.pointer_position = position;
 
-    if (m_pointer_popup >= 0) {
+    if (m_input_state.pointer_popup >= 0) {
         if (m_input.popup_motion)
-            m_input.popup_motion(m_pointer_popup, position);
+            m_input.popup_motion(m_input_state.pointer_popup, position);
         return;
     }
-    if (m_pointer_window < 0)
+    if (m_input_state.pointer_window < 0)
         return;
 
-    auto* window_surface = find(m_pointer_window);
+    auto* window_surface = find(m_input_state.pointer_window);
     if (window_surface && window_surface->menubar_surface) {
-        if (m_pointer_surface == window_surface->menubar_surface) {
+        if (m_input_state.pointer_surface == window_surface->menubar_surface) {
             if (m_input.menubar_motion)
-                m_input.menubar_motion(m_pointer_window, position);
+                m_input.menubar_motion(m_input_state.pointer_window, position);
             return;
         }
         if (m_input.menubar_left)
-            m_input.menubar_left(m_pointer_window);
+            m_input.menubar_left(m_input_state.pointer_window);
         if (m_input.mouse_move)
-            m_input.mouse_move(m_pointer_window, position, m_pointer_buttons, current_modifiers());
+            m_input.mouse_move(m_input_state.pointer_window, position, m_input_state.pointer_buttons, current_modifiers());
         return;
     }
     int inset = window_surface ? window_surface->inset : 0;
     if (inset > 0 && position.y() < inset) {
         if (m_input.menubar_motion)
-            m_input.menubar_motion(m_pointer_window, position);
+            m_input.menubar_motion(m_input_state.pointer_window, position);
         return;
     }
     if (m_input.menubar_left)
-        m_input.menubar_left(m_pointer_window);
+        m_input.menubar_left(m_input_state.pointer_window);
     if (m_input.mouse_move)
-        m_input.mouse_move(m_pointer_window, position.translated(0, -inset), m_pointer_buttons, current_modifiers());
+        m_input.mouse_move(m_input_state.pointer_window, position.translated(0, -inset), m_input_state.pointer_buttons, current_modifiers());
 }
 
 void WaylandClient::on_pointer_button(u32 button, bool pressed)
@@ -589,73 +588,73 @@ void WaylandClient::on_pointer_button(u32 button, bool pressed)
         return;
     }
 
-    if (m_pointer_popup >= 0) {
+    if (m_input_state.pointer_popup >= 0) {
         if (m_input.popup_button)
-            m_input.popup_button(m_pointer_popup, m_pointer_position, pressed);
+            m_input.popup_button(m_input_state.pointer_popup, m_input_state.pointer_position, pressed);
         return;
     }
-    if (m_pointer_window < 0)
+    if (m_input_state.pointer_window < 0)
         return;
 
-    auto* window_surface = find(m_pointer_window);
+    auto* window_surface = find(m_input_state.pointer_window);
     if (window_surface && window_surface->menubar_surface) {
-        if (m_pointer_surface == window_surface->menubar_surface) {
+        if (m_input_state.pointer_surface == window_surface->menubar_surface) {
             if (pressed && m_input.menubar_press)
-                m_input.menubar_press(m_pointer_window, m_pointer_position);
+                m_input.menubar_press(m_input_state.pointer_window, m_input_state.pointer_position);
             return;
         }
-        auto position = m_pointer_position;
+        auto position = m_input_state.pointer_position;
         if (pressed) {
-            m_pointer_buttons |= serenity_button;
+            m_input_state.pointer_buttons |= serenity_button;
         } else {
-            m_pointer_buttons &= ~serenity_button;
+            m_input_state.pointer_buttons &= ~serenity_button;
         }
         if (pressed) {
             if (m_input.mouse_down)
-                m_input.mouse_down(m_pointer_window, position, serenity_button, m_pointer_buttons, current_modifiers());
+                m_input.mouse_down(m_input_state.pointer_window, position, serenity_button, m_input_state.pointer_buttons, current_modifiers());
         } else {
             if (m_input.mouse_up)
-                m_input.mouse_up(m_pointer_window, position, serenity_button, m_pointer_buttons, current_modifiers());
+                m_input.mouse_up(m_input_state.pointer_window, position, serenity_button, m_input_state.pointer_buttons, current_modifiers());
         }
         return;
     }
     int inset = window_surface ? window_surface->inset : 0;
-    if (inset > 0 && m_pointer_position.y() < inset) {
+    if (inset > 0 && m_input_state.pointer_position.y() < inset) {
         if (pressed && m_input.menubar_press)
-            m_input.menubar_press(m_pointer_window, m_pointer_position);
+            m_input.menubar_press(m_input_state.pointer_window, m_input_state.pointer_position);
         return;
     }
 
-    auto position = m_pointer_position.translated(0, -inset);
+    auto position = m_input_state.pointer_position.translated(0, -inset);
     if (pressed) {
-        m_pointer_buttons |= serenity_button;
-        dbgln("LibWM/Wayland: mouse down window {} at {},{} button={}", m_pointer_window, position.x(), position.y(), serenity_button);
+        m_input_state.pointer_buttons |= serenity_button;
+        dbgln("LibWM/Wayland: mouse down window {} at {},{} button={}", m_input_state.pointer_window, position.x(), position.y(), serenity_button);
         if (m_input.mouse_down)
-            m_input.mouse_down(m_pointer_window, position, serenity_button, m_pointer_buttons, current_modifiers());
+            m_input.mouse_down(m_input_state.pointer_window, position, serenity_button, m_input_state.pointer_buttons, current_modifiers());
     } else {
-        m_pointer_buttons &= ~serenity_button;
-        dbgln("LibWM/Wayland: mouse up window {} at {},{} button={}", m_pointer_window, position.x(), position.y(), serenity_button);
+        m_input_state.pointer_buttons &= ~serenity_button;
+        dbgln("LibWM/Wayland: mouse up window {} at {},{} button={}", m_input_state.pointer_window, position.x(), position.y(), serenity_button);
         if (m_input.mouse_up)
-            m_input.mouse_up(m_pointer_window, position, serenity_button, m_pointer_buttons, current_modifiers());
+            m_input.mouse_up(m_input_state.pointer_window, position, serenity_button, m_input_state.pointer_buttons, current_modifiers());
     }
 }
 
 void WaylandClient::on_pointer_axis(i32 x, i32 y)
 {
     MutexLocker locker(m_mutex);
-    if (m_pointer_popup >= 0 || m_pointer_window < 0)
+    if (m_input_state.pointer_popup >= 0 || m_input_state.pointer_window < 0)
         return;
-    auto* window_surface = find(m_pointer_window);
+    auto* window_surface = find(m_input_state.pointer_window);
     if (window_surface && window_surface->menubar_surface) {
-        if (m_pointer_surface == window_surface->menubar_surface)
+        if (m_input_state.pointer_surface == window_surface->menubar_surface)
             return;
         if (m_input.mouse_wheel)
-            m_input.mouse_wheel(m_pointer_window, m_pointer_position, m_pointer_buttons, current_modifiers(), x, y);
+            m_input.mouse_wheel(m_input_state.pointer_window, m_input_state.pointer_position, m_input_state.pointer_buttons, current_modifiers(), x, y);
         return;
     }
     int inset = window_surface ? window_surface->inset : 0;
     if (m_input.mouse_wheel)
-        m_input.mouse_wheel(m_pointer_window, m_pointer_position.translated(0, -inset), m_pointer_buttons, current_modifiers(), x, y);
+        m_input.mouse_wheel(m_input_state.pointer_window, m_input_state.pointer_position.translated(0, -inset), m_input_state.pointer_buttons, current_modifiers(), x, y);
 }
 
 void WaylandClient::on_pointer_axis_delta(double x, double y)
@@ -664,24 +663,24 @@ void WaylandClient::on_pointer_axis_delta(double x, double y)
     // Wayland delivers smooth axis values that are often fractional (trackpads
     // and high-resolution wheels). SerenityOS widgets expect whole scroll steps,
     // so accumulate and emit the integral part, carrying the remainder.
-    m_axis_accum_x += x;
-    m_axis_accum_y += y;
-    auto step_x = static_cast<i32>(m_axis_accum_x);
-    auto step_y = static_cast<i32>(m_axis_accum_y);
+    m_input_state.axis_accum_x += x;
+    m_input_state.axis_accum_y += y;
+    auto step_x = static_cast<i32>(m_input_state.axis_accum_x);
+    auto step_y = static_cast<i32>(m_input_state.axis_accum_y);
     if (getenv("LIBWM_AXIS_DEBUG"))
         dbgln("LibWM/Wayland: axis delta {}x{} -> step {}x{}", x, y, step_x, step_y);
     if (step_x == 0 && step_y == 0)
         return;
-    m_axis_accum_x -= step_x;
-    m_axis_accum_y -= step_y;
+    m_input_state.axis_accum_x -= step_x;
+    m_input_state.axis_accum_y -= step_y;
     on_pointer_axis(step_x, step_y);
 }
 
 void WaylandClient::on_keyboard_keymap(int fd, u32 size)
 {
     MutexLocker locker(m_mutex);
-    if (!m_xkb_context)
-        m_xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+    if (!m_input_state.xkb_context)
+        m_input_state.xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
 
     auto* map = static_cast<char*>(mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0));
     if (map == MAP_FAILED) {
@@ -690,22 +689,22 @@ void WaylandClient::on_keyboard_keymap(int fd, u32 size)
     }
     close(fd);
 
-    if (m_xkb_keymap)
-        xkb_keymap_unref(m_xkb_keymap);
-    m_xkb_keymap = xkb_keymap_new_from_string(m_xkb_context, map, XKB_KEYMAP_FORMAT_TEXT_V1, XKB_KEYMAP_COMPILE_NO_FLAGS);
+    if (m_input_state.xkb_keymap)
+        xkb_keymap_unref(m_input_state.xkb_keymap);
+    m_input_state.xkb_keymap = xkb_keymap_new_from_string(m_input_state.xkb_context, map, XKB_KEYMAP_FORMAT_TEXT_V1, XKB_KEYMAP_COMPILE_NO_FLAGS);
     munmap(map, size);
 
-    if (m_xkb_state)
-        xkb_state_unref(m_xkb_state);
-    m_xkb_state = m_xkb_keymap ? xkb_state_new(m_xkb_keymap) : nullptr;
+    if (m_input_state.xkb_state)
+        xkb_state_unref(m_input_state.xkb_state);
+    m_input_state.xkb_state = m_input_state.xkb_keymap ? xkb_state_new(m_input_state.xkb_keymap) : nullptr;
 
-    dbgln("LibWM/Wayland: received keymap ({} bytes), state={}", size, m_xkb_state != nullptr);
+    dbgln("LibWM/Wayland: received keymap ({} bytes), state={}", size, m_input_state.xkb_state != nullptr);
 }
 
 u32 WaylandClient::current_modifiers() const
 {
     MutexLocker locker(m_mutex);
-    return m_modifiers;
+    return m_input_state.modifiers;
 }
 
 void WaylandClient::on_keyboard_modifiers(u32 depressed, u32 latched, u32 locked, u32 group, u32)
@@ -714,28 +713,25 @@ void WaylandClient::on_keyboard_modifiers(u32 depressed, u32 latched, u32 locked
     // The compositor's modifier state is authoritative. Key events alone are not
     // enough: if a release is lost because focus moved while Ctrl/Alt was held,
     // the next click and wheel event would silently keep that modifier forever.
-    // Keep the xkb state in sync as well so code points and shortcuts stay
-    // correct, and fall back to the key-event bookkeeping when no modifier event
-    // arrives (some compositors omit it for synthetic keys).
-    if (!m_xkb_state) {
+    if (!m_input_state.xkb_state) {
         dbgln("LibWM/Wayland: modifiers depressed={:#x} locked={:#x} group={}", depressed, locked, group);
         return;
     }
 
-    xkb_state_update_mask(m_xkb_state, depressed, latched, locked, 0, 0, group);
+    xkb_state_update_mask(m_input_state.xkb_state, depressed, latched, locked, 0, 0, group);
 
     u32 modifiers = 0;
-    if (xkb_state_mod_name_is_active(m_xkb_state, XKB_MOD_NAME_SHIFT, XKB_STATE_MODS_EFFECTIVE) > 0)
+    if (xkb_state_mod_name_is_active(m_input_state.xkb_state, XKB_MOD_NAME_SHIFT, XKB_STATE_MODS_EFFECTIVE) > 0)
         modifiers |= Mod_Shift;
-    if (xkb_state_mod_name_is_active(m_xkb_state, XKB_MOD_NAME_CTRL, XKB_STATE_MODS_EFFECTIVE) > 0)
+    if (xkb_state_mod_name_is_active(m_input_state.xkb_state, XKB_MOD_NAME_CTRL, XKB_STATE_MODS_EFFECTIVE) > 0)
         modifiers |= Mod_Ctrl;
-    if (xkb_state_mod_name_is_active(m_xkb_state, XKB_MOD_NAME_ALT, XKB_STATE_MODS_EFFECTIVE) > 0)
+    if (xkb_state_mod_name_is_active(m_input_state.xkb_state, XKB_MOD_NAME_ALT, XKB_STATE_MODS_EFFECTIVE) > 0)
         modifiers |= Mod_Alt;
-    if (xkb_state_mod_name_is_active(m_xkb_state, XKB_MOD_NAME_LOGO, XKB_STATE_MODS_EFFECTIVE) > 0)
+    if (xkb_state_mod_name_is_active(m_input_state.xkb_state, XKB_MOD_NAME_LOGO, XKB_STATE_MODS_EFFECTIVE) > 0)
         modifiers |= Mod_Super;
-    m_modifiers = modifiers;
+    m_input_state.modifiers = modifiers;
 
-    dbgln("LibWM/Wayland: modifiers depressed={:#x} locked={:#x} group={} -> {:#x}", depressed, locked, group, m_modifiers);
+    dbgln("LibWM/Wayland: modifiers depressed={:#x} locked={:#x} group={} -> {:#x}", depressed, locked, group, m_input_state.modifiers);
 }
 
 static u32 modifier_bit_for_evdev(u32 key)
@@ -761,62 +757,59 @@ static u32 modifier_bit_for_evdev(u32 key)
 void WaylandClient::on_keyboard_key(u32 key, bool pressed)
 {
     MutexLocker locker(m_mutex);
-    if (!m_xkb_state)
+    if (!m_input_state.xkb_state)
         return;
 
     xkb_keycode_t code = key + 8;
     // Update the xkb state from the key itself so code_point reflects
     // Shift/CapsLock/etc. even without modifier events.
-    xkb_state_update_key(m_xkb_state, code, pressed ? XKB_KEY_DOWN : XKB_KEY_UP);
+    xkb_state_update_key(m_input_state.xkb_state, code, pressed ? XKB_KEY_DOWN : XKB_KEY_UP);
 
-    u32 code_point = xkb_state_key_get_utf32(m_xkb_state, code);
+    u32 code_point = xkb_state_key_get_utf32(m_input_state.xkb_state, code);
     u32 key_code = static_cast<u32>(serenity_key_code_from_evdev(key));
 
     // Serenity's WindowServer turned Ctrl+<letter> into the control character
     // itself, so a client sees Ctrl-C as code point 3 rather than 'c' with a ctrl
     // flag; LibVT relies on that, and so does every terminal program that expects a
-    // SIGINT. A Wayland keysym gives the plain letter, so do the conversion here
-    // rather than depend on xkbcommon applying it (whether it does is a property of
-    // the keymap, not something to rely on). Already-control characters are left
-    // alone, so this cannot double-convert.
+    // SIGINT.
     if ((current_modifiers() & Mod_Ctrl) && code_point >= '@' && code_point < 0x7f)
         code_point &= 0x1f;
 
     if (u32 bit = modifier_bit_for_evdev(key); bit != 0) {
         if (pressed)
-            m_modifiers |= bit;
+            m_input_state.modifiers |= bit;
         else
-            m_modifiers &= ~bit;
+            m_input_state.modifiers &= ~bit;
     }
 
     if (m_input.key)
-        m_input.key(m_focused_window, code_point, key_code, 0, current_modifiers(), key, pressed);
+        m_input.key(m_input_state.focused_window, code_point, key_code, 0, current_modifiers(), key, pressed);
 }
 
 void WaylandClient::on_keyboard_focus(wl_surface* surface, bool entered)
 {
     MutexLocker locker(m_mutex);
-    m_focused_window = entered ? window_id_for_surface(surface) : -1;
+    m_input_state.focused_window = entered ? window_id_for_surface(surface) : -1;
 }
 
 Gfx::IntPoint WaylandClient::global_pointer_position()
 {
     MutexLocker locker(m_mutex);
     // Popups (server-rendered menus) are layer surfaces with a known position.
-    if (m_pointer_popup >= 0) {
-        if (auto* popup = find_popup(m_pointer_popup))
-            return popup->layer_position.translated(m_pointer_position);
+    if (m_input_state.pointer_popup >= 0) {
+        if (auto* popup = find_popup(m_input_state.pointer_popup))
+            return popup->layer_position.translated(m_input_state.pointer_position);
     }
-    if (m_pointer_window >= 0) {
-        if (auto* window_surface = find(m_pointer_window)) {
+    if (m_input_state.pointer_window >= 0) {
+        if (auto* window_surface = find(m_input_state.pointer_window)) {
             // Layer surfaces (Taskbar, Desktop) know their output position; for
             // toplevels it comes from the compositor's position event.
             auto origin = window_surface->is_layer ? window_surface->layer_output_position
                                                    : window_surface->global_position;
-            return origin.translated(m_pointer_position);
+            return origin.translated(m_input_state.pointer_position);
         }
     }
-    return m_pointer_position;
+    return m_input_state.pointer_position;
 }
 
 }

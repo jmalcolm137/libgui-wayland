@@ -131,12 +131,12 @@ public:
     Gfx::IntSize screen_size() const
     {
         MutexLocker locker(m_mutex);
-        return m_screen_size;
+        return m_output_state.screen_size;
     }
     int output_scale() const
     {
         MutexLocker locker(m_mutex);
-        return m_scale;
+        return m_output_state.scale;
     }
     // The backing-store scale the shim told the client to render at (usually the
     // output scale; 1 when client scaling is disabled). Distinct from output_scale
@@ -144,12 +144,12 @@ public:
     int client_scale() const
     {
         MutexLocker locker(m_mutex);
-        return m_client_scale;
+        return m_output_state.client_scale;
     }
     void set_client_scale(int scale)
     {
         MutexLocker locker(m_mutex);
-        m_client_scale = scale < 1 ? 1 : scale;
+        m_output_state.client_scale = scale < 1 ? 1 : scale;
     }
 
     // The pointer's position in output coordinates, reconstructed from the
@@ -181,7 +181,7 @@ public:
     void set_clipboard_changed_callback(Function<void(ByteString const&)> callback)
     {
         MutexLocker locker(m_mutex);
-        m_clipboard_changed = move(callback);
+        m_data_device.on_clipboard_changed = move(callback);
     }
     // The MIME types the current selection offers, in the source's order.
     Vector<ByteString> clipboard_mime_types() const;
@@ -195,7 +195,7 @@ public:
     bool owns_clipboard() const
     {
         MutexLocker locker(m_mutex);
-        return m_data_source && !m_clipboard_offers.is_empty();
+        return m_data_device.selection_source && !m_data_device.clipboard_offers.is_empty();
     }
 
     // Window <-> xdg_toplevel lifecycle.
@@ -368,7 +368,7 @@ public:
     bool text_input_enabled() const
     {
         MutexLocker locker(m_mutex);
-        return m_text_input_enabled;
+        return m_text_input.enabled;
     }
     void set_text_input_cursor_rect(Gfx::IntRect const& rect);
     void set_text_input_manager(zwp_text_input_manager_v3*);
@@ -382,12 +382,12 @@ public:
     void on_output_mode(Gfx::IntSize physical_size)
     {
         MutexLocker locker(m_mutex);
-        m_physical_size = physical_size;
+        m_output_state.physical_size = physical_size;
     }
     void on_output_scale(int factor)
     {
         MutexLocker locker(m_mutex);
-        m_scale = factor > 0 ? factor : 1;
+        m_output_state.scale = factor > 0 ? factor : 1;
     }
     void on_output_done();
 
@@ -438,7 +438,7 @@ public:
     void on_drag_source_action(u32 action)
     {
         MutexLocker locker(m_mutex);
-        m_drag_action = action;
+        m_data_device.drag_action = action;
     }
     void set_accepts_drag(bool accepts);
     void on_popup_done(xdg_popup*);
@@ -448,7 +448,7 @@ public:
     void note_input_serial(u32 serial)
     {
         MutexLocker locker(m_mutex);
-        m_last_input_serial = serial;
+        m_input_state.last_serial = serial;
     }
 
 private:
@@ -462,9 +462,7 @@ private:
         // server thread also calls into this surface (a client's paint request and
         // backing-store handover arrive over its WindowServer connection). Both
         // sides mutate the same damage/pending/composed state, so every entry
-        // point that touches a surface holds this lock. Without it, heavy output
-        // (the Terminal) races append-against-move/clear and loses damage regions
-        // or corrupts the heap.
+        // point that touches a surface holds this lock.
         pthread_mutex_t mutex {};
         WindowSurface()
         {
@@ -568,6 +566,80 @@ private:
         Vector<NonnullOwnPtr<BufferRecord>> buffers;
     };
 
+    struct OutputState {
+        wl_output* primary { nullptr };
+        Vector<wl_output*> outputs;
+        zxdg_output_manager_v1* xdg_manager { nullptr };
+        Gfx::IntSize physical_size;
+        Gfx::IntSize screen_size;
+        int scale { 1 };
+        int client_scale { 1 };
+        bool have_logical_size { false };
+    };
+
+    struct InputState {
+        wl_seat* seat { nullptr };
+        wl_pointer* pointer { nullptr };
+        wl_keyboard* keyboard { nullptr };
+        ::xkb_context* xkb_context { nullptr };
+        ::xkb_keymap* xkb_keymap { nullptr };
+        ::xkb_state* xkb_state { nullptr };
+        u32 last_serial { 0 };
+        u32 modifiers { 0 };
+        i32 pointer_window { -1 };
+        i32 pointer_popup { -1 };
+        wl_surface* pointer_surface { nullptr };
+        i32 focused_window { -1 };
+        Gfx::IntPoint pointer_position;
+        u32 pointer_buttons { 0 };
+        // Wayland axis deltas are often fractional (trackpads, high-resolution
+        // wheels); accumulate them so whole scroll steps reach the GUI.
+        double axis_accum_x { 0 };
+        double axis_accum_y { 0 };
+    };
+
+    struct TextInputState {
+        zwp_text_input_manager_v3* manager { nullptr };
+        zwp_text_input_v3* device { nullptr };
+        bool enabled { false };
+        Gfx::IntRect cursor_rect;
+        TextInputCommit on_commit;
+        TextInputPreedit on_preedit;
+        TextInputDeleteSurrounding on_delete_surrounding;
+    };
+
+    struct DataDeviceState {
+        wl_data_device_manager* manager { nullptr };
+        wl_data_device* device { nullptr };
+        wl_data_offer* current_offer { nullptr };
+        Vector<wl_data_offer*> pending_offers;
+        HashMap<u64, Vector<ByteString>> offer_mime_types;
+        wl_data_source* selection_source { nullptr };
+        HashMap<ByteString, ByteBuffer> clipboard_offers;
+        Function<void(ByteString const&)> on_clipboard_changed;
+        // Drag-and-drop state (see on_drag_*).
+        HashMap<String, ByteBuffer> drag_payload;
+        u32 drag_action { 0 };
+        wl_data_source* drag_source { nullptr };
+        wl_surface* drag_icon { nullptr };
+        wl_buffer* drag_icon_buffer { nullptr };
+        Optional<Core::AnonymousBuffer> drag_icon_anon;
+        wl_data_offer* drag_offer { nullptr };
+        i32 drag_window { -1 };
+        Gfx::IntPoint drag_position;
+        u32 drag_serial { 0 };
+        bool accepts_drag { false };
+        bool drag_dropped { false };
+        ByteString drag_mime;
+        HashMap<String, ByteBuffer> drag_received;
+    };
+
+    struct DisplayLinkState {
+        bool enabled { false };
+        wl_callback* callback { nullptr };
+        wl_surface* surface { nullptr };
+    };
+
     WindowSurface* find(i32 window_id);
     void commit_window_content(WindowSurface&, int client_fd, Gfx::IntSize size, Gfx::IntSize visible_size, i32 pitch, bool has_alpha);
     void present_menubar(WindowSurface&, Gfx::IntSize visible_size);
@@ -579,25 +651,15 @@ private:
     u32 current_modifiers() const;
     void maybe_create_data_device();
     ByteString preferred_mime_for(wl_data_offer*) const;
+    ByteBuffer receive_offer_data(wl_data_offer*, ByteString const& mime);
+    Gfx::IntPoint adjusted_drag_position() const;
+    void request_display_link_frame();
 
     wl_display* m_display { nullptr };
     wl_registry* m_registry { nullptr };
     wl_compositor* m_compositor { nullptr };
     wl_subcompositor* m_subcompositor { nullptr };
     wl_shm* m_shm { nullptr };
-    wl_seat* m_seat { nullptr };
-    zwp_text_input_manager_v3* m_text_input_manager { nullptr };
-    zwp_text_input_v3* m_text_input { nullptr };
-    bool m_text_input_enabled { false };
-    Gfx::IntRect m_text_input_cursor_rect;
-    TextInputCommit m_text_input_commit;
-    TextInputPreedit m_text_input_preedit;
-    TextInputDeleteSurrounding m_text_input_delete_surrounding;
-    wl_pointer* m_pointer { nullptr };
-    wl_keyboard* m_keyboard { nullptr };
-    wl_output* m_output { nullptr };
-    Vector<wl_output*> m_outputs;
-    zxdg_output_manager_v1* m_xdg_output_manager { nullptr };
     xdg_wm_base* m_wm_base { nullptr };
     zxdg_decoration_manager_v1* m_decoration_manager { nullptr };
     wp_viewporter* m_viewporter { nullptr };
@@ -605,71 +667,26 @@ private:
     serenity_window_manager* m_serenity_window_manager { nullptr };
     RefPtr<Core::Notifier> m_notifier;
 
-    xkb_context* m_xkb_context { nullptr };
-    xkb_keymap* m_xkb_keymap { nullptr };
-    xkb_state* m_xkb_state { nullptr };
+    OutputState m_output_state;
+    InputState m_input_state;
+    TextInputState m_text_input;
+    DataDeviceState m_data_device;
+    DisplayLinkState m_display_link;
 
-    wl_data_device_manager* m_data_device_manager { nullptr };
-    wl_data_device* m_data_device { nullptr };
-    wl_data_offer* m_current_offer { nullptr };
-    Vector<wl_data_offer*> m_pending_offers;
-    HashMap<u64, Vector<ByteString>> m_offer_mime_types;
-    wl_data_source* m_data_source { nullptr };
-    HashMap<ByteString, ByteBuffer> m_clipboard_offers;
-    // Drag-and-drop state (see on_drag_*).
-    HashMap<String, ByteBuffer> m_drag_payload;
-    u32 m_drag_action { 0 };
-    wl_data_source* m_drag_source { nullptr };
-    wl_surface* m_drag_icon { nullptr };
-    wl_buffer* m_drag_icon_buffer { nullptr };
-    Optional<Core::AnonymousBuffer> m_drag_icon_anon;
-    wl_data_offer* m_drag_offer { nullptr };
-    i32 m_drag_window { -1 };
-    Gfx::IntPoint m_drag_position;
-    u32 m_drag_serial { 0 };
-    bool m_accepts_drag { false };
-    bool m_drag_dropped { false };
-    ByteString m_drag_mime;
-    HashMap<String, ByteBuffer> m_drag_received;
-    ByteBuffer receive_offer_data(wl_data_offer*, ByteString const& mime);
-    Gfx::IntPoint adjusted_drag_position() const;
-    u32 m_last_input_serial { 0 };
-    u32 m_modifiers { 0 };
-    Function<void(ByteString const&)> m_clipboard_changed;
-    Function<void(i32 window_id, bool visible)> m_menubar_visibility_changed;
-    Function<void(i32 window_id, Gfx::IntPoint)> m_toplevel_position_changed;
-    Function<void()> m_dismiss_menus;
     HostConfig m_host_config;
     HashMap<ByteString, ByteString> m_host_settings;
-    bool m_display_link_enabled { false };
-    wl_callback* m_display_link_callback { nullptr };
-    wl_surface* m_display_link_surface { nullptr };
-    void request_display_link_frame();
     RefPtr<Gfx::Bitmap> m_captured;
     u32 m_capture_serial { 0 };
     RefPtr<Gfx::Bitmap> m_host_wallpaper;
 
     InputCallbacks m_input;
     Function<void(ByteString const&)> m_connection_lost;
-    i32 m_pointer_window { -1 };
-    wl_surface* m_pointer_surface { nullptr };
-    i32 m_focused_window { -1 };
-    Gfx::IntPoint m_pointer_position;
-    u32 m_pointer_buttons { 0 };
-    // Wayland axis deltas are often fractional (trackpads, high-resolution
-    // wheels); accumulate them so whole scroll steps reach the GUI.
-    double m_axis_accum_x { 0 };
-    double m_axis_accum_y { 0 };
-
-    Gfx::IntSize m_physical_size;
-    Gfx::IntSize m_screen_size;
-    int m_scale { 1 };
-    int m_client_scale { 1 };
-    bool m_have_logical_size { false };
+    Function<void(i32 window_id, bool visible)> m_menubar_visibility_changed;
+    Function<void(i32 window_id, Gfx::IntPoint)> m_toplevel_position_changed;
+    Function<void()> m_dismiss_menus;
 
     HashMap<i32, NonnullOwnPtr<WindowSurface>> m_windows;
     HashMap<i32, NonnullOwnPtr<Popup>> m_popups;
-    i32 m_pointer_popup { -1 };
 };
 
 }

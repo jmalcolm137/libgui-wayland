@@ -383,7 +383,7 @@ ErrorOr<void> WaylandClient::ensure_connected()
     m_notifier->on_activation = [this] { dispatch(); };
 
     dbgln("LibWM/Wayland: connected; screen {}x{} @{}x, output scale {}",
-        m_screen_size.width(), m_screen_size.height(), m_scale, m_scale);
+        m_output_state.screen_size.width(), m_output_state.screen_size.height(), m_output_state.scale, m_output_state.scale);
     return {};
 }
 
@@ -444,11 +444,11 @@ void WaylandClient::dispatch()
 void WaylandClient::add_output(wl_output* output)
 {
     MutexLocker locker(m_mutex);
-    m_output = output;
-    m_outputs.append(output);
+    m_output_state.primary = output;
+    m_output_state.outputs.append(output);
     wl_output_add_listener(output, &s_output_listener, this);
-    if (m_xdg_output_manager) {
-        auto* xdg_output = zxdg_output_manager_v1_get_xdg_output(m_xdg_output_manager, output);
+    if (m_output_state.xdg_manager) {
+        auto* xdg_output = zxdg_output_manager_v1_get_xdg_output(m_output_state.xdg_manager, output);
         zxdg_output_v1_add_listener(xdg_output, &s_xdg_output_listener, this);
     }
 }
@@ -456,8 +456,8 @@ void WaylandClient::add_output(wl_output* output)
 void WaylandClient::set_xdg_output_manager(zxdg_output_manager_v1* manager)
 {
     MutexLocker locker(m_mutex);
-    m_xdg_output_manager = manager;
-    for (auto* output : m_outputs) {
+    m_output_state.xdg_manager = manager;
+    for (auto* output : m_output_state.outputs) {
         auto* xdg_output = zxdg_output_manager_v1_get_xdg_output(manager, output);
         zxdg_output_v1_add_listener(xdg_output, &s_xdg_output_listener, this);
     }
@@ -475,8 +475,8 @@ void WaylandClient::on_output_logical_size(wl_output*, Gfx::IntSize logical_size
     MutexLocker locker(m_mutex);
     if (logical_size.is_empty())
         return;
-    m_have_logical_size = true;
-    m_screen_size = logical_size;
+    m_output_state.have_logical_size = true;
+    m_output_state.screen_size = logical_size;
 }
 
 void WaylandClient::on_output_done()
@@ -484,11 +484,14 @@ void WaylandClient::on_output_done()
     MutexLocker locker(m_mutex);
     // zxdg_output_v1 gives the real logical size under fractional scaling and
     // takes precedence over mode/scale.
-    if (m_have_logical_size)
+    if (m_output_state.have_logical_size)
         return;
-    if (m_physical_size.is_empty())
+    if (m_output_state.physical_size.is_empty())
         return;
-    m_screen_size = { m_physical_size.width() / m_scale, m_physical_size.height() / m_scale };
+    m_output_state.screen_size = {
+        m_output_state.physical_size.width() / m_output_state.scale,
+        m_output_state.physical_size.height() / m_output_state.scale,
+    };
 }
 
 // --- display link -------------------------------------------------------------
@@ -505,25 +508,25 @@ static wl_callback_listener const s_display_link_listener = {
 void WaylandClient::enable_display_link()
 {
     MutexLocker locker(m_mutex);
-    m_display_link_enabled = true;
+    m_display_link.enabled = true;
     request_display_link_frame();
 }
 
 void WaylandClient::disable_display_link()
 {
     MutexLocker locker(m_mutex);
-    m_display_link_enabled = false;
-    if (m_display_link_callback) {
-        wl_callback_destroy(m_display_link_callback);
-        m_display_link_callback = nullptr;
-        m_display_link_surface = nullptr;
+    m_display_link.enabled = false;
+    if (m_display_link.callback) {
+        wl_callback_destroy(m_display_link.callback);
+        m_display_link.callback = nullptr;
+        m_display_link.surface = nullptr;
     }
 }
 
 void WaylandClient::request_display_link_frame()
 {
     MutexLocker locker(m_mutex);
-    if (!m_display_link_enabled)
+    if (!m_display_link.enabled)
         return;
     // A mapped window surface fires frame_done once per refresh it is rendered in.
     // The most recently presented window is the one most likely to be animating.
@@ -534,28 +537,28 @@ void WaylandClient::request_display_link_frame()
     }
     if (!surface)
         return;
-    if (m_display_link_callback) {
-        if (m_display_link_surface == surface)
+    if (m_display_link.callback) {
+        if (m_display_link.surface == surface)
             return;
         // That surface is gone or another is animating now: pace from the new one.
-        wl_callback_destroy(m_display_link_callback);
-        m_display_link_callback = nullptr;
+        wl_callback_destroy(m_display_link.callback);
+        m_display_link.callback = nullptr;
     }
-    m_display_link_surface = surface;
-    m_display_link_callback = wl_surface_frame(surface);
-    wl_callback_add_listener(m_display_link_callback, &s_display_link_listener, this);
+    m_display_link.surface = surface;
+    m_display_link.callback = wl_surface_frame(surface);
+    wl_callback_add_listener(m_display_link.callback, &s_display_link_listener, this);
 }
 
 void WaylandClient::on_display_link_frame_done(wl_callback* callback)
 {
     MutexLocker locker(m_mutex);
-    if (callback != m_display_link_callback) {
+    if (callback != m_display_link.callback) {
         wl_callback_destroy(callback);
         return;
     }
     wl_callback_destroy(callback);
-    m_display_link_callback = nullptr;
-    m_display_link_surface = nullptr;
+    m_display_link.callback = nullptr;
+    m_display_link.surface = nullptr;
     if (on_display_link)
         on_display_link();
     // Re-arm for the next refresh; the app's repaint in response is the damage

@@ -5,12 +5,16 @@
  */
 
 #include "ClipboardServerConnection.h"
+#include "ConfigServerConnection.h"
 #include "LibWM.h"
 #include "MenuController.h"
 #include <AK/Format.h>
 #include <Kernel/API/KeyCode.h>
 #include <LibConfig/Client.h>
+#include <LibCore/ConfigFile.h>
+#include <LibCore/Directory.h>
 #include <LibCore/EventLoop.h>
+#include <LibCore/File.h>
 #include <LibGfx/Bitmap.h>
 #include <LibGfx/Painter.h>
 #include <LibMain/Main.h>
@@ -210,6 +214,21 @@ void test_config_server_portal()
     Core::EventLoop loop;
     auto& client = Config::Client::the();
 
+    // 1. Pre-seed an INI file on disk before querying "PreseededDomain" to verify
+    //    lazy loading and typed parsing from disk.
+    auto config_dir = LibWM::ConfigServerConnection::config_directory();
+    (void)Core::Directory::create(config_dir, Core::Directory::CreateDirectories::Yes);
+    auto preseeded_path = LibWM::ConfigServerConnection::domain_file_path("PreseededDomain");
+    if (auto file = Core::File::open(preseeded_path, Core::File::OpenMode::Write); !file.is_error()) {
+        (void)file.value()->write_until_depleted("[SavedGroup]\nTitle=FromDisk\nCount=-99\nSize=2048\nEnabled=true\n"sv);
+    }
+
+    check(client.read_string_value("PreseededDomain"sv, "SavedGroup"sv, "Title"sv) == "FromDisk"sv, "Config portal loads string from existing INI on disk"sv);
+    check(client.read_i32_value("PreseededDomain"sv, "SavedGroup"sv, "Count"sv) == -99, "Config portal loads i32 from existing INI on disk"sv);
+    check(client.read_u32_value("PreseededDomain"sv, "SavedGroup"sv, "Size"sv) == 2048u, "Config portal loads u32 from existing INI on disk"sv);
+    check(client.read_bool_value("PreseededDomain"sv, "SavedGroup"sv, "Enabled"sv) == true, "Config portal loads bool from existing INI on disk"sv);
+
+    // 2. Write values and verify both in-memory round-trip and disk persistence.
     client.write_string_value("TestDomain"sv, "Window"sv, "Title"sv, "Hello Wayland"sv);
     client.write_i32_value("TestDomain"sv, "Window"sv, "X"sv, -42);
     client.write_u32_value("TestDomain"sv, "Window"sv, "Width"sv, 1280u);
@@ -219,6 +238,14 @@ void test_config_server_portal()
     check(client.read_i32_value("TestDomain"sv, "Window"sv, "X"sv) == -42, "Config portal round-trips i32 value"sv);
     check(client.read_u32_value("TestDomain"sv, "Window"sv, "Width"sv) == 1280u, "Config portal round-trips u32 value"sv);
     check(client.read_bool_value("TestDomain"sv, "Window"sv, "Fullscreen"sv) == true, "Config portal round-trips bool value"sv);
+
+    auto disk_cfg = Core::ConfigFile::open(LibWM::ConfigServerConnection::domain_file_path("TestDomain"));
+    check(!disk_cfg.is_error()
+            && disk_cfg.value()->read_entry("Window", "Title") == "Hello Wayland"sv
+            && disk_cfg.value()->read_num_entry<i32>("Window", "X") == -42
+            && disk_cfg.value()->read_num_entry<u32>("Window", "Width") == 1280u
+            && disk_cfg.value()->read_bool_entry("Window", "Fullscreen") == true,
+        "Config portal persists written domain to disk INI file"sv);
 
     // Type mismatch returns empty Optional rather than corrupt data.
     check(!client.read_i32_value("TestDomain"sv, "Window"sv, "Title"sv).has_value(), "Config portal returns empty Optional on type mismatch"sv);

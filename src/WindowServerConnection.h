@@ -259,6 +259,12 @@ private:
     // System fonts: a session broker ($XDG_RUNTIME_DIR/sde-fonts), like the
     // theme broker, so a font change applies to every client and the compositor
     // (R4.7). Also what makes size-based zoom work with a scalable family.
+    struct FontQueries {
+        ByteString default_query;
+        ByteString fixed_width_query;
+        ByteString window_title_query;
+    };
+    static FontQueries read_fonts_broker();
     void watch_fonts();
     void apply_fonts_from_broker();
     RefPtr<Core::FileWatcher> m_fonts_watcher;

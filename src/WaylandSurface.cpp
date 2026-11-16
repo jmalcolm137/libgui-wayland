@@ -672,14 +672,14 @@ void WaylandClient::create_popup(i32 popup_id, i32 parent_window_id, i32 parent_
         // bottom, flip it above the anchor (as WindowServer does for buttons).
         int menu_x = layer_position.x();
         int menu_y = layer_position.y();
-        if (!m_screen_size.is_empty()) {
+        if (!m_output_state.screen_size.is_empty()) {
             // A button menu flips above its button when it would run off the
             // bottom. A submenu just slides up so it stays on-screen, keeping the
             // item's row reachable (otherwise it would jump above its parent).
-            if (!is_submenu && menu_y + size.height() > m_screen_size.height())
+            if (!is_submenu && menu_y + size.height() > m_output_state.screen_size.height())
                 menu_y -= size.height() + max(0, anchor.height() - 1);
-            menu_x = clamp(menu_x, 0, max(0, m_screen_size.width() - size.width()));
-            menu_y = clamp(menu_y, 0, max(0, m_screen_size.height() - size.height()));
+            menu_x = clamp(menu_x, 0, max(0, m_output_state.screen_size.width() - size.width()));
+            menu_y = clamp(menu_y, 0, max(0, m_output_state.screen_size.height() - size.height()));
         }
         layer_position = { menu_x, menu_y };
         zwlr_layer_surface_v1_set_margin(layer_surface, layer_position.y(), 0, 0, layer_position.x());
@@ -717,8 +717,8 @@ void WaylandClient::create_popup(i32 popup_id, i32 parent_window_id, i32 parent_
     xdg_positioner_destroy(positioner);
     xdg_popup_add_listener(popup, &s_popup_listener, this);
     // Only the root popup grabs; nested popups inherit the grab.
-    if (!is_submenu && m_seat)
-        xdg_popup_grab(popup, m_seat, m_last_input_serial);
+    if (!is_submenu && m_input_state.seat)
+        xdg_popup_grab(popup, m_input_state.seat, m_input_state.last_serial);
     wl_surface_commit(surface);
 
     auto p = make<Popup>();
@@ -919,10 +919,10 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::In
             window_surface->layer_output_position = { 0, 0 };
             break;
         case WindowServer::WindowType::Taskbar:
-            window_surface->layer_output_position = { 0, m_screen_size.height() - size.height() };
+            window_surface->layer_output_position = { 0, m_output_state.screen_size.height() - size.height() };
             break;
         case WindowServer::WindowType::Applet:
-            window_surface->layer_output_position = { m_screen_size.width() - size.width(), m_screen_size.height() - size.height() };
+            window_surface->layer_output_position = { m_output_state.screen_size.width() - size.width(), m_output_state.screen_size.height() - size.height() };
             break;
         default:
             break;
@@ -1096,14 +1096,14 @@ void WaylandClient::destroy_window(i32 window_id)
             wp_viewport_destroy(window_surface.viewport);
         if (window_surface.xdg_surface_object)
             xdg_surface_destroy(window_surface.xdg_surface_object);
-        if (m_display_link_surface == window_surface.surface) {
-            if (m_display_link_callback)
-                wl_callback_destroy(m_display_link_callback);
-            m_display_link_callback = nullptr;
-            m_display_link_surface = nullptr;
+        if (m_display_link.surface == window_surface.surface) {
+            if (m_display_link.callback)
+                wl_callback_destroy(m_display_link.callback);
+            m_display_link.callback = nullptr;
+            m_display_link.surface = nullptr;
         }
-        if (m_pointer_surface == window_surface.surface || m_pointer_surface == window_surface.menubar_surface)
-            m_pointer_surface = nullptr;
+        if (m_input_state.pointer_surface == window_surface.surface || m_input_state.pointer_surface == window_surface.menubar_surface)
+            m_input_state.pointer_surface = nullptr;
         for (auto& record : window_surface.menubar_buffers) {
             if (record->buffer)
                 wl_buffer_destroy(record->buffer);
@@ -1345,7 +1345,7 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
     MutexLocker locker(m_mutex);
     // A display link enabled before the first present starts ticking once there is a
     // surface to pace it from.
-    if (m_display_link_enabled)
+    if (m_display_link.enabled)
         request_display_link_frame();
     auto request_frame = [&] {
         window_surface.frame_callback = wl_surface_frame(window_surface.surface);

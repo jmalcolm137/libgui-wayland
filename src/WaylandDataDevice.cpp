@@ -125,26 +125,26 @@ static wl_data_source_listener const s_drag_source_listener = {
 void WaylandClient::set_data_device_manager(wl_data_device_manager* manager)
 {
     MutexLocker locker(m_mutex);
-    m_data_device_manager = manager;
+    m_data_device.manager = manager;
     maybe_create_data_device();
 }
 
 void WaylandClient::maybe_create_data_device()
 {
     MutexLocker locker(m_mutex);
-    if (m_data_device || !m_seat || !m_data_device_manager)
+    if (m_data_device.device || !m_input_state.seat || !m_data_device.manager)
         return;
-    m_data_device = wl_data_device_manager_get_data_device(m_data_device_manager, m_seat);
-    dbgln("LibWM/Wayland: data device created: {}", m_data_device != nullptr);
-    if (m_data_device)
-        wl_data_device_add_listener(m_data_device, &s_data_device_listener, this);
+    m_data_device.device = wl_data_device_manager_get_data_device(m_data_device.manager, m_input_state.seat);
+    dbgln("LibWM/Wayland: data device created: {}", m_data_device.device != nullptr);
+    if (m_data_device.device)
+        wl_data_device_add_listener(m_data_device.device, &s_data_device_listener, this);
 }
 
 ByteString WaylandClient::preferred_mime_for(wl_data_offer* offer) const
 {
     MutexLocker locker(m_mutex);
-    auto it = m_offer_mime_types.find(reinterpret_cast<u64>(offer));
-    if (it == m_offer_mime_types.end() || it->value.is_empty())
+    auto it = m_data_device.offer_mime_types.find(reinterpret_cast<u64>(offer));
+    if (it == m_data_device.offer_mime_types.end() || it->value.is_empty())
         return {};
     auto const& mimes = it->value;
     for (auto const& candidate : { "text/plain;charset=utf-8"sv, "text/plain"sv, "UTF8_STRING"sv, "STRING"sv, "text/uri-list"sv, "image/png"sv }) {
@@ -161,35 +161,35 @@ void WaylandClient::on_data_offer(wl_data_offer* offer)
 {
     MutexLocker locker(m_mutex);
     dbgln("LibWM/Wayland: data offer {}", static_cast<void*>(offer));
-    m_pending_offers.append(offer);
-    m_offer_mime_types.set(reinterpret_cast<u64>(offer), {});
+    m_data_device.pending_offers.append(offer);
+    m_data_device.offer_mime_types.set(reinterpret_cast<u64>(offer), {});
     wl_data_offer_add_listener(offer, &s_data_offer_listener, this);
 }
 
 void WaylandClient::on_data_offer_mime(wl_data_offer* offer, char const* mime_type)
 {
     MutexLocker locker(m_mutex);
-    auto it = m_offer_mime_types.find(reinterpret_cast<u64>(offer));
-    if (it != m_offer_mime_types.end())
+    auto it = m_data_device.offer_mime_types.find(reinterpret_cast<u64>(offer));
+    if (it != m_data_device.offer_mime_types.end())
         it->value.append(ByteString(mime_type));
 }
 
 void WaylandClient::on_selection(wl_data_offer* offer)
 {
     MutexLocker locker(m_mutex);
-    for (auto* pending : m_pending_offers) {
+    for (auto* pending : m_data_device.pending_offers) {
         // The drag offer belongs to the drag, not to the selection. Destroying it
-        // here used to leave m_drag_offer dangling, and the drop/leave destroyed it
+        // here used to leave drag_offer dangling, and the drop/leave destroyed it
         // again -- a segfault inside wl_data_offer_destroy (a freed wl_proxy).
-        if (pending == offer || pending == m_drag_offer)
+        if (pending == offer || pending == m_data_device.drag_offer)
             continue;
-        m_offer_mime_types.remove(reinterpret_cast<u64>(pending));
+        m_data_device.offer_mime_types.remove(reinterpret_cast<u64>(pending));
         wl_data_offer_destroy(pending);
     }
-    m_pending_offers.clear();
+    m_data_device.pending_offers.clear();
     if (offer)
-        m_pending_offers.append(offer);
-    m_current_offer = offer;
+        m_data_device.pending_offers.append(offer);
+    m_data_device.current_offer = offer;
 
     ByteString mime;
     if (offer) {
@@ -199,8 +199,8 @@ void WaylandClient::on_selection(wl_data_offer* offer)
             mime = ByteString("text/plain");
     }
     dbgln("LibWM/Wayland: selection changed (mime='{}')", mime);
-    if (m_clipboard_changed)
-        m_clipboard_changed(mime);
+    if (m_data_device.on_clipboard_changed)
+        m_data_device.on_clipboard_changed(mime);
 }
 
 void WaylandClient::on_source_send(wl_data_source*, char const* mime_type, int fd)
@@ -216,9 +216,9 @@ void WaylandClient::on_source_send(wl_data_source*, char const* mime_type, int f
         }
     };
     // The source may be serving the clipboard selection or a drag payload.
-    if (auto it = m_clipboard_offers.find(ByteString(mime_type)); it != m_clipboard_offers.end())
+    if (auto it = m_data_device.clipboard_offers.find(ByteString(mime_type)); it != m_data_device.clipboard_offers.end())
         write_data(it->value);
-    else if (auto it = m_drag_payload.find(String::from_utf8(StringView { mime_type, strlen(mime_type) }).release_value_but_fixme_should_propagate_errors()); it != m_drag_payload.end())
+    else if (auto it = m_data_device.drag_payload.find(String::from_utf8(StringView { mime_type, strlen(mime_type) }).release_value_but_fixme_should_propagate_errors()); it != m_data_device.drag_payload.end())
         write_data(it->value);
     close(fd);
 }
@@ -226,8 +226,8 @@ void WaylandClient::on_source_send(wl_data_source*, char const* mime_type, int f
 void WaylandClient::on_source_cancelled(wl_data_source* source)
 {
     MutexLocker locker(m_mutex);
-    if (source == m_data_source)
-        m_data_source = nullptr;
+    if (source == m_data_device.selection_source)
+        m_data_device.selection_source = nullptr;
     if (source)
         wl_data_source_destroy(source);
 }
@@ -250,66 +250,66 @@ static wl_buffer* create_icon_buffer(wl_shm* shm, Core::AnonymousBuffer& anon, G
 bool WaylandClient::start_drag(ByteString const&, HashMap<String, ByteBuffer> const& mime_data, Gfx::ShareableBitmap const& drag_bitmap)
 {
     MutexLocker locker(m_mutex);
-    if (!m_data_device || !m_data_device_manager || !m_compositor || !m_shm)
+    if (!m_data_device.device || !m_data_device.manager || !m_compositor || !m_shm)
         return false;
-    auto* origin = find(m_pointer_window);
+    auto* origin = find(m_input_state.pointer_window);
     if (!origin || !origin->surface)
         return false;
 
-    m_drag_payload = mime_data;
-    m_drag_dropped = false;
+    m_data_device.drag_payload = mime_data;
+    m_data_device.drag_dropped = false;
 
-    m_drag_source = wl_data_device_manager_create_data_source(m_data_device_manager);
-    if (!m_drag_source)
+    m_data_device.drag_source = wl_data_device_manager_create_data_source(m_data_device.manager);
+    if (!m_data_device.drag_source)
         return false;
-    wl_data_source_add_listener(m_drag_source, &s_drag_source_listener, this);
+    wl_data_source_add_listener(m_data_device.drag_source, &s_drag_source_listener, this);
     for (auto const& it : mime_data) {
         auto mime = it.key.to_byte_string();
-        wl_data_source_offer(m_drag_source, mime.characters());
+        wl_data_source_offer(m_data_device.drag_source, mime.characters());
     }
-    wl_data_source_set_actions(m_drag_source,
+    wl_data_source_set_actions(m_data_device.drag_source,
         WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY | WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE);
 
     // The drag icon (a plain surface carrying the drag bitmap), if one was given.
-    if (m_drag_icon) {
-        wl_surface_destroy(m_drag_icon);
-        m_drag_icon = nullptr;
+    if (m_data_device.drag_icon) {
+        wl_surface_destroy(m_data_device.drag_icon);
+        m_data_device.drag_icon = nullptr;
     }
-    if (m_drag_icon_buffer) {
-        wl_buffer_destroy(m_drag_icon_buffer);
-        m_drag_icon_buffer = nullptr;
+    if (m_data_device.drag_icon_buffer) {
+        wl_buffer_destroy(m_data_device.drag_icon_buffer);
+        m_data_device.drag_icon_buffer = nullptr;
     }
-    m_drag_icon_anon.clear();
+    m_data_device.drag_icon_anon.clear();
     if (drag_bitmap.is_valid() && drag_bitmap.bitmap()) {
         auto const& bitmap = *drag_bitmap.bitmap();
         auto anon = Core::AnonymousBuffer::create_with_size(static_cast<size_t>(bitmap.pitch()) * static_cast<size_t>(bitmap.height()));
         if (!anon.is_error()) {
             auto buffer = anon.release_value();
             memcpy(buffer.data<u8>(), bitmap.scanline(0), static_cast<size_t>(bitmap.pitch()) * static_cast<size_t>(bitmap.height()));
-            m_drag_icon = wl_compositor_create_surface(m_compositor);
-            m_drag_icon_buffer = create_icon_buffer(m_shm, buffer, bitmap);
-            if (m_drag_icon && m_drag_icon_buffer) {
-                wl_surface_attach(m_drag_icon, m_drag_icon_buffer, 0, 0);
-                wl_surface_damage_buffer(m_drag_icon, 0, 0, bitmap.width(), bitmap.height());
-                wl_surface_commit(m_drag_icon);
-                m_drag_icon_anon = move(buffer);
+            m_data_device.drag_icon = wl_compositor_create_surface(m_compositor);
+            m_data_device.drag_icon_buffer = create_icon_buffer(m_shm, buffer, bitmap);
+            if (m_data_device.drag_icon && m_data_device.drag_icon_buffer) {
+                wl_surface_attach(m_data_device.drag_icon, m_data_device.drag_icon_buffer, 0, 0);
+                wl_surface_damage_buffer(m_data_device.drag_icon, 0, 0, bitmap.width(), bitmap.height());
+                wl_surface_commit(m_data_device.drag_icon);
+                m_data_device.drag_icon_anon = move(buffer);
             }
         }
     }
 
-    wl_data_device_start_drag(m_data_device, m_drag_source, origin->surface, m_drag_icon, m_last_input_serial);
+    wl_data_device_start_drag(m_data_device.device, m_data_device.drag_source, origin->surface, m_data_device.drag_icon, m_input_state.last_serial);
     wl_display_flush(m_display);
-    dbgln("LibWM/Wayland: started drag ({} representation(s), serial {})", mime_data.size(), m_last_input_serial);
+    dbgln("LibWM/Wayland: started drag ({} representation(s), serial {})", mime_data.size(), m_input_state.last_serial);
     return true;
 }
 
 void WaylandClient::on_drag_source_cancelled(wl_data_source* source)
 {
     MutexLocker locker(m_mutex);
-    if (source == m_drag_source)
-        m_drag_source = nullptr;
+    if (source == m_data_device.drag_source)
+        m_data_device.drag_source = nullptr;
     wl_data_source_destroy(source);
-    m_drag_payload.clear();
+    m_data_device.drag_payload.clear();
     if (m_input.drag_finished)
         m_input.drag_finished(false);
 }
@@ -317,27 +317,27 @@ void WaylandClient::on_drag_source_cancelled(wl_data_source* source)
 void WaylandClient::on_drag_source_drop_performed()
 {
     MutexLocker locker(m_mutex);
-    m_drag_dropped = true;
+    m_data_device.drag_dropped = true;
 }
 
 void WaylandClient::on_drag_source_finished()
 {
     MutexLocker locker(m_mutex);
-    bool accepted = m_drag_dropped && m_drag_action != WL_DATA_DEVICE_MANAGER_DND_ACTION_NONE;
-    if (m_drag_source) {
-        wl_data_source_destroy(m_drag_source);
-        m_drag_source = nullptr;
+    bool accepted = m_data_device.drag_dropped && m_data_device.drag_action != WL_DATA_DEVICE_MANAGER_DND_ACTION_NONE;
+    if (m_data_device.drag_source) {
+        wl_data_source_destroy(m_data_device.drag_source);
+        m_data_device.drag_source = nullptr;
     }
-    if (m_drag_icon) {
-        wl_surface_destroy(m_drag_icon);
-        m_drag_icon = nullptr;
+    if (m_data_device.drag_icon) {
+        wl_surface_destroy(m_data_device.drag_icon);
+        m_data_device.drag_icon = nullptr;
     }
-    if (m_drag_icon_buffer) {
-        wl_buffer_destroy(m_drag_icon_buffer);
-        m_drag_icon_buffer = nullptr;
+    if (m_data_device.drag_icon_buffer) {
+        wl_buffer_destroy(m_data_device.drag_icon_buffer);
+        m_data_device.drag_icon_buffer = nullptr;
     }
-    m_drag_icon_anon.clear();
-    m_drag_payload.clear();
+    m_data_device.drag_icon_anon.clear();
+    m_data_device.drag_payload.clear();
     if (m_input.drag_finished)
         m_input.drag_finished(accepted);
 }
@@ -345,9 +345,9 @@ void WaylandClient::on_drag_source_finished()
 Gfx::IntPoint WaylandClient::adjusted_drag_position() const
 {
     MutexLocker locker(m_mutex);
-    auto const* window_surface = const_cast<WaylandClient*>(this)->find(m_drag_window);
+    auto const* window_surface = const_cast<WaylandClient*>(this)->find(m_data_device.drag_window);
     int inset = window_surface ? window_surface->inset : 0;
-    return m_drag_position.translated(0, -inset);
+    return m_data_device.drag_position.translated(0, -inset);
 }
 
 ByteBuffer WaylandClient::receive_offer_data(wl_data_offer* offer, ByteString const& mime)
@@ -380,91 +380,91 @@ ByteBuffer WaylandClient::receive_offer_data(wl_data_offer* offer, ByteString co
 void WaylandClient::on_drag_enter(u32 serial, wl_data_offer* offer, wl_surface* surface, Gfx::IntPoint position)
 {
     MutexLocker locker(m_mutex);
-    m_drag_offer = offer;
-    m_drag_serial = serial;
-    m_drag_window = window_id_for_surface(surface);
-    m_drag_position = position;
-    m_drag_mime = preferred_mime_for(offer);
-    m_drag_received.clear();
+    m_data_device.drag_offer = offer;
+    m_data_device.drag_serial = serial;
+    m_data_device.drag_window = window_id_for_surface(surface);
+    m_data_device.drag_position = position;
+    m_data_device.drag_mime = preferred_mime_for(offer);
+    m_data_device.drag_received.clear();
     // Each drag starts undecided; the target widget accepts (or not).
-    m_accepts_drag = false;
+    m_data_device.accepts_drag = false;
     // Fetch the offered data (the source writes it on demand). Skipped while this
     // process is itself the source: reading would block the same event loop that
     // would answer the request.
-    if (offer && !m_drag_source) {
-        if (auto it = m_offer_mime_types.find(reinterpret_cast<u64>(offer)); it != m_offer_mime_types.end()) {
+    if (offer && !m_data_device.drag_source) {
+        if (auto it = m_data_device.offer_mime_types.find(reinterpret_cast<u64>(offer)); it != m_data_device.offer_mime_types.end()) {
             auto mimes = it->value;
             for (auto const& mime : mimes) {
                 auto data = receive_offer_data(offer, mime);
                 if (!data.is_empty())
-                    m_drag_received.set(String::from_byte_string(mime).release_value_but_fixme_should_propagate_errors(), move(data));
+                    m_data_device.drag_received.set(String::from_byte_string(mime).release_value_but_fixme_should_propagate_errors(), move(data));
             }
         }
     }
     // The widget decides whether it accepts; Application replies with
     // set_accepts_drag() after the dispatched event, which accepts the offer.
-    if (m_accepts_drag && offer && !m_drag_mime.is_empty())
-        wl_data_offer_accept(offer, serial, m_drag_mime.characters());
-    if (m_drag_window >= 0 && m_input.drag_moved)
-        m_input.drag_moved(m_drag_window, adjusted_drag_position(), m_pointer_buttons, current_modifiers(), m_drag_received);
+    if (m_data_device.accepts_drag && offer && !m_data_device.drag_mime.is_empty())
+        wl_data_offer_accept(offer, serial, m_data_device.drag_mime.characters());
+    if (m_data_device.drag_window >= 0 && m_input.drag_moved)
+        m_input.drag_moved(m_data_device.drag_window, adjusted_drag_position(), m_input_state.pointer_buttons, current_modifiers(), m_data_device.drag_received);
 }
 
 void WaylandClient::on_drag_motion(Gfx::IntPoint position)
 {
     MutexLocker locker(m_mutex);
-    m_drag_position = position;
-    if (m_drag_offer && m_accepts_drag && !m_drag_mime.is_empty())
-        wl_data_offer_accept(m_drag_offer, m_drag_serial, m_drag_mime.characters());
-    if (m_drag_window >= 0 && m_input.drag_moved)
-        m_input.drag_moved(m_drag_window, adjusted_drag_position(), m_pointer_buttons, current_modifiers(), m_drag_received);
+    m_data_device.drag_position = position;
+    if (m_data_device.drag_offer && m_data_device.accepts_drag && !m_data_device.drag_mime.is_empty())
+        wl_data_offer_accept(m_data_device.drag_offer, m_data_device.drag_serial, m_data_device.drag_mime.characters());
+    if (m_data_device.drag_window >= 0 && m_input.drag_moved)
+        m_input.drag_moved(m_data_device.drag_window, adjusted_drag_position(), m_input_state.pointer_buttons, current_modifiers(), m_data_device.drag_received);
 }
 
 void WaylandClient::set_accepts_drag(bool accepts)
 {
     MutexLocker locker(m_mutex);
-    m_accepts_drag = accepts;
-    if (accepts && m_drag_offer && !m_drag_mime.is_empty())
-        wl_data_offer_accept(m_drag_offer, m_drag_serial, m_drag_mime.characters());
+    m_data_device.accepts_drag = accepts;
+    if (accepts && m_data_device.drag_offer && !m_data_device.drag_mime.is_empty())
+        wl_data_offer_accept(m_data_device.drag_offer, m_data_device.drag_serial, m_data_device.drag_mime.characters());
 }
 
 void WaylandClient::on_drag_drop()
 {
     MutexLocker locker(m_mutex);
-    if (m_drag_window >= 0 && m_input.drag_dropped)
-        m_input.drag_dropped(m_drag_window, adjusted_drag_position(), m_pointer_buttons, current_modifiers(), m_drag_received);
-    if (m_drag_offer) {
-        wl_data_offer_finish(m_drag_offer);
-        forget_offer(m_drag_offer);
-        wl_data_offer_destroy(m_drag_offer);
-        m_drag_offer = nullptr;
+    if (m_data_device.drag_window >= 0 && m_input.drag_dropped)
+        m_input.drag_dropped(m_data_device.drag_window, adjusted_drag_position(), m_input_state.pointer_buttons, current_modifiers(), m_data_device.drag_received);
+    if (m_data_device.drag_offer) {
+        wl_data_offer_finish(m_data_device.drag_offer);
+        forget_offer(m_data_device.drag_offer);
+        wl_data_offer_destroy(m_data_device.drag_offer);
+        m_data_device.drag_offer = nullptr;
     }
-    m_drag_window = -1;
-    m_drag_received.clear();
+    m_data_device.drag_window = -1;
+    m_data_device.drag_received.clear();
 }
 
 void WaylandClient::on_drag_leave()
 {
     MutexLocker locker(m_mutex);
-    if (m_drag_offer) {
-        forget_offer(m_drag_offer);
-        wl_data_offer_destroy(m_drag_offer);
-        m_drag_offer = nullptr;
+    if (m_data_device.drag_offer) {
+        forget_offer(m_data_device.drag_offer);
+        wl_data_offer_destroy(m_data_device.drag_offer);
+        m_data_device.drag_offer = nullptr;
     }
-    m_drag_window = -1;
-    m_drag_received.clear();
+    m_data_device.drag_window = -1;
+    m_data_device.drag_received.clear();
 }
 
 // An offer we are about to destroy must not be reachable from the selection state
-// any more (the drag and the selection share m_pending_offers / m_offer_mime_types).
+// any more (the drag and the selection share pending_offers / offer_mime_types).
 void WaylandClient::forget_offer(wl_data_offer* offer)
 {
     MutexLocker locker(m_mutex);
-    m_offer_mime_types.remove(reinterpret_cast<u64>(offer));
-    if (m_current_offer == offer)
-        m_current_offer = nullptr;
-    for (size_t i = m_pending_offers.size(); i > 0; --i) {
-        if (m_pending_offers[i - 1] == offer)
-            m_pending_offers.remove(i - 1);
+    m_data_device.offer_mime_types.remove(reinterpret_cast<u64>(offer));
+    if (m_data_device.current_offer == offer)
+        m_data_device.current_offer = nullptr;
+    for (size_t i = m_data_device.pending_offers.size(); i > 0; --i) {
+        if (m_data_device.pending_offers[i - 1] == offer)
+            m_data_device.pending_offers.remove(i - 1);
     }
 }
 
@@ -475,18 +475,18 @@ Vector<ByteString> WaylandClient::clipboard_mime_types() const
     MutexLocker locker(m_mutex);
     // If we own the selection, the offers are the canonical list: the data-source
     // round trip would block the same event loop that has to answer it.
-    if (m_data_source && !m_clipboard_offers.is_empty()) {
+    if (m_data_device.selection_source && !m_data_device.clipboard_offers.is_empty()) {
         Vector<ByteString> mimes;
-        mimes.ensure_capacity(m_clipboard_offers.size());
-        for (auto const& it : m_clipboard_offers)
+        mimes.ensure_capacity(m_data_device.clipboard_offers.size());
+        for (auto const& it : m_data_device.clipboard_offers)
             mimes.append(ByteString { it.key.view() });
         return mimes;
     }
 
-    if (!m_current_offer)
+    if (!m_data_device.current_offer)
         return {};
 
-    if (auto it = m_offer_mime_types.find(reinterpret_cast<u64>(m_current_offer)); it != m_offer_mime_types.end()) {
+    if (auto it = m_data_device.offer_mime_types.find(reinterpret_cast<u64>(m_data_device.current_offer)); it != m_data_device.offer_mime_types.end()) {
         Vector<ByteString> mimes;
         mimes.ensure_capacity(it->value.size());
         for (auto const& mime : it->value)
@@ -505,13 +505,9 @@ ErrorOr<ByteBuffer> WaylandClient::read_clipboard_for_mime(ByteString const& wan
     int fds[2] = { -1, -1 };
     {
         MutexLocker locker(m_mutex);
-        // If we are the clipboard owner, serve the stored offers directly. A
-        // Wayland round trip through our own data source would require dispatching
-        // the data-source request while the caller is blocked reading the pipe, and
-        // the 2 s timeout turned large copies into a long stall (and could take the
-        // client's clipboard connection down with it).
-        if (m_data_source && !m_clipboard_offers.is_empty()) {
-            if (auto it = m_clipboard_offers.find(wanted_mime); it != m_clipboard_offers.end()) {
+        // If we are the clipboard owner, serve the stored offers directly.
+        if (m_data_device.selection_source && !m_data_device.clipboard_offers.is_empty()) {
+            if (auto it = m_data_device.clipboard_offers.find(wanted_mime); it != m_data_device.clipboard_offers.end()) {
                 out_mime_type = it->key;
                 return ByteBuffer::copy(it->value);
             }
@@ -519,7 +515,7 @@ ErrorOr<ByteBuffer> WaylandClient::read_clipboard_for_mime(ByteString const& wan
             // text/plain is offered under a few aliases; accept any of them.
             if (wanted_mime == "text/plain"sv || wanted_mime.starts_with("text/plain;"sv)) {
                 for (auto const& alias : { "text/plain"sv, "text/plain;charset=utf-8"sv, "UTF8_STRING"sv, "STRING"sv }) {
-                    if (auto it = m_clipboard_offers.find(ByteString(alias)); it != m_clipboard_offers.end()) {
+                    if (auto it = m_data_device.clipboard_offers.find(ByteString(alias)); it != m_data_device.clipboard_offers.end()) {
                         out_mime_type = ByteString("text/plain");
                         return ByteBuffer::copy(it->value);
                     }
@@ -529,13 +525,13 @@ ErrorOr<ByteBuffer> WaylandClient::read_clipboard_for_mime(ByteString const& wan
             return Error::from_string_literal("LibWM: selection does not offer the requested MIME type");
         }
 
-        if (!m_current_offer || !m_display)
+        if (!m_data_device.current_offer || !m_display)
             return Error::from_string_literal("LibWM: no clipboard selection");
 
         if (pipe(fds) != 0)
             return Error::from_errno(errno);
 
-        wl_data_offer_receive(m_current_offer, wanted_mime.characters(), fds[1]);
+        wl_data_offer_receive(m_data_device.current_offer, wanted_mime.characters(), fds[1]);
         wl_display_flush(m_display);
         close(fds[1]);
     }
@@ -577,19 +573,19 @@ ErrorOr<ByteBuffer> WaylandClient::read_clipboard(ByteString& out_mime_type)
     ByteString mime;
     {
         MutexLocker locker(m_mutex);
-        if (m_data_source && !m_clipboard_offers.is_empty()) {
+        if (m_data_device.selection_source && !m_data_device.clipboard_offers.is_empty()) {
             for (auto const& preferred : { "text/plain"sv, "text/plain;charset=utf-8"sv, "UTF8_STRING"sv, "text/uri-list"sv, "image/png"sv, "image/x-serenityos"sv }) {
-                if (m_clipboard_offers.contains(ByteString(preferred))) {
+                if (m_data_device.clipboard_offers.contains(ByteString(preferred))) {
                     mime = ByteString(preferred);
                     break;
                 }
             }
             if (mime.is_empty())
-                mime = m_clipboard_offers.begin()->key;
+                mime = m_data_device.clipboard_offers.begin()->key;
         } else {
-            if (!m_current_offer)
+            if (!m_data_device.current_offer)
                 return Error::from_string_literal("LibWM: no clipboard selection");
-            mime = preferred_mime_for(m_current_offer);
+            mime = preferred_mime_for(m_data_device.current_offer);
             if (mime.is_empty())
                 return Error::from_string_literal("LibWM: selection offers no usable type");
         }
@@ -601,31 +597,31 @@ ErrorOr<ByteBuffer> WaylandClient::read_clipboard(ByteString& out_mime_type)
 void WaylandClient::write_clipboard(HashMap<ByteString, ByteBuffer> offers)
 {
     MutexLocker locker(m_mutex);
-    m_clipboard_offers = move(offers);
+    m_data_device.clipboard_offers = move(offers);
 
-    if (!m_data_device_manager || !m_data_device) {
+    if (!m_data_device.manager || !m_data_device.device) {
         dbgln("LibWM/Wayland: cannot set clipboard (no data device)");
         return;
     }
 
-    if (m_data_source) {
-        wl_data_source_destroy(m_data_source);
-        m_data_source = nullptr;
+    if (m_data_device.selection_source) {
+        wl_data_source_destroy(m_data_device.selection_source);
+        m_data_device.selection_source = nullptr;
     }
 
-    if (m_clipboard_offers.is_empty()) {
-        wl_data_device_set_selection(m_data_device, nullptr, m_last_input_serial);
+    if (m_data_device.clipboard_offers.is_empty()) {
+        wl_data_device_set_selection(m_data_device.device, nullptr, m_input_state.last_serial);
         wl_display_flush(m_display);
         return;
     }
 
-    m_data_source = wl_data_device_manager_create_data_source(m_data_device_manager);
-    wl_data_source_add_listener(m_data_source, &s_data_source_listener, this);
-    for (auto const& it : m_clipboard_offers)
-        wl_data_source_offer(m_data_source, it.key.characters());
-    wl_data_device_set_selection(m_data_device, m_data_source, m_last_input_serial);
+    m_data_device.selection_source = wl_data_device_manager_create_data_source(m_data_device.manager);
+    wl_data_source_add_listener(m_data_device.selection_source, &s_data_source_listener, this);
+    for (auto const& it : m_data_device.clipboard_offers)
+        wl_data_source_offer(m_data_device.selection_source, it.key.characters());
+    wl_data_device_set_selection(m_data_device.device, m_data_device.selection_source, m_input_state.last_serial);
     wl_display_flush(m_display);
-    dbgln("LibWM/Wayland: set clipboard ({} representation(s), serial {})", m_clipboard_offers.size(), m_last_input_serial);
+    dbgln("LibWM/Wayland: set clipboard ({} representation(s), serial {})", m_data_device.clipboard_offers.size(), m_input_state.last_serial);
 }
 
 }

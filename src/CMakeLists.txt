@@ -99,6 +99,7 @@ add_library(windowserver SHARED
     WaylandInput.cpp
     WaylandSurface.cpp
     WindowServerConnection.cpp
+    WindowServerSettings.cpp
     "${SERENITY_PROJECT_ROOT}/Userland/Services/ImageDecoder/ConnectionFromClient.cpp"
     "${WM_WAYLAND_DIR}/xdg-shell-protocol.c"
     "${WM_WAYLAND_DIR}/text-input-unstable-v3-protocol.c"
