@@ -46,7 +46,7 @@ env XDG_RUNTIME_DIR="$RUNTIME" SDE_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLA
     SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
     LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
     "$BUILD_DIR/bin/libwm-unit-test" > "$RUNTIME/unit.log" 2>&1
-check "unit: MenuController, PNG & Config (36 checks)" "grep -q '36 passed, 0 failed' '$RUNTIME/unit.log'"
+check "unit: MenuController, PNG, Config & concurrency" "grep -q '38 passed, 0 failed' '$RUNTIME/unit.log'"
 
 # --- 2. Window state transitions (fullscreen, maximize, minimize, resize) ----
 cat > "$RUNTIME/fs.input" <<'EOF'

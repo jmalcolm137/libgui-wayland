@@ -21,9 +21,10 @@
 #include <WindowServer/WindowClientEndpoint.h>
 #include <WindowServer/WindowServerEndpoint.h>
 
+#include "MainThreadInvoker.h"
+#include "MenuController.h"
 #include "WaylandClient.h"
 #include "WindowServerDefaultStub.h"
-#include "MenuController.h"
 
 namespace LibWM {
 
@@ -70,7 +71,9 @@ private:
         auto& host = WaylandClient::the();
         if (!host.on_host_settings_updated) {
             host.on_host_settings_updated = [this] {
-                apply_theme_from_broker();
+                MainThreadInvoker::post_to_server([this] {
+                    apply_theme_from_broker();
+                });
             };
             host.on_host_settings_updated_owner = this;
         }

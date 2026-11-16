@@ -236,6 +236,52 @@ void test_config_server_portal()
     check(client.list_config_groups("TestDomain"sv).is_empty(), "Config portal removes group entry"sv);
 }
 
+void test_wayland_client_thread_safety()
+{
+    auto& client = LibWM::WaylandClient::the();
+
+    // Hammer WaylandClient state concurrently from 4 worker threads while the
+    // main thread updates host settings, host config, scale, and wallpaper.
+    constexpr int iterations = 500;
+    Vector<pthread_t, 4> threads;
+    for (int t = 0; t < 4; ++t) {
+        pthread_t tid {};
+        pthread_create(
+            &tid, nullptr, +[](void*) -> void* {
+                auto& c = LibWM::WaylandClient::the();
+                for (int i = 0; i < iterations; ++i) {
+                    c.set_host_setting("mouse.acceleration"sv, "1.5"sv);
+                    (void)c.host_setting("mouse.acceleration"sv, "1.0"sv);
+                    (void)c.host_config();
+                    (void)c.host_wallpaper();
+                    (void)c.captured_bitmap();
+                    (void)c.clipboard_mime_types();
+                    (void)c.window_menubar_visible(1);
+                    (void)c.global_pointer_position();
+                    c.set_client_scale((i % 2) + 1);
+                    (void)c.client_scale();
+                }
+                return nullptr;
+            },
+            nullptr);
+        threads.append(tid);
+    }
+
+    for (int i = 0; i < iterations; ++i) {
+        client.on_host_settings("mouse.acceleration=2.0\ncursor.theme=Default\n"sv);
+        client.on_host_config(2, 2, 0.5, 3.5, 1, 100, 900);
+        client.on_output_scale((i % 2) + 1);
+    }
+
+    for (auto tid : threads)
+        pthread_join(tid, nullptr);
+
+    check(client.host_config().workspace_rows == 2 && client.host_config().workspace_columns == 2,
+        "WaylandClient concurrent host_config updates are race-free"sv);
+    check(!client.host_setting("mouse.acceleration"sv).is_empty(),
+        "WaylandClient concurrent host_setting reads/writes are race-free"sv);
+}
+
 }
 
 ErrorOr<int> serenity_main(Main::Arguments)
@@ -245,6 +291,7 @@ ErrorOr<int> serenity_main(Main::Arguments)
     test_menu_controller();
     test_clipboard_image_transcoding();
     test_config_server_portal();
+    test_wayland_client_thread_safety();
 
     outln("==> libwm-unit-test: {} passed, {} failed", s_passed, s_failed);
     return s_failed == 0 ? 0 : 1;

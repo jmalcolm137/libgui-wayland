@@ -29,7 +29,6 @@
 #include <stdlib.h>
 #include <sys/socket.h>
 #include <sys/un.h>
-#include <sys/un.h>
 #include <unistd.h>
 
 namespace LibWM {
@@ -416,6 +415,9 @@ static void start_server_thread()
         ::close(launch_server);
         ::close(config_server);
         ::close(file_system_access_server);
+        ::close(image_decoder_server);
+        for (auto const& it : s_client_fds)
+            ::close(it.value);
         s_client_fds.clear();
         return;
     }

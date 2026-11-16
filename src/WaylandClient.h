@@ -14,6 +14,7 @@
 #include <AK/NonnullOwnPtr.h>
 #include <AK/RefPtr.h>
 #include <AK/Span.h>
+#include <AK/String.h>
 #include <AK/Vector.h>
 #include <LibCore/AnonymousBuffer.h>
 #include <LibGfx/Point.h>
@@ -70,10 +71,26 @@ namespace LibWM {
 //
 // This is the source of truth for environmental state (principle P1): output
 // logical size and scale, seat capabilities, input, shm, and the xdg-shell
-// objects used to present LibGUI windows. It is driven from the WindowServer
-// thread's event loop.
+// objects used to present LibGUI windows.
+//
+// Threading: Wayland events are dispatched on the main thread, while the
+// in-process portal servers (WindowServerConnection, ClipboardServerConnection)
+// invoke methods from the LibWM server thread. Access to shared state is
+// serialized by the recursive mutex `m_mutex` (and per-surface `WindowSurface::mutex`).
 class WaylandClient {
 public:
+    struct MutexLocker {
+        explicit MutexLocker(pthread_mutex_t& mutex)
+            : m_mutex(mutex)
+        {
+            pthread_mutex_lock(&m_mutex);
+        }
+        ~MutexLocker() { pthread_mutex_unlock(&m_mutex); }
+
+    private:
+        pthread_mutex_t& m_mutex;
+    };
+
     // Input is delivered through these callbacks, which the WindowServer
     // connection installs to translate into Serenity WindowClient events.
     struct InputCallbacks {
@@ -104,16 +121,36 @@ public:
     static WaylandClient& the();
 
     ErrorOr<void> ensure_connected();
-    bool is_connected() const { return m_display != nullptr; }
+    bool is_connected() const
+    {
+        MutexLocker locker(m_mutex);
+        return m_display != nullptr;
+    }
 
     // Logical screen size and output scale as reported by the compositor.
-    Gfx::IntSize screen_size() const { return m_screen_size; }
-    int output_scale() const { return m_scale; }
+    Gfx::IntSize screen_size() const
+    {
+        MutexLocker locker(m_mutex);
+        return m_screen_size;
+    }
+    int output_scale() const
+    {
+        MutexLocker locker(m_mutex);
+        return m_scale;
+    }
     // The backing-store scale the shim told the client to render at (usually the
     // output scale; 1 when client scaling is disabled). Distinct from output_scale
     // so present() maps buffers correctly regardless of a resize margin.
-    int client_scale() const { return m_client_scale; }
-    void set_client_scale(int scale) { m_client_scale = scale < 1 ? 1 : scale; }
+    int client_scale() const
+    {
+        MutexLocker locker(m_mutex);
+        return m_client_scale;
+    }
+    void set_client_scale(int scale)
+    {
+        MutexLocker locker(m_mutex);
+        m_client_scale = scale < 1 ? 1 : scale;
+    }
 
     // The pointer's position in output coordinates, reconstructed from the
     // surface under the pointer and that surface's known origin. The compositor
@@ -121,19 +158,31 @@ public:
     // how the client places tooltips near the cursor.
     Gfx::IntPoint global_pointer_position();
 
-    void set_input_callbacks(InputCallbacks callbacks) { m_input = move(callbacks); }
+    void set_input_callbacks(InputCallbacks callbacks)
+    {
+        MutexLocker locker(m_mutex);
+        m_input = move(callbacks);
+    }
 
     // The compositor connection failed (closed socket, protocol error, or a
     // vanished compositor). Without a handler the current event loop is asked to
     // exit, which is right for a single-window applet. An application that owns
     // durable state (the browser session) installs a handler to record why it
     // ended and save before quitting.
-    void set_connection_lost_callback(Function<void(ByteString const& reason)> callback) { m_connection_lost = move(callback); }
+    void set_connection_lost_callback(Function<void(ByteString const& reason)> callback)
+    {
+        MutexLocker locker(m_mutex);
+        m_connection_lost = move(callback);
+    }
 
     // --- Clipboard (native Wayland data device) ---
     // Called when the compositor's selection changes; the mime type is a
     // preferred Serenity-side type (e.g. "text/plain").
-    void set_clipboard_changed_callback(Function<void(ByteString const&)> callback) { m_clipboard_changed = move(callback); }
+    void set_clipboard_changed_callback(Function<void(ByteString const&)> callback)
+    {
+        MutexLocker locker(m_mutex);
+        m_clipboard_changed = move(callback);
+    }
     // The MIME types the current selection offers, in the source's order.
     Vector<ByteString> clipboard_mime_types() const;
     // Fetch the current selection, preferring text then files/images. Blocks until the source closes the pipe.
@@ -143,7 +192,11 @@ public:
     // Advertise a set of mime-type -> bytes representations as the selection.
     void write_clipboard(HashMap<ByteString, ByteBuffer> offers);
     // Whether this client currently owns the selection.
-    bool owns_clipboard() const { return m_data_source && !m_clipboard_offers.is_empty(); }
+    bool owns_clipboard() const
+    {
+        MutexLocker locker(m_mutex);
+        return m_data_source && !m_clipboard_offers.is_empty();
+    }
 
     // Window <-> xdg_toplevel lifecycle.
     void create_window(i32 window_id, Gfx::IntPoint position, Gfx::IntSize, ByteString const& title, bool has_alpha, bool resizable, i32 window_type, i32 window_mode, i32 parent_window_id, Gfx::IntRect const& launch_origin = {});
@@ -191,20 +244,44 @@ public:
     // Wayland event dispatch (registered on the owning event loop).
     void dispatch();
 
-    // --- called by the C protocol listeners (see WaylandClient.cpp) ---
+    // --- called by the C protocol listeners ---
     struct BufferRecord {
         wl_buffer* buffer { nullptr };
         bool released { false };
     };
-    void set_compositor(wl_compositor* compositor) { m_compositor = compositor; }
-    void set_subcompositor(wl_subcompositor* subcompositor) { m_subcompositor = subcompositor; }
-    void set_shm(wl_shm* shm) { m_shm = shm; }
+    void set_compositor(wl_compositor* compositor)
+    {
+        MutexLocker locker(m_mutex);
+        m_compositor = compositor;
+    }
+    void set_subcompositor(wl_subcompositor* subcompositor)
+    {
+        MutexLocker locker(m_mutex);
+        m_subcompositor = subcompositor;
+    }
+    void set_shm(wl_shm* shm)
+    {
+        MutexLocker locker(m_mutex);
+        m_shm = shm;
+    }
     void add_seat(wl_seat* seat);
     void ensure_text_input();
     void add_wm_base(xdg_wm_base* wm_base);
-    void set_decoration_manager(zxdg_decoration_manager_v1* manager) { m_decoration_manager = manager; }
-    void set_viewporter(wp_viewporter* viewporter) { m_viewporter = viewporter; }
-    void set_layer_shell(zwlr_layer_shell_v1* shell) { m_layer_shell = shell; }
+    void set_decoration_manager(zxdg_decoration_manager_v1* manager)
+    {
+        MutexLocker locker(m_mutex);
+        m_decoration_manager = manager;
+    }
+    void set_viewporter(wp_viewporter* viewporter)
+    {
+        MutexLocker locker(m_mutex);
+        m_viewporter = viewporter;
+    }
+    void set_layer_shell(zwlr_layer_shell_v1* shell)
+    {
+        MutexLocker locker(m_mutex);
+        m_layer_shell = shell;
+    }
     void set_serenity_window_manager(serenity_window_manager* manager);
     // The window-server configuration the *desktop* owns: the workspace grid and
     // the input-setting bounds. The compositor sends it over serenity-window (see
@@ -220,7 +297,11 @@ public:
         int double_click_min { 100 };
         int double_click_max { 900 };
     };
-    HostConfig const& host_config() const { return m_host_config; }
+    HostConfig host_config() const
+    {
+        MutexLocker locker(m_mutex);
+        return m_host_config;
+    }
     // The desktop-owned settings, keyed semantically (see the protocol). The
     // compositor sends them; the shim answers an application's WindowServer config
     // requests from here and forwards changes back, so it never touches the
@@ -228,14 +309,6 @@ public:
     ByteString host_setting(StringView key, StringView fallback = {}) const;
     void set_host_setting(StringView key, StringView value);
 
-    // Called after the compositor's host settings arrive, or change.
-    //
-    // They can be the *only* source of a value. The system theme, for instance,
-    // falls back to the `theme.path`/`theme.name` settings when no live broker file
-    // exists -- which is the normal case for a client started after the session
-    // began -- and the settings are delivered over IPC, i.e. after the constructor
-    // that reads them has already run. Anything derived from a host setting has to
-    // be recomputed here, or it keeps the value it read when there was nothing yet.
     // R5: the app's GUI::DisplayLink. SerenityOS drives it from the window
     // server's frame loop; here it is paced by the window surface's frame
     // callbacks. The Magnifier captures on every callback.
@@ -248,20 +321,40 @@ public:
     // object dies instead of being called through a dangling capture.
     void* on_host_settings_updated_owner { nullptr };
     // The desktop's wallpaper, sent as raw pixels over serenity-window.
-    Gfx::Bitmap* host_wallpaper() { return m_host_wallpaper.ptr(); }
+    RefPtr<Gfx::Bitmap> host_wallpaper()
+    {
+        MutexLocker locker(m_mutex);
+        return m_host_wallpaper;
+    }
 
     // R5 accessibility (docs/29): the Magnifier asks for a region of the screen.
     // The compositor pushes it back as `captured`; this returns the most recent one,
     // so a capture never blocks the caller. request_capture() asks for another.
-    Gfx::Bitmap* captured_bitmap() { return m_captured.ptr(); }
+    RefPtr<Gfx::Bitmap> captured_bitmap()
+    {
+        MutexLocker locker(m_mutex);
+        return m_captured;
+    }
     void request_capture(Gfx::IntRect const&);
     void set_host_wallpaper(Gfx::Bitmap* bitmap);
     // The compositor asks the client to show/hide a window's menu bar.
-    void set_menubar_visibility_callback(Function<void(i32 window_id, bool visible)> callback) { m_menubar_visibility_changed = move(callback); }
+    void set_menubar_visibility_callback(Function<void(i32 window_id, bool visible)> callback)
+    {
+        MutexLocker locker(m_mutex);
+        m_menubar_visibility_changed = move(callback);
+    }
     // The compositor asks the client to close its open menus (see the protocol).
-    void set_dismiss_menus_callback(Function<void()> callback) { m_dismiss_menus = move(callback); }
+    void set_dismiss_menus_callback(Function<void()> callback)
+    {
+        MutexLocker locker(m_mutex);
+        m_dismiss_menus = move(callback);
+    }
     // The compositor tells the client where it placed a window.
-    void set_toplevel_position_callback(Function<void(i32 window_id, Gfx::IntPoint position)> callback) { m_toplevel_position_changed = move(callback); }
+    void set_toplevel_position_callback(Function<void(i32 window_id, Gfx::IntPoint position)> callback)
+    {
+        MutexLocker locker(m_mutex);
+        m_toplevel_position_changed = move(callback);
+    }
     void set_data_device_manager(wl_data_device_manager* manager);
 
     // --- Text input / IME (zwp_text_input_v3) ---
@@ -272,7 +365,11 @@ public:
     using TextInputDeleteSurrounding = Function<void(i32 before_length, i32 after_length)>;
     void set_text_input_callbacks(TextInputCommit, TextInputPreedit, TextInputDeleteSurrounding);
     void set_text_input_enabled(bool);
-    bool text_input_enabled() const { return m_text_input_enabled; }
+    bool text_input_enabled() const
+    {
+        MutexLocker locker(m_mutex);
+        return m_text_input_enabled;
+    }
     void set_text_input_cursor_rect(Gfx::IntRect const& rect);
     void set_text_input_manager(zwp_text_input_manager_v3*);
     void on_text_input_enter();
@@ -282,8 +379,16 @@ public:
     void add_output(wl_output* output);
     void set_xdg_output_manager(zxdg_output_manager_v1* manager);
     void on_output_logical_size(wl_output*, Gfx::IntSize logical_size);
-    void on_output_mode(Gfx::IntSize physical_size) { m_physical_size = physical_size; }
-    void on_output_scale(int factor) { m_scale = factor > 0 ? factor : 1; }
+    void on_output_mode(Gfx::IntSize physical_size)
+    {
+        MutexLocker locker(m_mutex);
+        m_physical_size = physical_size;
+    }
+    void on_output_scale(int factor)
+    {
+        MutexLocker locker(m_mutex);
+        m_scale = factor > 0 ? factor : 1;
+    }
     void on_output_done();
 
     void on_seat_capabilities(u32 capabilities);
@@ -330,16 +435,27 @@ public:
     void on_drag_source_cancelled(wl_data_source*);
     void on_drag_source_drop_performed();
     void on_drag_source_finished();
-    void on_drag_source_action(u32 action) { m_drag_action = action; }
+    void on_drag_source_action(u32 action)
+    {
+        MutexLocker locker(m_mutex);
+        m_drag_action = action;
+    }
     void set_accepts_drag(bool accepts);
     void on_popup_done(xdg_popup*);
     void on_surface_configured(xdg_surface*);
     void on_frame_done(wl_callback*);
     void on_display_link_frame_done(wl_callback*);
-    void note_input_serial(u32 serial) { m_last_input_serial = serial; }
+    void note_input_serial(u32 serial)
+    {
+        MutexLocker locker(m_mutex);
+        m_last_input_serial = serial;
+    }
 
 private:
-    WaylandClient() = default;
+    WaylandClient();
+    ~WaylandClient();
+
+    mutable pthread_mutex_t m_mutex {};
 
     struct WindowSurface {
         // The Wayland display is dispatched on the main thread, but the LibWM
@@ -349,7 +465,7 @@ private:
         // point that touches a surface holds this lock. Without it, heavy output
         // (the Terminal) races append-against-move/clear and loses damage regions
         // or corrupts the heap.
-        pthread_mutex_t mutex { };
+        pthread_mutex_t mutex {};
         WindowSurface()
         {
             pthread_mutexattr_t attributes;

@@ -27,26 +27,6 @@
 
 namespace {
 
-// Wallpaper/background state: written by apps, read by the compositor. Kept in a
-// persistent directory so a chosen wallpaper survives a session restart.
-
-
-
-
-// Input settings (R4.6): a small input.ini the compositor watches and applies to
-// the (libinput) devices. Mouse Settings reads and writes it through here.
-
-
-// Cursor theme/highlight (cursor.ini): Mouse Settings' Highlight/Theme tabs. The
-// compositor applies these to the real cursor/highlight in R4.7.
-
-
-// The SDE WindowServer.ini (the compositor's config schema): effects, input
-// ranges, workspace grid, ... The port reads it for values clients need and
-// writes the [Effects] section back when the user changes effects.
-
-
-
 // The wallpaper state is stored as raw pixels, not a PNG: encoding a full-screen
 // image to PNG takes several hundred milliseconds and would stall the UI thread
 // of whichever application applies it. Must match WallpaperHeader in the
@@ -119,16 +99,6 @@ void WindowServerConnection::remove_window(i32 id)
 {
     m_windows.remove_first_matching([&](auto& window) { return window->id == id; });
 }
-
-// The workspace grid, read from the same config the compositor uses ([Workspaces]
-// in WindowServer.ini: the SerenityOS default overlaid by the user's file in the
-// session state directory). GUI::Desktop gets these with the screen rects, and the
-// WorkspacePicker applet sizes its grid from them.
-
-
-// R4.6: input-setting bounds from WindowServer.ini [Input] (the SDE config
-// schema, the same file the compositor reads). Returns the raw entry so callers
-// can parse the type they need.
 
 namespace {
 struct FontQueries {
@@ -703,7 +673,7 @@ Gfx::ShareableBitmap capture_around(Gfx::IntSize size, Gfx::IntPoint location)
     auto& wayland = WaylandClient::the();
     Gfx::IntRect const region { { location.x() - size.width() / 2, location.y() - size.height() / 2 }, size };
     wayland.request_capture(region);
-    if (auto* bitmap = wayland.captured_bitmap())
+    if (auto bitmap = wayland.captured_bitmap())
         return bitmap->to_shareable_bitmap();
     return Gfx::ShareableBitmap { };
 }
@@ -725,7 +695,7 @@ Messages::WindowServer::GetWallpaperResponse WindowServerConnection::get_wallpap
         return m_wallpaper->to_shareable_bitmap();
     // Rolling-upgrade compatibility: an older compositor still pushes the
     // wallpaper over serenity-window. New compositors leave it unset.
-    if (auto* host = WaylandClient::the().host_wallpaper()) {
+    if (auto host = WaylandClient::the().host_wallpaper()) {
         m_wallpaper = host;
         return m_wallpaper->to_shareable_bitmap();
     }
