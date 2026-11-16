@@ -18,6 +18,7 @@
 #include <wayland-client.h>
 
 static struct wl_display *display;
+static struct wl_compositor *compositor;
 static struct wl_data_device_manager *manager;
 static struct wl_seat *seat;
 static struct wl_data_device *device;
@@ -93,7 +94,13 @@ static void source_cancelled(void *data, struct wl_data_source *src)
 }
 static void source_target(void *d, struct wl_data_source *s, const char *m) { (void)d; (void)s; (void)m; }
 static void source_dnd_drop_performed(void *d, struct wl_data_source *s) { (void)d; (void)s; }
-static void source_dnd_finished(void *d, struct wl_data_source *s) { (void)d; (void)s; }
+static void source_dnd_finished(void *d, struct wl_data_source *s)
+{
+    (void)d; (void)s;
+    printf("PEER: dnd_finished\n");
+    fflush(stdout);
+    exit(0);
+}
 static void source_action(void *d, struct wl_data_source *s, uint32_t a) { (void)d; (void)s; (void)a; }
 
 static struct wl_data_source_listener const source_listener = {
@@ -151,7 +158,9 @@ static void registry_global(void *data, struct wl_registry *registry, uint32_t n
                             const char *interface, uint32_t version)
 {
     (void)data;
-    if (!strcmp(interface, wl_data_device_manager_interface.name))
+    if (!strcmp(interface, wl_compositor_interface.name))
+        compositor = wl_registry_bind(registry, name, &wl_compositor_interface, 1);
+    else if (!strcmp(interface, wl_data_device_manager_interface.name))
         manager = wl_registry_bind(registry, name, &wl_data_device_manager_interface, version < 3 ? version : 3);
     else if (!strcmp(interface, wl_seat_interface.name))
         seat = wl_registry_bind(registry, name, &wl_seat_interface, 1);
@@ -209,6 +218,13 @@ int main(int argc, char **argv)
         }
         if (set_count == 0)
             return 2;
+    } else if (!strcmp(argv[1], "drag")) {
+        if (argc < 3) return 2;
+        mode = 4;
+        set_mimes[0] = "text/plain";
+        set_datas[0] = (unsigned char *)argv[2];
+        set_sizes[0] = strlen(argv[2]);
+        set_count = 1;
     } else if (!strcmp(argv[1], "get")) {
         mode = 0;
         want_mime = argc >= 3 ? argv[2] : NULL;
@@ -243,9 +259,16 @@ int main(int argc, char **argv)
             wl_data_source_offer(source, "text/plain;charset=utf-8");
             wl_data_source_offer(source, "UTF8_STRING");
         }
-        wl_data_device_set_selection(device, source, 0);
-        wl_display_flush(display);
-        printf("PEER: serving selection\n");
+        if (mode == 4) {
+            struct wl_surface *origin = compositor ? wl_compositor_create_surface(compositor) : NULL;
+            wl_data_device_start_drag(device, source, origin, NULL, 0);
+            wl_display_flush(display);
+            printf("PEER: started drag\n");
+        } else {
+            wl_data_device_set_selection(device, source, 0);
+            wl_display_flush(display);
+            printf("PEER: serving selection\n");
+        }
         fflush(stdout);
         for (;;) {
             if (wl_display_dispatch(display) < 0)

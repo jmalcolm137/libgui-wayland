@@ -5,6 +5,7 @@ event synchronously. That re-entered on_change (and every ClipboardClient) from
 inside AK::Function, tripping may_defer || !called_from_inside_function. Drop
 nested notifications; the outer call already sees the freshest contents.
 
+diff --git a/Userland/Libraries/LibGUI/Clipboard.cpp b/Userland/Libraries/LibGUI/Clipboard.cpp
 --- a/Userland/Libraries/LibGUI/Clipboard.cpp
 +++ b/Userland/Libraries/LibGUI/Clipboard.cpp
 @@ -228,10 +228,21 @@
@@ -29,6 +30,7 @@ nested notifications; the outer call already sees the freshest contents.
  }
  
  Clipboard::ClipboardClient::ClipboardClient()
+diff --git a/Userland/Libraries/LibGUI/Clipboard.h b/Userland/Libraries/LibGUI/Clipboard.h
 --- a/Userland/Libraries/LibGUI/Clipboard.h
 +++ b/Userland/Libraries/LibGUI/Clipboard.h
 @@ -59,6 +59,7 @@

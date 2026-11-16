@@ -13,6 +13,7 @@ Sync responses must never be dropped: the waiter is blocked until the reply
 arrives. Send handler responses with a distinct reliable kind so the bounded
 async path cannot discard them.
 
+diff --git a/Userland/Libraries/LibGUI/ConnectionToWindowServer.cpp b/Userland/Libraries/LibGUI/ConnectionToWindowServer.cpp
 --- a/Userland/Libraries/LibGUI/ConnectionToWindowServer.cpp
 +++ b/Userland/Libraries/LibGUI/ConnectionToWindowServer.cpp
 @@ -56,6 +56,13 @@
@@ -29,6 +30,7 @@ async path cannot discard them.
      // NOTE: WindowServer automatically sends a "fast_greet" message to us when we connect.
      //       All we have to do is wait for it to arrive. This avoids a round-trip during application startup.
      auto message = wait_for_specific_message<Messages::WindowClient::FastGreet>();
+diff --git a/Userland/Libraries/LibIPC/Connection.cpp b/Userland/Libraries/LibIPC/Connection.cpp
 --- a/Userland/Libraries/LibIPC/Connection.cpp
 +++ b/Userland/Libraries/LibIPC/Connection.cpp
 @@ -65,13 +65,28 @@
@@ -73,6 +75,7 @@ async path cannot discard them.
                      dbgln("IPC::ConnectionBase::handle_messages: {}", post_result.error());
                  }
              }
+diff --git a/Userland/Libraries/LibIPC/Connection.h b/Userland/Libraries/LibIPC/Connection.h
 --- a/Userland/Libraries/LibIPC/Connection.h
 +++ b/Userland/Libraries/LibIPC/Connection.h
 @@ -37,9 +37,17 @@
@@ -102,6 +105,7 @@ async path cannot discard them.
  
      NonnullOwnPtr<DeferredInvoker> m_deferred_invoker;
  };
+diff --git a/Userland/Libraries/LibIPC/Message.cpp b/Userland/Libraries/LibIPC/Message.cpp
 --- a/Userland/Libraries/LibIPC/Message.cpp
 +++ b/Userland/Libraries/LibIPC/Message.cpp
 @@ -7,6 +7,8 @@
@@ -162,7 +166,7 @@ async path cannot discard them.
 +        if (!writable)
 +            return Error::from_errno(ETIMEDOUT);
 +    }
-+
+ 
      while (!bytes_to_write.is_empty()) {
          auto chunk = bytes_to_write.slice(0, min(max_write_size, bytes_to_write.size()));
          ErrorOr<ssize_t> maybe_nwritten = 0;
@@ -193,6 +197,7 @@ async path cannot discard them.
          bytes_to_write = bytes_to_write.slice(maybe_nwritten.value());
      }
  
+diff --git a/Userland/Libraries/LibIPC/Message.h b/Userland/Libraries/LibIPC/Message.h
 --- a/Userland/Libraries/LibIPC/Message.h
 +++ b/Userland/Libraries/LibIPC/Message.h
 @@ -44,7 +44,9 @@

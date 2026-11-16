@@ -661,11 +661,13 @@ void WindowServerConnection::set_fullscreen(i32 window_id, bool fullscreen)
 
 void WindowServerConnection::set_maximized(i32 window_id, bool maximized)
 {
+    dbgln("LibWM: set_maximized({}, {})", window_id, maximized);
     WaylandClient::the().set_maximized(window_id, maximized);
 }
 
 void WindowServerConnection::set_minimized(i32 window_id, bool minimized)
 {
+    dbgln("LibWM: set_minimized({}, {})", window_id, minimized);
     if (minimized)
         WaylandClient::the().set_minimized(window_id);
 }

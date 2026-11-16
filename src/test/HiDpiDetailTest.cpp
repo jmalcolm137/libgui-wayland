@@ -69,7 +69,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     widget->set_fill_with_background_color(true);
     window->show();
 
-    auto quit_timer = Core::Timer::create_single_shot(6000, [&] { app->quit(0); });
+    auto quit_timer = Core::Timer::create_single_shot(3500, [&] { app->quit(0); });
     quit_timer->start();
     return app->exec();
 }

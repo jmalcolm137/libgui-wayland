@@ -9,6 +9,7 @@ peer was lost and calls the handler instead of exit(0) when one is installed;
 otherwise the old exit(0) behaviour (and a log line) stays. The browser
 installs a handler that records the reason and saves the session.
 
+diff --git a/Userland/Libraries/LibIPC/Connection.h b/Userland/Libraries/LibIPC/Connection.h
 --- a/Userland/Libraries/LibIPC/Connection.h
 +++ b/Userland/Libraries/LibIPC/Connection.h
 @@ -51,6 +51,14 @@
@@ -26,6 +27,7 @@ installs a handler that records the reason and saves the session.
      Core::LocalSocket& socket() { return *m_socket; }
  
  protected:
+diff --git a/Userland/Libraries/LibIPC/Connection.cpp b/Userland/Libraries/LibIPC/Connection.cpp
 --- a/Userland/Libraries/LibIPC/Connection.cpp
 +++ b/Userland/Libraries/LibIPC/Connection.cpp
 @@ -43,6 +43,12 @@
@@ -41,6 +43,7 @@ installs a handler that records the reason and saves the session.
  bool ConnectionBase::is_open() const
  {
      return m_socket->is_open();
+diff --git a/Userland/Libraries/LibIPC/ConnectionToServer.h b/Userland/Libraries/LibIPC/ConnectionToServer.h
 --- a/Userland/Libraries/LibIPC/ConnectionToServer.h
 +++ b/Userland/Libraries/LibIPC/ConnectionToServer.h
 @@ -6,6 +6,7 @@

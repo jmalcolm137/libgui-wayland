@@ -23,6 +23,11 @@ private:
         painter.fill_rect(event.rect(), Gfx::Color::from_rgb(0x205020));
         painter.draw_rect(rect(), Gfx::Color::from_rgb(0xffffff));
     }
+
+    virtual void resize_event(GUI::ResizeEvent& event) override
+    {
+        dbgln("FULLSCREEN-TEST: resized to {}x{}", event.size().width(), event.size().height());
+    }
 };
 
 ErrorOr<int> serenity_main(Main::Arguments arguments)
@@ -37,13 +42,21 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     widget->set_fill_with_background_color(true);
     window->show();
 
-    auto fullscreen_timer = Core::Timer::create_single_shot(1200, [&] {
+    auto fullscreen_timer = Core::Timer::create_single_shot(600, [&] {
         dbgln("FULLSCREEN-TEST: set_fullscreen(true)");
         window->set_fullscreen(true);
+        dbgln("FULLSCREEN-TEST: set_maximized(true)");
+        window->set_maximized(true);
+        dbgln("FULLSCREEN-TEST: set_maximized(false)");
+        window->set_maximized(false);
+        dbgln("FULLSCREEN-TEST: set_minimized(true)");
+        window->set_minimized(true);
+        dbgln("FULLSCREEN-TEST: set_fullscreen(false)");
+        window->set_fullscreen(false);
     });
     fullscreen_timer->start();
 
-    auto quit_timer = Core::Timer::create_single_shot(7000, [&] { app->quit(0); });
+    auto quit_timer = Core::Timer::create_single_shot(2500, [&] { app->quit(0); });
     quit_timer->start();
     return app->exec();
 }

@@ -31,31 +31,6 @@ if [[ ${#TARGETS[@]} -eq 0 ]]; then
     TARGETS=(
         LibGfx LibGUI windowserver eglgpu
     )
-    # Two passes, not one. The shim (windowserver) includes endpoint headers the
-    # build *generates* (WindowServer, Clipboard, LaunchServer,
-    # FileSystemAccessServer, Config, ...) and its CMake does not declare that
-    # dependency — header inclusion is invisible to ninja — so a parallel build of
-    # a fresh tree can compile the shim before the headers exist:
-    #
-    #   FileSystemAccessServerConnection.h:19:10: fatal error:
-    #     FileSystemAccessServer/FileSystemAccessClientEndpoint.h: No such file
-    #
-    # Building the libraries first is not enough on its own (LibGUI does not pull
-    # all of them), so name the generators explicitly. Both were invisible on a
-    # development machine, where an earlier build had left the headers in place;
-    # the first clean CI build hit them.
-    TWO_PHASES=1
-    GENERATED=(
-        generate_WindowServerEndpoint.h generate_WindowClientEndpoint.h
-        generate_WindowManagerServerEndpoint.h generate_WindowManagerClientEndpoint.h
-        generate_ClipboardClientEndpoint.h generate_ClipboardServerEndpoint.h
-        generate_NotificationClientEndpoint.h generate_NotificationServerEndpoint.h
-        generate_LaunchClientEndpoint.h generate_LaunchServerEndpoint.h
-        generate_FileSystemAccessClientEndpoint.h generate_FileSystemAccessServerEndpoint.h
-        generate_AudioClientEndpoint.h generate_AudioServerEndpoint.h
-        generate_AudioManagerClientEndpoint.h generate_AudioManagerServerEndpoint.h
-        generate_ConfigClientEndpoint.h generate_ConfigServerEndpoint.h
-    )
 fi
 
 if ! git -C "$SERENITY_SRC" rev-parse --git-dir >/dev/null 2>&1; then
@@ -166,28 +141,15 @@ cmake -S "$SERENITY_SRC/Meta/Lagom" -B "$BUILD_DIR" -GNinja \
     -DCMAKE_BUILD_TYPE=Release
 
 echo "==> Building: ${TARGETS[*]}"
-# The shim goes last, whatever was asked for: it is the one target whose headers
-# include generated endpoint headers without declaring they are inputs.
-PHASE_ONE=()
-PHASE_TWO=()
-for target in "${TARGETS[@]}"; do
-    case "$target" in
-        windowserver | eglgpu) PHASE_TWO+=("$target") ;;
-        *) PHASE_ONE+=("$target") ;;
-    esac
-done
-if [[ "${#PHASE_TWO[@]}" -gt 0 ]]; then
-    [[ "${#PHASE_ONE[@]}" -gt 0 ]] && ninja -C "$BUILD_DIR" -j"$JOBS" "${PHASE_ONE[@]}" "${GENERATED[@]}"
-    ninja -C "$BUILD_DIR" -j"$JOBS" "${PHASE_TWO[@]}"
-else
-    ninja -C "$BUILD_DIR" -j"$JOBS" "${TARGETS[@]}"
-fi
+ninja -C "$BUILD_DIR" -j"$JOBS" "${TARGETS[@]}"
 
 if [[ "$RUN_TESTS" == "1" ]]; then
     echo "==> Running upstream library test suites (set RUN_TESTS=0 or pass --no-tests to skip)"
     SERENITY_SRC="$SERENITY_SRC" BUILD_DIR="$BUILD_DIR" "$PROJECT_ROOT/scripts/run-lib-tests.sh"
     echo "==> Running headless integration test"
     SERENITY_SRC="$SERENITY_SRC" BUILD_DIR="$BUILD_DIR" "$PROJECT_ROOT/scripts/run-headless-tests.sh"
+    echo "==> Running window-state, HiDPI, unit & portal integration tests"
+    SERENITY_SRC="$SERENITY_SRC" BUILD_DIR="$BUILD_DIR" "$PROJECT_ROOT/scripts/run-window-and-portal-tests.sh"
     echo "==> Running clipboard integration test"
     SERENITY_SRC="$SERENITY_SRC" BUILD_DIR="$BUILD_DIR" "$PROJECT_ROOT/scripts/run-clipboard-test.sh"
     echo "==> Running menu integration test"

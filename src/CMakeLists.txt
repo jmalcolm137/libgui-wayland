@@ -120,6 +120,28 @@ target_compile_definitions(windowserver PRIVATE "LIBWM_DEFAULT_RES=\"${SERENITY_
 # The generated Wayland protocol code drops const in its listener trampolines.
 target_compile_options(windowserver PRIVATE -Wno-cast-qual)
 target_link_libraries(windowserver PRIVATE LibCore LibGfx LibIPC LibGUI LibLaunch LibThreading LibURL ${WAYLAND_CLIENT_LIBRARIES} ${XKBCOMMON_LIBRARIES})
+add_dependencies(windowserver
+    generate_WindowServerEndpoint.h
+    generate_WindowClientEndpoint.h
+    generate_WindowManagerServerEndpoint.h
+    generate_WindowManagerClientEndpoint.h
+    generate_ClipboardClientEndpoint.h
+    generate_ClipboardServerEndpoint.h
+    generate_NotificationClientEndpoint.h
+    generate_NotificationServerEndpoint.h
+    generate_LaunchClientEndpoint.h
+    generate_LaunchServerEndpoint.h
+    generate_FileSystemAccessClientEndpoint.h
+    generate_FileSystemAccessServerEndpoint.h
+    generate_AudioClientEndpoint.h
+    generate_AudioServerEndpoint.h
+    generate_AudioManagerClientEndpoint.h
+    generate_AudioManagerServerEndpoint.h
+    generate_ConfigClientEndpoint.h
+    generate_ConfigServerEndpoint.h
+    generate_ImageDecoderClientEndpoint.h
+    generate_ImageDecoderServerEndpoint.h
+)
 
 # A minimal unmodified-style LibGUI application used to exercise the shim.
 add_executable(libwm-test-window test/TestWindow.cpp)
@@ -154,7 +176,7 @@ target_link_libraries(libwm-submenu-test PRIVATE LibMain LibGUI LibGfx LibCore L
 add_executable(libwm-appfile-test test/AppFileLaunchTest.cpp)
 target_include_directories(libwm-appfile-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_options(libwm-appfile-test PRIVATE "-Wl,--no-as-needed")
-target_link_libraries(libwm-appfile-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibDesktop windowserver)
+target_link_libraries(libwm-appfile-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibDesktop LibURL windowserver)
 
 # HiDPI fine-detail repro: a widget drawing full-width rects and thin/thick lines,
 # dumped at 1x and 2x to find ops that don't scale (see docs/03 D7).
@@ -162,6 +184,13 @@ add_executable(libwm-hidpi-detail-test test/HiDpiDetailTest.cpp)
 target_include_directories(libwm-hidpi-detail-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_options(libwm-hidpi-detail-test PRIVATE "-Wl,--no-as-needed")
 target_link_libraries(libwm-hidpi-detail-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC windowserver)
+
+# Direct unit tests of LibWM's Wayland/Linux translation helpers (MenuController,
+# clipboard PNG/Serenity image transcoding, in-process ConfigServer portal).
+add_executable(libwm-unit-test test/UnitTest.cpp)
+target_include_directories(libwm-unit-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_options(libwm-unit-test PRIVATE "-Wl,--no-as-needed")
+target_link_libraries(libwm-unit-test PRIVATE LibMain LibGUI LibGfx LibCore LibIPC LibConfig windowserver)
 
 # --- The out-of-process WebContent service ------------------------------------
 # Built from the upstream sources. It is a single-client system service; LibWM
@@ -185,6 +214,12 @@ target_link_options(WebContent PRIVATE "-Wl,--no-as-needed")
 # connects (RequestServer, ImageDecoder) go through LibWM and are spawned/served
 # on demand, exactly as an application's are.
 target_link_libraries(WebContent PRIVATE LibCore LibFileSystem LibIPC LibGfx LibAudio LibImageDecoderClient LibJS LibWebView LibWeb LibLocale LibMain LibURL windowserver)
+add_dependencies(WebContent
+    generate_WebContentClientEndpoint.h
+    generate_WebContentServerEndpoint.h
+    generate_WebDriverClientEndpoint.h
+    generate_WebDriverServerEndpoint.h
+)
 
 # --- The out-of-process RequestServer service ---------------------------------
 # WebContent (and the browser) require it: the HTTP/TLS backend for page loads.
@@ -206,6 +241,10 @@ add_executable(RequestServer
 target_include_directories(RequestServer PRIVATE "${SERENITY_PROJECT_ROOT}/Userland/Services")
 target_link_options(RequestServer PRIVATE "-Wl,--no-as-needed")
 target_link_libraries(RequestServer PRIVATE LibCore LibCrypto LibIPC LibGemini LibHTTP LibMain LibTLS LibWebSocket LibURL LibThreading)
+add_dependencies(RequestServer
+    generate_RequestClientEndpoint.h
+    generate_RequestServerEndpoint.h
+)
 
 # --- The out-of-process SQLServer service -------------------------------------
 # A multi-client service (IPC::MultiServer). LibWM binds its listening socket and
@@ -221,6 +260,10 @@ add_executable(SQLServer
 target_include_directories(SQLServer PRIVATE "${SERENITY_PROJECT_ROOT}/Userland/Services")
 target_link_options(SQLServer PRIVATE "-Wl,--no-as-needed")
 target_link_libraries(SQLServer PRIVATE LibCore LibIPC LibSQL LibMain)
+add_dependencies(SQLServer
+    generate_SQLClientEndpoint.h
+    generate_SQLServerEndpoint.h
+)
 
 # The SerenityOS taskbar applets (WorkspacePicker and friends) are part of the
 # desktop environment, not the port: SDE builds them (serenity-desktop-environment
