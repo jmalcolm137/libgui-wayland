@@ -82,14 +82,17 @@ programming model.
   web stack (`LibWeb`/`LibWebView`) is built on the host too (`-DENABLE_LAGOM_LIBWEB=ON`). The
   five that remain are Serenity service/kernel-facing and excluded (see below).
 
+- **HiDPI & Fractional Scaling (M8)** — LibWM binds `wp_fractional_scale_v1` (`preferred_scale` in
+  `1/120` units), infers fractional ratios from `wl_output` physical mode + `zxdg_output_v1`
+  logical size, and supports explicit integer or fractional overrides via `SDE_CLIENT_SCALE` (e.g.
+  `1.5`, `1.75`, `2`, or `0` to force `1x`). At integer scales (`2x`), the client backing store is
+  presented directly with `wl_surface.set_buffer_scale`. At fractional scales (`1.25x`, `1.5x`,
+  `1.75x`), the client renders its backing store at `ceil(scale)` (`2x`) and LibWM resamples into a
+  fractional physical buffer (`round(logical * scale_v120 / 120)`) presented with
+  `wl_surface.set_buffer_scale(1)` and `wp_viewport_set_destination(logical_width, logical_height)`.
+
 ## Remaining work
 
-- **Crisp fractional HiDPI (M8).** LibWM renders the client backing store at the output's
-  integer device scale and declares it with `wl_surface.set_buffer_scale`; `LibGUI` exposes
-  that scale through `Window::backing_store_scale()`. `SDE_CLIENT_SCALE` overrides it
-  (`0` forces 1x, a positive value selects that scale). Fractional output scales still
-  round to the nearest integer; `wp_viewporter` handles the remaining ratio in the
-  compositor.
 - **Audio polish.** Cross-rate clients use LibAudio's naive resampler.
 - **GPU presentation and shaders.** `EGLGPU` renders on the GPU (Mesa) but reads the result
   back with `glReadPixels` into a `Gfx::Bitmap` and presents it over `wl_shm`; zero-copy

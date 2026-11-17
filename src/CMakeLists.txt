@@ -55,7 +55,8 @@ add_custom_command(
     VERBATIM
 )
 
-# wp_viewporter (stretch the last frame during an interactive resize).
+# wp_viewporter (stretch the last frame during an interactive resize, and
+# set the logical destination size under fractional HiDPI).
 set(VIEWPORTER_XML "${WAYLAND_PROTOCOLS_DIR}/stable/viewporter/viewporter.xml")
 add_custom_command(
     OUTPUT
@@ -64,6 +65,18 @@ add_custom_command(
     COMMAND "${WAYLAND_SCANNER}" client-header "${VIEWPORTER_XML}" "${WM_WAYLAND_DIR}/viewporter-client-protocol.h"
     COMMAND "${WAYLAND_SCANNER}" private-code "${VIEWPORTER_XML}" "${WM_WAYLAND_DIR}/viewporter-protocol.c"
     DEPENDS "${VIEWPORTER_XML}"
+    VERBATIM
+)
+
+# wp_fractional_scale_v1 (per-surface fractional scale factor in 1/120th units).
+set(FRACTIONAL_SCALE_XML "${WAYLAND_PROTOCOLS_DIR}/staging/fractional-scale/fractional-scale-v1.xml")
+add_custom_command(
+    OUTPUT
+        "${WM_WAYLAND_DIR}/fractional-scale-v1-client-protocol.h"
+        "${WM_WAYLAND_DIR}/fractional-scale-v1-protocol.c"
+    COMMAND "${WAYLAND_SCANNER}" client-header "${FRACTIONAL_SCALE_XML}" "${WM_WAYLAND_DIR}/fractional-scale-v1-client-protocol.h"
+    COMMAND "${WAYLAND_SCANNER}" private-code "${FRACTIONAL_SCALE_XML}" "${WM_WAYLAND_DIR}/fractional-scale-v1-protocol.c"
+    DEPENDS "${FRACTIONAL_SCALE_XML}"
     VERBATIM
 )
 
@@ -107,6 +120,7 @@ add_library(windowserver SHARED
     "${WM_WAYLAND_DIR}/xdg-decoration-protocol.c"
     "${WM_WAYLAND_DIR}/xdg-output-protocol.c"
     "${WM_WAYLAND_DIR}/viewporter-protocol.c"
+    "${WM_WAYLAND_DIR}/fractional-scale-v1-protocol.c"
     "${WM_WAYLAND_DIR}/wlr-layer-shell-unstable-v1-protocol.c"
     "${WM_WAYLAND_DIR}/serenity-window-protocol.c"
 )

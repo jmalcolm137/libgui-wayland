@@ -66,19 +66,18 @@ void WindowServerConnection::send_fast_greet()
     unsigned const workspace_rows = WaylandClient::the().host_config().workspace_rows;
     unsigned const workspace_columns = WaylandClient::the().host_config().workspace_columns;
 
-    // Client-side HiDPI: rasterise at the compositor's output scale so windows are
-    // drawn at native resolution on any compositor, with no SDE-specific protocol.
-    // Fonts stay as they are (the fixed bitmap family); glyphs are scaled along
-    // with everything else, keeping the UI in proportion. Set SDE_CLIENT_SCALE=0 to
-    // force 1x (debugging).
-    int client_scale = wayland.output_scale();
+    // Client-side HiDPI: rasterise at the compositor's output scale (or
+    // ceil(fractional_scale) with wp_viewport downsampling for fractional scales
+    // like 1.25x, 1.5x, 1.75x) so windows are drawn at native resolution on any
+    // compositor. Set SDE_CLIENT_SCALE=0 to force 1x, or a positive integer or
+    // fractional value (e.g. 1.5, 1.75, 2) to select that scale explicitly.
+    int client_scale_v120 = wayland.output_scale_v120();
     if (auto const* env = getenv("SDE_CLIENT_SCALE"); env && *env) {
-        // A positive value selects a scale explicitly (useful for testing); 0 forces 1x.
-        auto requested = atoi(env);
-        client_scale = requested > 0 ? requested : 1;
+        double requested = strtod(env, nullptr);
+        client_scale_v120 = requested > 0.0 ? static_cast<int>(__builtin_lround(requested * 120.0)) : 120;
     }
-    GUI::Window::set_backing_store_scale(client_scale);
-    WaylandClient::the().set_client_scale(client_scale);
+    wayland.set_client_scale_v120(client_scale_v120);
+    GUI::Window::set_backing_store_scale(wayland.client_scale());
 
     // R4.7: the session font. Prefer the font broker (else the Katica/Csilla
     // bitmap defaults), so a client's first FontDatabase update already uses it.

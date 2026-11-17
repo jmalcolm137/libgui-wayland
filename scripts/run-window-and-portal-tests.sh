@@ -47,7 +47,7 @@ env XDG_RUNTIME_DIR="$RUNTIME" XDG_CONFIG_HOME="$RUNTIME/config" SDE_SESSION_DIR
     SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
     LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
     "$BUILD_DIR/bin/libwm-unit-test" > "$RUNTIME/unit.log" 2>&1
-check "unit: MenuController, PNG, Config & concurrency" "grep -q '51 passed, 0 failed' '$RUNTIME/unit.log'"
+check "unit: MenuController, PNG, Config & concurrency" "grep -q '53 passed, 0 failed' '$RUNTIME/unit.log'"
 
 # --- 2. Window state transitions (fullscreen, maximize, minimize, resize) ----
 cat > "$RUNTIME/fs.input" <<'EOF'
@@ -151,7 +151,27 @@ check "hidpi: 2x output scale negotiated"              "grep -q 'output scale 2'
 check "hidpi: 2x backing store is 400x192"             "grep -q 'dumped window .* (400x192)' '$RUNTIME/hidpi-2x.app.log'"
 check "hidpi: compositor captured 400x192 @2x buffer"  "grep -q 'captured 400x192' '$RUNTIME/hidpi-2x.hc.log'"
 
-python3 - "$RUNTIME/dump-1x.png" "$RUNTIME/dump-2x.png" <<'PY' > "$RUNTIME/hidpi-pixels.log" 2>&1
+# Fractional HiDPI (1.5x): backing store renders at 2x (400x192) and LibWM
+# resamples + presents a 300x144 (1.5x) buffer with wp_viewport destination 200x96.
+"$HC" --socket libwm-hidpi-15x --size 800x600 --scale 1 --timeout 2 \
+    --output "$RUNTIME/hc-15x.png" > "$RUNTIME/hidpi-15x.hc.log" 2>&1 &
+HC_PID=$!
+for _ in $(seq 1 100); do [[ -e "$RUNTIME/libwm-hidpi-15x" ]] && break; sleep 0.1; done
+
+env XDG_RUNTIME_DIR="$RUNTIME" SDE_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY=libwm-hidpi-15x \
+    SDE_CLIENT_SCALE=1.5 \
+    SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
+    LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    LIBWM_DUMP="$RUNTIME/dump-15x.png" \
+    timeout 4 "$BUILD_DIR/bin/libwm-hidpi-detail-test" > "$RUNTIME/hidpi-15x.app.log" 2>&1 || true
+wait "$HC_PID" 2>/dev/null || true
+HC_PID=""
+
+check "hidpi: 1.5x backing store rendered at 2x (400x192)" "grep -q 'dumped window .* (400x192)' '$RUNTIME/hidpi-15x.app.log'"
+check "hidpi: 1.5x presented 300x144 fractional buffer"    "grep -q '@1.50x -> 300x144px' '$RUNTIME/hidpi-15x.app.log'"
+check "hidpi: compositor captured 300x144 @1.5x buffer"    "grep -q 'captured 300x144' '$RUNTIME/hidpi-15x.hc.log'"
+
+python3 - "$RUNTIME/dump-1x.png" "$RUNTIME/dump-2x.png" "$RUNTIME/hc-15x.png" <<'PY' > "$RUNTIME/hidpi-pixels.log" 2>&1
 import struct, sys, zlib
 
 def read_png_rgba(path):
@@ -211,20 +231,23 @@ def pixel_rgb(rows, x, y):
 
 w1, h1, rows1 = read_png_rgba(sys.argv[1])
 w2, h2, rows2 = read_png_rgba(sys.argv[2])
+w15, h15, rows15 = read_png_rgba(sys.argv[3])
 assert (w1, h1) == (200, 96), f"1x size mismatch: {w1}x{h1}"
 assert (w2, h2) == (400, 192), f"2x size mismatch: {w2}x{h2}"
+assert (w15, h15) == (300, 144), f"1.5x size mismatch: {w15}x{h15}"
 # Verify full-width drawing operations at 2x reach x=390 (near right edge of 400px buffer):
-# - fill_rect red at logical y=6..13 -> 2x y=14
 assert pixel_rgb(rows2, 390, 14) == (255, 0, 0), f"red rect at x=390: {pixel_rgb(rows2, 390, 14)}"
-# - thin green draw_line at logical y=26 -> 2x y=52
 assert pixel_rgb(rows2, 390, 52) == (0, 128, 0), f"thin green line at x=390: {pixel_rgb(rows2, 390, 52)}"
-# - thick magenta draw_line at logical y=36 -> 2x y=72
 assert pixel_rgb(rows2, 390, 72) == (255, 0, 255), f"thick magenta line at x=390: {pixel_rgb(rows2, 390, 72)}"
-# - black draw_rect top edge at logical y=46 -> 2x y=92
 assert pixel_rgb(rows2, 390, 92) == (0, 0, 0), f"black rect outline at x=390: {pixel_rgb(rows2, 390, 92)}"
+# Verify 1.5x resampled buffer (300x144) preserves crisp full-width lines to x=290:
+assert pixel_rgb(rows15, 290, 10) == (255, 0, 0), f"1.5x red rect at x=290: {pixel_rgb(rows15, 290, 10)}"
+assert pixel_rgb(rows15, 290, 39) == (0, 128, 0), f"1.5x thin green line at x=290: {pixel_rgb(rows15, 290, 39)}"
+assert pixel_rgb(rows15, 290, 54) == (255, 0, 255), f"1.5x thick magenta line at x=290: {pixel_rgb(rows15, 290, 54)}"
+assert pixel_rgb(rows15, 290, 69) == (0, 0, 0), f"1.5x black rect outline at x=290: {pixel_rgb(rows15, 290, 69)}"
 print("HIDPI-PIXELS-OK")
 PY
-check "hidpi: 2x lines & rects span full 400px width"  "grep -q 'HIDPI-PIXELS-OK' '$RUNTIME/hidpi-pixels.log'"
+check "hidpi: 2x & 1.5x lines span full width crisply" "grep -q 'HIDPI-PIXELS-OK' '$RUNTIME/hidpi-pixels.log'"
 
 # --- 4. Linux portal socket resilience & AppFile / LaunchServer spawning -----
 # Create a stale (bound, never listened, closed) Unix domain socket at the

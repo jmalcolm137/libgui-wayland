@@ -353,6 +353,16 @@ void test_wayland_client_thread_safety()
         "WaylandClient concurrent host_config updates are race-free"sv);
     check(!client.host_setting("mouse.acceleration"sv).is_empty(),
         "WaylandClient concurrent host_setting reads/writes are race-free"sv);
+
+    // Fractional scale inference from physical mode (2560x1600) + zxdg_output_v1 logical size (1463x914 -> 1.75x = 210/120).
+    client.on_output_mode({ 2560, 1600 });
+    client.on_output_logical_size(nullptr, { 1463, 914 });
+    check(client.output_scale_v120() == 210 && client.output_scale() == 2,
+        "zxdg_output_v1 1463x914 on 2560x1600 infers 1.75x (210/120) and ceil scale 2"sv);
+
+    client.set_client_scale_v120(180);
+    check(client.client_scale_v120() == 180 && client.client_scale() == 2,
+        "set_client_scale_v120(180) sets 1.5x presentation and 2x backing scale"sv);
 }
 
 }

@@ -14,6 +14,7 @@
 #include <unistd.h>
 #include <wayland-client.h>
 
+#include "fractional-scale-v1-client-protocol.h"
 #include "serenity-window-client-protocol.h"
 #include "text-input-unstable-v3-client-protocol.h"
 #include "viewporter-client-protocol.h"
@@ -51,6 +52,8 @@ static void registry_global(void* data, wl_registry* registry, uint32_t name, ch
         self.set_xdg_output_manager(reinterpret_cast<zxdg_output_manager_v1*>(wl_registry_bind(registry, name, &zxdg_output_manager_v1_interface, min(version, 3u))));
     } else if (!strcmp(interface, wp_viewporter_interface.name)) {
         self.set_viewporter(reinterpret_cast<wp_viewporter*>(wl_registry_bind(registry, name, &wp_viewporter_interface, 1)));
+    } else if (!strcmp(interface, wp_fractional_scale_manager_v1_interface.name)) {
+        self.set_fractional_scale_manager(reinterpret_cast<wp_fractional_scale_manager_v1*>(wl_registry_bind(registry, name, &wp_fractional_scale_manager_v1_interface, 1)));
     } else if (!strcmp(interface, zwlr_layer_shell_v1_interface.name)) {
         self.set_layer_shell(reinterpret_cast<zwlr_layer_shell_v1*>(wl_registry_bind(registry, name, &zwlr_layer_shell_v1_interface, min(version, 4u))));
     } else if (!strcmp(interface, serenity_window_manager_interface.name)) {
@@ -477,6 +480,14 @@ void WaylandClient::on_output_logical_size(wl_output*, Gfx::IntSize logical_size
         return;
     m_output_state.have_logical_size = true;
     m_output_state.screen_size = logical_size;
+    if (!m_output_state.physical_size.is_empty() && logical_size.width() > 0) {
+        int raw_v120 = static_cast<int>(__builtin_lround(static_cast<double>(m_output_state.physical_size.width()) * 120.0 / static_cast<double>(logical_size.width())));
+        int snapped_v120 = ((raw_v120 + 7) / 15) * 15;
+        if (__builtin_abs(raw_v120 - snapped_v120) <= 2)
+            raw_v120 = snapped_v120;
+        m_output_state.scale_v120 = max(120, raw_v120);
+        m_output_state.scale = max(1, (m_output_state.scale_v120 + 119) / 120);
+    }
 }
 
 void WaylandClient::on_output_done()
@@ -484,14 +495,24 @@ void WaylandClient::on_output_done()
     MutexLocker locker(m_mutex);
     // zxdg_output_v1 gives the real logical size under fractional scaling and
     // takes precedence over mode/scale.
-    if (m_output_state.have_logical_size)
+    if (m_output_state.have_logical_size) {
+        if (!m_output_state.physical_size.is_empty() && m_output_state.screen_size.width() > 0) {
+            int raw_v120 = static_cast<int>(__builtin_lround(static_cast<double>(m_output_state.physical_size.width()) * 120.0 / static_cast<double>(m_output_state.screen_size.width())));
+            int snapped_v120 = ((raw_v120 + 7) / 15) * 15;
+            if (__builtin_abs(raw_v120 - snapped_v120) <= 2)
+                raw_v120 = snapped_v120;
+            m_output_state.scale_v120 = max(120, raw_v120);
+            m_output_state.scale = max(1, (m_output_state.scale_v120 + 119) / 120);
+        }
         return;
+    }
     if (m_output_state.physical_size.is_empty())
         return;
     m_output_state.screen_size = {
         m_output_state.physical_size.width() / m_output_state.scale,
         m_output_state.physical_size.height() / m_output_state.scale,
     };
+    m_output_state.scale_v120 = m_output_state.scale * 120;
 }
 
 // --- display link -------------------------------------------------------------

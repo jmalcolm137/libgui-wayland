@@ -13,6 +13,7 @@
 #include <LibGfx/Palette.h>
 #include <LibGfx/StylePainter.h>
 #include <LibGfx/SystemTheme.h>
+#include <LibGUI/Window.h>
 #include <WindowServer/WindowType.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,6 +21,7 @@
 #include <unistd.h>
 #include <wayland-client.h>
 
+#include "fractional-scale-v1-client-protocol.h"
 #include "serenity-window-client-protocol.h"
 #include "viewporter-client-protocol.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
@@ -155,6 +157,48 @@ static serenity_toplevel_listener const s_serenity_toplevel_listener = {
     .menubar_visibility = serenity_toplevel_menubar_visibility,
     .position = serenity_toplevel_position,
 };
+
+// --- wp_fractional_scale_v1 ---------------------------------------------------
+
+static void fractional_scale_preferred_scale(void* data, wp_fractional_scale_v1* fractional, uint32_t scale_v120)
+{
+    static_cast<WaylandClient*>(data)->on_preferred_scale(fractional, scale_v120);
+}
+
+static wp_fractional_scale_v1_listener const s_fractional_scale_listener = {
+    .preferred_scale = fractional_scale_preferred_scale,
+};
+
+void WaylandClient::on_preferred_scale(wp_fractional_scale_v1* fractional, u32 scale_v120)
+{
+    MutexLocker locker(m_mutex);
+    if (scale_v120 < 60)
+        return;
+    m_output_state.scale_v120 = static_cast<int>(scale_v120);
+    m_output_state.scale = max(1, static_cast<int>(scale_v120 + 119) / 120);
+    dbgln("LibWM/Wayland: preferred fractional scale {}/120 ({:.2f}x, backing {}x)",
+        scale_v120, static_cast<double>(scale_v120) / 120.0, m_output_state.scale);
+
+    if (auto const* env = getenv("SDE_CLIENT_SCALE"); env && *env)
+        return;
+
+    int const previous_backing_scale = m_output_state.client_scale;
+    set_client_scale_v120(static_cast<int>(scale_v120));
+    GUI::Window::set_backing_store_scale(m_output_state.client_scale);
+
+    for (auto const& it : m_windows) {
+        auto& w = *it.value;
+        if (w.fractional_scale != fractional)
+            continue;
+        SurfaceLocker surface_locker(w.mutex);
+        w.composed_valid = false;
+        w.csd_dirty = true;
+        w.inset_dirty = true;
+        if (m_output_state.client_scale != previous_backing_scale && m_input.window_resize)
+            m_input.window_resize(w.window_id, w.size);
+        return;
+    }
+}
 
 // --- zxdg_toplevel_decoration_v1 ----------------------------------------------
 
@@ -691,6 +735,11 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::In
         dbgln("LibWM/Wayland: using client-side decorations for window {}", window_id);
     if (m_viewporter)
         window_surface->viewport = wp_viewporter_get_viewport(m_viewporter, surface);
+    if (m_fractional_scale_manager) {
+        window_surface->fractional_scale = wp_fractional_scale_manager_v1_get_fractional_scale(m_fractional_scale_manager, surface);
+        if (window_surface->fractional_scale)
+            wp_fractional_scale_v1_add_listener(window_surface->fractional_scale, &s_fractional_scale_listener, this);
+    }
 
     // Let the compositor drive this window's chrome (the menu bar).
     if (m_serenity_window_manager) {
@@ -752,6 +801,8 @@ void WaylandClient::destroy_window(i32 window_id)
             zxdg_toplevel_decoration_v1_destroy(window_surface.decoration);
         if (window_surface.toplevel)
             xdg_toplevel_destroy(window_surface.toplevel);
+        if (window_surface.fractional_scale)
+            wp_fractional_scale_v1_destroy(window_surface.fractional_scale);
         if (window_surface.viewport)
             wp_viewport_destroy(window_surface.viewport);
         if (window_surface.xdg_surface_object)
@@ -1017,6 +1068,24 @@ void WaylandClient::render_csd_titlebar(WindowSurface const& window_surface, Gfx
     paint_caption_button(close_rect, "\xC3\x97"sv);
 }
 
+static void resample_to_fractional(u8 const* src_base, size_t src_pitch, int src_w, int src_h, Gfx::Bitmap& dst)
+{
+    int const dst_w = dst.physical_width();
+    int const dst_h = dst.physical_height();
+    if (dst_w <= 0 || dst_h <= 0 || src_w <= 0 || src_h <= 0)
+        return;
+
+    for (int dy = 0; dy < dst_h; ++dy) {
+        int const sy = min(src_h - 1, ((2 * dy + 1) * src_h) / (2 * dst_h));
+        auto const* src_row = reinterpret_cast<u32 const*>(src_base + static_cast<size_t>(sy) * src_pitch);
+        auto* dst_row = dst.scanline(dy);
+        for (int dx = 0; dx < dst_w; ++dx) {
+            int const sx = min(src_w - 1, ((2 * dx + 1) * src_w) / (2 * dst_w));
+            dst_row[dx] = src_row[sx];
+        }
+    }
+}
+
 void WaylandClient::commit_window_content(WindowSurface& window_surface, int client_fd, Gfx::IntSize size, Gfx::IntSize visible_size, i32 pitch, bool has_alpha)
 {
     MutexLocker locker(m_mutex);
@@ -1028,8 +1097,12 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
         window_surface.frame_in_flight = true;
     };
 
+    int const scale = client_scale();
+    int const scale_v120 = client_scale_v120();
+    bool const is_fractional = (scale_v120 % 120) != 0;
+
     if (window_surface.stretch_active && !window_surface.resizing) {
-        if (window_surface.viewport)
+        if (window_surface.viewport && !is_fractional)
             wp_viewport_set_destination(window_surface.viewport, -1, -1);
         window_surface.stretch_active = false;
     }
@@ -1051,10 +1124,40 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
     int const csd_h = window_surface.csd_height();
     int const menubar_h = (window_surface.inset > 0 && window_surface.draw_inset && !window_surface.menubar_surface) ? window_surface.inset : 0;
     int const total_inset = csd_h + menubar_h;
+    int const logical_height = visible_size.height() + total_inset;
+
+    auto present_fractional = [&](u8 const* src_base, size_t src_pitch, int src_w, int src_h) -> bool {
+        int const frac_w = max(1, (visible_size.width() * scale_v120 + 60) / 120);
+        int const frac_h = max(1, (logical_height * scale_v120 + 60) / 120);
+        auto const fmt = has_alpha ? Gfx::BitmapFormat::BGRA8888 : Gfx::BitmapFormat::BGRx8888;
+        size_t const frac_pitch = Gfx::Bitmap::minimum_pitch(frac_w, fmt);
+        if (!window_surface.fractional_bitmap || window_surface.fractional_bitmap->size() != Gfx::IntSize { frac_w, frac_h } || window_surface.fractional_bitmap->format() != fmt) {
+            auto buf = Core::AnonymousBuffer::create_with_size(frac_pitch * static_cast<size_t>(frac_h));
+            if (buf.is_error())
+                return false;
+            window_surface.fractional_buffer = buf.release_value();
+            auto bmp = Gfx::Bitmap::create_with_anonymous_buffer(fmt, window_surface.fractional_buffer, { frac_w, frac_h }, 1);
+            if (bmp.is_error())
+                return false;
+            window_surface.fractional_bitmap = bmp.release_value();
+        }
+        resample_to_fractional(src_base, src_pitch, src_w, src_h, *window_surface.fractional_bitmap);
+        wl_surface_set_buffer_scale(window_surface.surface, 1);
+        if (window_surface.viewport && !window_surface.resizing)
+            wp_viewport_set_destination(window_surface.viewport, visible_size.width(), logical_height);
+        Vector<Gfx::IntRect> frac_damage;
+        frac_damage.append({ 0, 0, visible_size.width(), logical_height });
+        request_frame();
+        bind_bitmap(window_surface.surface, window_surface.fractional_buffer, *window_surface.fractional_bitmap, window_surface.buffers, &frac_damage);
+        wl_surface_commit(window_surface.surface);
+        wl_display_flush(m_display);
+        dbgln("LibWM/Wayland: presented window {} ({}x{} @{:.2f}x -> {}x{}px incl. {}px csd + {}px inset)",
+            window_surface.window_id, visible_size.width(), visible_size.height(),
+            static_cast<double>(scale_v120) / 120.0, frac_w, frac_h, csd_h, menubar_h);
+        return true;
+    };
 
     if (total_inset > 0) {
-        int const scale = client_scale();
-        int const logical_height = visible_size.height() + total_inset;
         int const display_width = visible_size.width() * scale;
         int const display_height = logical_height * scale;
         size_t const composed_pitch = Gfx::Bitmap::minimum_pitch(display_width, Gfx::BitmapFormat::BGRA8888);
@@ -1110,6 +1213,9 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
             window_surface.inset_dirty = false;
         }
 
+        if (is_fractional && present_fractional(reinterpret_cast<u8 const*>(destination.scanline(0)), destination.pitch(), display_width, display_height))
+            return;
+
         Vector<Gfx::IntRect> surface_damage;
         if (recreate || full_damage) {
             surface_damage.append({ 0, 0, visible_size.width(), logical_height });
@@ -1135,6 +1241,20 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
         return;
     }
 
+    int const display_width = visible_size.width() * scale;
+    int const display_height = visible_size.height() * scale;
+
+    if (is_fractional) {
+        size_t const client_bytes = static_cast<size_t>(pitch) * static_cast<size_t>(size.height());
+        auto const* source = static_cast<u8 const*>(mmap(nullptr, client_bytes, PROT_READ, MAP_SHARED, client_fd, 0));
+        if (source != MAP_FAILED) {
+            bool const ok = present_fractional(source, static_cast<size_t>(pitch), display_width, display_height);
+            munmap(const_cast<u8*>(source), client_bytes);
+            if (ok)
+                return;
+        }
+    }
+
     int fd = dup(client_fd);
     if (fd < 0)
         return;
@@ -1146,9 +1266,6 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
     }
 
     auto format = has_alpha ? WL_SHM_FORMAT_ARGB8888 : WL_SHM_FORMAT_XRGB8888;
-    int const scale = client_scale();
-    int const display_width = visible_size.width() * scale;
-    int const display_height = visible_size.height() * scale;
     wl_surface_set_buffer_scale(window_surface.surface, scale);
     auto* buffer = wl_shm_pool_create_buffer(pool, 0, display_width, display_height, pitch, format);
     if (!buffer) {

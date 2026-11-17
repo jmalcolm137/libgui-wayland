@@ -42,6 +42,8 @@ struct wl_shm;
 struct wl_subcompositor;
 struct wl_subsurface;
 struct wl_surface;
+struct wp_fractional_scale_manager_v1;
+struct wp_fractional_scale_v1;
 struct wp_viewporter;
 struct wp_viewport;
 struct xdg_popup;
@@ -139,18 +141,36 @@ public:
         MutexLocker locker(m_mutex);
         return m_output_state.scale;
     }
-    // The backing-store scale the shim told the client to render at (usually the
-    // output scale; 1 when client scaling is disabled). Distinct from output_scale
-    // so present() maps buffers correctly regardless of a resize margin.
+    int output_scale_v120() const
+    {
+        MutexLocker locker(m_mutex);
+        return m_output_state.scale_v120;
+    }
+    // The integer backing-store scale the shim told the client to render at
+    // (ceil(client_scale_v120 / 120.0); 1 when client scaling is disabled).
     int client_scale() const
     {
         MutexLocker locker(m_mutex);
         return m_output_state.client_scale;
     }
+    int client_scale_v120() const
+    {
+        MutexLocker locker(m_mutex);
+        return m_output_state.client_scale_v120;
+    }
     void set_client_scale(int scale)
     {
         MutexLocker locker(m_mutex);
-        m_output_state.client_scale = scale < 1 ? 1 : scale;
+        int clamped = scale < 1 ? 1 : scale;
+        m_output_state.client_scale = clamped;
+        m_output_state.client_scale_v120 = clamped * 120;
+    }
+    void set_client_scale_v120(int scale_v120)
+    {
+        MutexLocker locker(m_mutex);
+        int clamped = scale_v120 < 60 ? 120 : scale_v120;
+        m_output_state.client_scale_v120 = clamped;
+        m_output_state.client_scale = max(1, (clamped + 119) / 120);
     }
 
     // The pointer's position in output coordinates, reconstructed from the
@@ -278,6 +298,12 @@ public:
         MutexLocker locker(m_mutex);
         m_viewporter = viewporter;
     }
+    void set_fractional_scale_manager(wp_fractional_scale_manager_v1* manager)
+    {
+        MutexLocker locker(m_mutex);
+        m_fractional_scale_manager = manager;
+    }
+    void on_preferred_scale(wp_fractional_scale_v1*, u32 scale_v120);
     void set_layer_shell(zwlr_layer_shell_v1* shell)
     {
         MutexLocker locker(m_mutex);
@@ -389,6 +415,8 @@ public:
     {
         MutexLocker locker(m_mutex);
         m_output_state.scale = factor > 0 ? factor : 1;
+        if (!m_output_state.have_logical_size)
+            m_output_state.scale_v120 = m_output_state.scale * 120;
     }
     void on_output_done();
 
@@ -558,11 +586,11 @@ private:
         i32 pending_pitch { 0 };
         bool pending_has_alpha { false };
         bool has_pending { false };
-        // Interactive-resize stretch: while the compositor reports
-        // XDG_TOPLEVEL_STATE_RESIZING we keep the last frame and let the
-        // compositor scale it via a wp_viewport, avoiding a client re-render
-        // per configure.
+        // Interactive-resize stretch and fractional-scale presentation via wp_viewport.
         wp_viewport* viewport { nullptr };
+        wp_fractional_scale_v1* fractional_scale { nullptr };
+        Core::AnonymousBuffer fractional_buffer;
+        RefPtr<Gfx::Bitmap> fractional_bitmap;
         bool resizing { false };
         bool stretch_active { false };
     };
@@ -591,7 +619,9 @@ private:
         Gfx::IntSize physical_size;
         Gfx::IntSize screen_size;
         int scale { 1 };
+        int scale_v120 { 120 };
         int client_scale { 1 };
+        int client_scale_v120 { 120 };
         bool have_logical_size { false };
     };
 
@@ -682,6 +712,7 @@ private:
     xdg_wm_base* m_wm_base { nullptr };
     zxdg_decoration_manager_v1* m_decoration_manager { nullptr };
     wp_viewporter* m_viewporter { nullptr };
+    wp_fractional_scale_manager_v1* m_fractional_scale_manager { nullptr };
     zwlr_layer_shell_v1* m_layer_shell { nullptr };
     serenity_window_manager* m_serenity_window_manager { nullptr };
     RefPtr<Core::Notifier> m_notifier;
