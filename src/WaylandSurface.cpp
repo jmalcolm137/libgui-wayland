@@ -894,6 +894,7 @@ void WaylandClient::set_maximized(i32 window_id, bool maximized)
 {
     MutexLocker locker(m_mutex);
     if (auto* window_surface = find(window_id)) {
+        window_surface->maximized = maximized;
         if (!window_surface->toplevel)
             return;
         if (maximized)
@@ -901,6 +902,63 @@ void WaylandClient::set_maximized(i32 window_id, bool maximized)
         else
             xdg_toplevel_unset_maximized(window_surface->toplevel);
         wl_display_flush(m_display);
+    }
+}
+
+bool WaylandClient::is_window_maximized(i32 window_id) const
+{
+    MutexLocker locker(m_mutex);
+    auto it = m_windows.find(window_id);
+    return it != m_windows.end() && it->value->maximized;
+}
+
+void WaylandClient::set_minimum_size(i32 window_id, Gfx::IntSize size)
+{
+    MutexLocker locker(m_mutex);
+    if (auto* window_surface = find(window_id)) {
+        SurfaceLocker surface_locker(window_surface->mutex);
+        window_surface->minimum_size = size;
+        if (window_surface->toplevel && window_surface->resizable) {
+            int const min_w = max(0, size.width());
+            int const min_h = size.height() > 0 ? size.height() + window_surface->total_top_inset() : 0;
+            xdg_toplevel_set_min_size(window_surface->toplevel, min_w, min_h);
+            wl_display_flush(m_display);
+            dbgln("LibWM/Wayland: set_min_size window {} -> {}x{}", window_id, min_w, min_h);
+        }
+    }
+}
+
+void WaylandClient::set_frameless(i32 window_id, bool frameless)
+{
+    MutexLocker locker(m_mutex);
+    if (auto* window_surface = find(window_id)) {
+        SurfaceLocker surface_locker(window_surface->mutex);
+        if (window_surface->frameless == frameless)
+            return;
+        window_surface->frameless = frameless;
+        bool const force_csd = getenv("LIBWM_FORCE_CSD") && *getenv("LIBWM_FORCE_CSD") != '0';
+        window_surface->use_csd = !frameless && (!m_decoration_manager || force_csd);
+        window_surface->csd_dirty = true;
+        window_surface->composed_valid = false;
+    }
+}
+
+void WaylandClient::set_window_has_alpha_channel(i32 window_id, bool has_alpha)
+{
+    MutexLocker locker(m_mutex);
+    if (auto* window_surface = find(window_id)) {
+        SurfaceLocker surface_locker(window_surface->mutex);
+        window_surface->has_alpha = has_alpha;
+        window_surface->composed_valid = false;
+    }
+}
+
+void WaylandClient::set_window_alpha_hit_threshold(i32 window_id, float threshold)
+{
+    MutexLocker locker(m_mutex);
+    if (auto* window_surface = find(window_id)) {
+        SurfaceLocker surface_locker(window_surface->mutex);
+        window_surface->alpha_hit_threshold = clamp(threshold, 0.0f, 1.0f);
     }
 }
 
@@ -1086,6 +1144,65 @@ static void resample_to_fractional(u8 const* src_base, size_t src_pitch, int src
     }
 }
 
+void WaylandClient::update_surface_regions(WindowSurface& window_surface, u8 const* client_pixels, size_t pitch, Gfx::IntSize visible_size, int scale, int total_inset)
+{
+    if (!m_compositor || !window_surface.surface)
+        return;
+
+    int const logical_w = visible_size.width();
+    int const logical_h = visible_size.height() + total_inset;
+
+    // 1. Opaque region hint: lets the compositor skip blending for opaque windows.
+    if (!window_surface.has_alpha) {
+        if (auto* opaque = wl_compositor_create_region(m_compositor)) {
+            wl_region_add(opaque, 0, 0, logical_w, logical_h);
+            wl_surface_set_opaque_region(window_surface.surface, opaque);
+            wl_region_destroy(opaque);
+        }
+    } else {
+        wl_surface_set_opaque_region(window_surface.surface, nullptr);
+    }
+
+    // 2. Alpha click-through input region: mask out pixels with alpha < threshold.
+    if (window_surface.has_alpha && window_surface.alpha_hit_threshold > 0.0f && client_pixels != nullptr) {
+        auto* input_region = wl_compositor_create_region(m_compositor);
+        if (!input_region)
+            return;
+        if (total_inset > 0)
+            wl_region_add(input_region, 0, 0, logical_w, total_inset);
+
+        u8 const min_alpha = static_cast<u8>(clamp(window_surface.alpha_hit_threshold * 255.0f, 1.0f, 255.0f));
+        size_t span_count = 0;
+        for (int y = 0; y < visible_size.height(); ++y) {
+            auto const* row = reinterpret_cast<u32 const*>(client_pixels + static_cast<size_t>(y * scale) * pitch);
+            int run_start = -1;
+            for (int x = 0; x < logical_w; ++x) {
+                u8 const alpha = static_cast<u8>((row[x * scale] >> 24) & 0xff);
+                if (alpha >= min_alpha) {
+                    if (run_start < 0)
+                        run_start = x;
+                } else if (run_start >= 0) {
+                    wl_region_add(input_region, run_start, y + total_inset, x - run_start, 1);
+                    ++span_count;
+                    run_start = -1;
+                }
+            }
+            if (run_start >= 0) {
+                wl_region_add(input_region, run_start, y + total_inset, logical_w - run_start, 1);
+                ++span_count;
+            }
+        }
+        wl_surface_set_input_region(window_surface.surface, input_region);
+        wl_region_destroy(input_region);
+        window_surface.input_region_active = true;
+        dbgln("LibWM/Wayland: applied alpha input region on window {} (threshold={:.2f}, spans={})",
+            window_surface.window_id, window_surface.alpha_hit_threshold, span_count);
+    } else if (window_surface.input_region_active) {
+        wl_surface_set_input_region(window_surface.surface, nullptr);
+        window_surface.input_region_active = false;
+    }
+}
+
 void WaylandClient::commit_window_content(WindowSurface& window_surface, int client_fd, Gfx::IntSize size, Gfx::IntSize visible_size, i32 pitch, bool has_alpha)
 {
     MutexLocker locker(m_mutex);
@@ -1199,6 +1316,7 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
             for (auto const& rect : damage)
                 copy_rect(rect);
         }
+        update_surface_regions(window_surface, source, static_cast<size_t>(pitch), visible_size, scale, total_inset);
         munmap(const_cast<u8*>(source), client_bytes);
 
         bool const redraw_csd = csd_h > 0 && (recreate || window_surface.csd_dirty);
@@ -1244,14 +1362,19 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
     int const display_width = visible_size.width() * scale;
     int const display_height = visible_size.height() * scale;
 
-    if (is_fractional) {
+    if (is_fractional || !window_surface.has_alpha || window_surface.alpha_hit_threshold > 0.0f || window_surface.input_region_active) {
         size_t const client_bytes = static_cast<size_t>(pitch) * static_cast<size_t>(size.height());
         auto const* source = static_cast<u8 const*>(mmap(nullptr, client_bytes, PROT_READ, MAP_SHARED, client_fd, 0));
         if (source != MAP_FAILED) {
-            bool const ok = present_fractional(source, static_cast<size_t>(pitch), display_width, display_height);
-            munmap(const_cast<u8*>(source), client_bytes);
-            if (ok)
-                return;
+            update_surface_regions(window_surface, source, static_cast<size_t>(pitch), visible_size, scale, 0);
+            if (is_fractional) {
+                bool const ok = present_fractional(source, static_cast<size_t>(pitch), display_width, display_height);
+                munmap(const_cast<u8*>(source), client_bytes);
+                if (ok)
+                    return;
+            } else {
+                munmap(const_cast<u8*>(source), client_bytes);
+            }
         }
     }
 

@@ -7,7 +7,11 @@
 #include "WaylandClient.h"
 #include <Kernel/API/KeyCode.h>
 #include <LibGUI/Event.h>
+#include <LibGfx/Bitmap.h>
+#include <LibGfx/CursorParams.h>
+#include <LibGfx/StandardCursor.h>
 #include <linux/input-event-codes.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -297,7 +301,7 @@ static wl_seat_listener const s_seat_listener = {
 
 static void pointer_enter(void* data, wl_pointer*, uint32_t serial, wl_surface* surface, wl_fixed_t sx, wl_fixed_t sy)
 {
-    static_cast<WaylandClient*>(data)->note_input_serial(serial);
+    static_cast<WaylandClient*>(data)->note_pointer_enter_serial(serial);
     static_cast<WaylandClient*>(data)->on_pointer_enter(surface, { wl_fixed_to_int(sx), wl_fixed_to_int(sy) });
 }
 
@@ -505,8 +509,12 @@ void WaylandClient::on_pointer_enter(wl_surface* surface, Gfx::IntPoint position
             m_input.popup_motion(m_input_state.pointer_popup, position);
         return;
     }
-    if (m_input_state.pointer_window >= 0 && m_input.window_entered)
-        m_input.window_entered(m_input_state.pointer_window);
+    if (m_input_state.pointer_window >= 0) {
+        if (auto const* window_surface = find(m_input_state.pointer_window))
+            apply_window_cursor(*window_surface);
+        if (m_input.window_entered)
+            m_input.window_entered(m_input_state.pointer_window);
+    }
 }
 
 void WaylandClient::on_pointer_leave()
@@ -853,6 +861,159 @@ Gfx::IntPoint WaylandClient::global_pointer_position()
         }
     }
     return m_input_state.pointer_position;
+}
+
+static StringView standard_cursor_filename(Gfx::StandardCursor cursor)
+{
+    switch (cursor) {
+    case Gfx::StandardCursor::Arrow:
+        return "arrow.x2y2.png"sv;
+    case Gfx::StandardCursor::Crosshair:
+        return "crosshair.png"sv;
+    case Gfx::StandardCursor::IBeam:
+        return "i-beam.png"sv;
+    case Gfx::StandardCursor::ResizeHorizontal:
+        return "resize-horizontal.png"sv;
+    case Gfx::StandardCursor::ResizeVertical:
+        return "resize-vertical.png"sv;
+    case Gfx::StandardCursor::ResizeDiagonalTLBR:
+        return "resize-diagonal-tlbr.png"sv;
+    case Gfx::StandardCursor::ResizeDiagonalBLTR:
+        return "resize-diagonal-bltr.png"sv;
+    case Gfx::StandardCursor::ResizeColumn:
+        return "resize-column.png"sv;
+    case Gfx::StandardCursor::ResizeRow:
+        return "resize-row.png"sv;
+    case Gfx::StandardCursor::Hand:
+        return "hand.x8y4.png"sv;
+    case Gfx::StandardCursor::Help:
+        return "help.x1y1.png"sv;
+    case Gfx::StandardCursor::Drag:
+        return "drag.png"sv;
+    case Gfx::StandardCursor::DragCopy:
+        return "drag-copy.x7y7.png"sv;
+    case Gfx::StandardCursor::Move:
+        return "move.png"sv;
+    case Gfx::StandardCursor::Wait:
+        return "wait.f14t100.png"sv;
+    case Gfx::StandardCursor::Disallowed:
+        return "disallowed.png"sv;
+    case Gfx::StandardCursor::Eyedropper:
+        return "eyedropper.x2y2.png"sv;
+    case Gfx::StandardCursor::Zoom:
+        return "zoom.x0y0.png"sv;
+    default:
+        return {};
+    }
+}
+
+void WaylandClient::apply_window_cursor(WindowSurface const& window_surface)
+{
+    MutexLocker locker(m_mutex);
+    if (!m_input_state.pointer || !m_compositor || !m_shm)
+        return;
+
+    auto const cursor_enum = static_cast<Gfx::StandardCursor>(window_surface.cursor_type);
+    if (!window_surface.custom_cursor && cursor_enum == Gfx::StandardCursor::Hidden) {
+        wl_pointer_set_cursor(m_input_state.pointer, m_input_state.pointer_enter_serial, nullptr, 0, 0);
+        wl_display_flush(m_display);
+        dbgln("LibWM/Wayland: hid cursor on window {}", window_surface.window_id);
+        return;
+    }
+
+    RefPtr<Gfx::Bitmap> bitmap = window_surface.custom_cursor;
+    Gfx::IntPoint hotspot;
+    if (bitmap) {
+        hotspot = bitmap->rect().center();
+    } else if (cursor_enum != Gfx::StandardCursor::None) {
+        auto filename = standard_cursor_filename(cursor_enum);
+        if (filename.is_empty())
+            return;
+        ByteString res_root = getenv("SERENITY_RES_ROOT") ? ByteString(getenv("SERENITY_RES_ROOT")) : ByteString(LIBWM_DEFAULT_RES);
+        auto theme = host_setting("cursor.theme"sv, "Default"sv);
+        auto path = ByteString::formatted("{}/cursor-themes/{}/{}", res_root, theme, filename);
+        auto loaded = Gfx::Bitmap::load_from_file(path);
+        if (loaded.is_error() && theme != "Default"sv) {
+            path = ByteString::formatted("{}/cursor-themes/Default/{}", res_root, filename);
+            loaded = Gfx::Bitmap::load_from_file(path);
+        }
+        if (loaded.is_error())
+            return;
+        auto full_bmp = loaded.release_value();
+        auto params = Gfx::CursorParams::parse_from_filename(filename, full_bmp->rect().center()).constrained(*full_bmp);
+        if (params.frames() > 1 && full_bmp->width() >= static_cast<int>(params.frames())) {
+            int frame_w = full_bmp->width() / static_cast<int>(params.frames());
+            auto cropped = full_bmp->cropped({ 0, 0, frame_w, full_bmp->height() });
+            if (!cropped.is_error())
+                full_bmp = cropped.release_value();
+            params = Gfx::CursorParams::parse_from_filename(filename, full_bmp->rect().center()).constrained(*full_bmp);
+        }
+        bitmap = move(full_bmp);
+        hotspot = params.hotspot();
+    } else {
+        return;
+    }
+
+    if (!bitmap || bitmap->size().is_empty())
+        return;
+
+    if (!m_input_state.cursor_surface)
+        m_input_state.cursor_surface = wl_compositor_create_surface(m_compositor);
+    if (!m_input_state.cursor_surface)
+        return;
+
+    // Purge any released cursor buffers.
+    Vector<NonnullOwnPtr<BufferRecord>> kept;
+    for (auto& record : m_input_state.cursor_buffers) {
+        if (record->released)
+            wl_buffer_destroy(record->buffer);
+        else
+            kept.append(move(record));
+    }
+    m_input_state.cursor_buffers = move(kept);
+
+    size_t const bytes = static_cast<size_t>(bitmap->pitch()) * static_cast<size_t>(bitmap->height());
+    if (!m_input_state.cursor_bitmap || m_input_state.cursor_bitmap->size() != bitmap->size()) {
+        auto buffer = Core::AnonymousBuffer::create_with_size(bytes);
+        if (buffer.is_error())
+            return;
+        m_input_state.cursor_buffer = buffer.release_value();
+        auto wrapped = Gfx::Bitmap::create_with_anonymous_buffer(Gfx::BitmapFormat::BGRA8888, m_input_state.cursor_buffer, bitmap->size(), 1);
+        if (wrapped.is_error())
+            return;
+        m_input_state.cursor_bitmap = wrapped.release_value();
+    }
+    memcpy(m_input_state.cursor_bitmap->scanline(0), bitmap->scanline(0), bytes);
+
+    bind_bitmap(m_input_state.cursor_surface, m_input_state.cursor_buffer, *m_input_state.cursor_bitmap, m_input_state.cursor_buffers);
+    wl_surface_commit(m_input_state.cursor_surface);
+    wl_pointer_set_cursor(m_input_state.pointer, m_input_state.pointer_enter_serial, m_input_state.cursor_surface, hotspot.x(), hotspot.y());
+    wl_display_flush(m_display);
+    dbgln("LibWM/Wayland: set cursor on window {} ({}x{}, hotspot {},{})",
+        window_surface.window_id, bitmap->width(), bitmap->height(), hotspot.x(), hotspot.y());
+}
+
+void WaylandClient::set_window_cursor(i32 window_id, i32 cursor_type)
+{
+    MutexLocker locker(m_mutex);
+    auto* window_surface = find(window_id);
+    if (!window_surface)
+        return;
+    window_surface->cursor_type = cursor_type;
+    window_surface->custom_cursor = nullptr;
+    if (m_input_state.pointer_window == window_id)
+        apply_window_cursor(*window_surface);
+}
+
+void WaylandClient::set_window_custom_cursor(i32 window_id, Gfx::ShareableBitmap const& cursor)
+{
+    MutexLocker locker(m_mutex);
+    auto* window_surface = find(window_id);
+    if (!window_surface)
+        return;
+    window_surface->custom_cursor = cursor.is_valid() ? cursor.bitmap() : nullptr;
+    if (m_input_state.pointer_window == window_id)
+        apply_window_cursor(*window_surface);
 }
 
 }

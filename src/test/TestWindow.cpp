@@ -17,6 +17,7 @@
 #include <LibGUI/Window.h>
 #include <LibGfx/Bitmap.h>
 #include <LibGfx/Color.h>
+#include <LibGfx/StandardCursor.h>
 #include <LibMain/Main.h>
 
 class ColorWidget final : public GUI::Widget {
@@ -53,6 +54,8 @@ private:
     virtual void mouseup_event(GUI::MouseEvent& event) override
     {
         dbgln("TestWindow: mouse up at {},{} button {}", event.position().x(), event.position().y(), (int)event.button());
+        if (window())
+            window()->set_cursor(Gfx::StandardCursor::Hand);
     }
 
     virtual void doubleclick_event(GUI::MouseEvent& event) override
@@ -108,10 +111,15 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     auto window = GUI::Window::construct();
     window->set_title("LibWM Test Window");
     window->set_rect(100, 100, 320, 240);
+    window->set_obey_widget_min_size(false);
+    window->set_minimum_size(120, 90);
+    window->set_cursor(Gfx::StandardCursor::Hand);
 
     auto widget = window->set_main_widget<ColorWidget>();
     widget->set_fill_with_background_color(true);
     window->show();
+    window->set_modified(true);
+    dbgln("TestWindow: modified={} min_size={}x{}", window->is_modified(), window->minimum_size().width(), window->minimum_size().height());
 
     // Exercise Wayland connection-lost reporting and graceful shutdown when the
     // headless compositor finishes and closes the Wayland socket.
@@ -144,6 +152,13 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
         LibWM::WaylandClient::the().set_text_input_cursor_rect({ 10, 10, 2, 16 });
         LibWM::WaylandClient::the().set_text_input_enabled(true);
+
+        if (auto custom_cursor = Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, { 12, 12 }); !custom_cursor.is_error())
+            window->set_cursor(*custom_cursor.value());
+
+        window->set_has_alpha_channel(true);
+        window->set_alpha_hit_threshold(0.5f);
+        widget->update();
     });
     ime_and_title_timer->start();
 

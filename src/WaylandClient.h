@@ -235,8 +235,15 @@ public:
     // Window state (maps to xdg_toplevel).
     void set_fullscreen(i32 window_id, bool fullscreen);
     void set_maximized(i32 window_id, bool maximized);
+    bool is_window_maximized(i32 window_id) const;
     void set_minimized(i32 window_id);
     void set_always_on_top(i32 window_id, bool always_on_top);
+    void set_minimum_size(i32 window_id, Gfx::IntSize size);
+    void set_frameless(i32 window_id, bool frameless);
+    void set_window_has_alpha_channel(i32 window_id, bool has_alpha);
+    void set_window_alpha_hit_threshold(i32 window_id, float threshold);
+    void set_window_cursor(i32 window_id, i32 cursor_type);
+    void set_window_custom_cursor(i32 window_id, Gfx::ShareableBitmap const& cursor);
 
     // The window's icon, pushed to the compositor over serenity-window when it
     // offers the manager (SerenityOS: Window::icon()). An invalid icon clears it.
@@ -480,6 +487,12 @@ public:
         MutexLocker locker(m_mutex);
         m_input_state.last_serial = serial;
     }
+    void note_pointer_enter_serial(u32 serial)
+    {
+        MutexLocker locker(m_mutex);
+        m_input_state.last_serial = serial;
+        m_input_state.pointer_enter_serial = serial;
+    }
 
 private:
     WaylandClient();
@@ -542,7 +555,10 @@ private:
         bool menubar_visible { true };
         ByteString title;
         Gfx::IntSize size;
+        Gfx::IntSize minimum_size;
         bool has_alpha { false };
+        float alpha_hit_threshold { 0.0f };
+        bool input_region_active { false };
         bool resizable { true };
         bool frameless { false };
         bool fullscreen { false };
@@ -550,6 +566,8 @@ private:
         bool activated { true };
         bool use_csd { false };
         bool csd_dirty { true };
+        i32 cursor_type { 0 };
+        RefPtr<Gfx::Bitmap> custom_cursor;
         RefPtr<Gfx::Bitmap> icon_bitmap;
         Gfx::IntSize fixed_size;
         Vector<NonnullOwnPtr<BufferRecord>> buffers;
@@ -633,10 +651,15 @@ private:
         ::xkb_keymap* xkb_keymap { nullptr };
         ::xkb_state* xkb_state { nullptr };
         u32 last_serial { 0 };
+        u32 pointer_enter_serial { 0 };
         u32 modifiers { 0 };
         i32 pointer_window { -1 };
         i32 pointer_popup { -1 };
         wl_surface* pointer_surface { nullptr };
+        wl_surface* cursor_surface { nullptr };
+        Core::AnonymousBuffer cursor_buffer;
+        RefPtr<Gfx::Bitmap> cursor_bitmap;
+        Vector<NonnullOwnPtr<BufferRecord>> cursor_buffers;
         i32 focused_window { -1 };
         Gfx::IntPoint pointer_position;
         u32 pointer_buttons { 0 };
@@ -690,8 +713,10 @@ private:
 
     WindowSurface* find(i32 window_id);
     void commit_window_content(WindowSurface&, int client_fd, Gfx::IntSize size, Gfx::IntSize visible_size, i32 pitch, bool has_alpha);
+    void update_surface_regions(WindowSurface&, u8 const* client_pixels, size_t pitch, Gfx::IntSize visible_size, int scale, int total_inset);
     void present_menubar(WindowSurface&, Gfx::IntSize visible_size);
     void render_csd_titlebar(WindowSurface const&, Gfx::Bitmap&, int width);
+    void apply_window_cursor(WindowSurface const&);
     Popup* find_popup(i32 popup_id);
     i32 popup_id_for_surface(wl_surface*) const;
     void purge_released_buffers(WindowSurface&);

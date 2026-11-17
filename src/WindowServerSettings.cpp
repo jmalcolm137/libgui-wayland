@@ -371,6 +371,11 @@ Messages::WindowServer::SaveScreenLayoutResponse WindowServerConnection::save_sc
     return { true, {} };
 }
 
+Messages::WindowServer::GetDesktopDisplayScaleResponse WindowServerConnection::get_desktop_display_scale(u32)
+{
+    return WaylandClient::the().output_scale();
+}
+
 void WindowServerConnection::set_output_scale(i32 scale_v120)
 {
     // R6 HiDPI: the DisplaySettings scale control calls this; we write the
@@ -592,6 +597,12 @@ Messages::WindowServer::ApplyWorkspaceSettingsResponse WindowServerConnection::a
     WaylandClient::the().set_host_setting("workspaces.rows"sv, ByteString::number(rows));
     WaylandClient::the().set_host_setting("workspaces.columns"sv, ByteString::number(columns));
     return true;
+}
+
+Messages::WindowServer::GetWorkspaceSettingsResponse WindowServerConnection::get_workspace_settings()
+{
+    auto cfg = WaylandClient::the().host_config();
+    return { cfg.workspace_rows, cfg.workspace_columns, 8u, 8u };
 }
 
 Messages::WindowServer::GetSystemThemeOverrideResponse WindowServerConnection::get_system_theme_override()

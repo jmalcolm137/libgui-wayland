@@ -109,6 +109,7 @@ private:
         Gfx::IntRect rect;
         Gfx::IntSize minimum_size;
         bool has_alpha_channel { false };
+        bool modified { false };
         ByteString title;
         // SerenityOS WindowMode (0 modeless .. 3 blocking) and the parent window
         // id (for a transient/modal dialog), from create_window.
@@ -149,6 +150,7 @@ private:
     void set_window_minimum_size(i32 window_id, Gfx::IntSize size) override;
     Messages::WindowServer::GetWindowMinimumSizeResponse get_window_minimum_size(i32 window_id) override;
     Messages::WindowServer::GetWindowTitleResponse get_window_title(i32 window_id) override;
+    void set_window_modified(i32 window_id, bool modified) override;
     Messages::WindowServer::IsWindowModifiedResponse is_window_modified(i32 window_id) override;
     Messages::WindowServer::GetAppletRectOnScreenResponse get_applet_rect_on_screen(i32 window_id) override;
     Messages::WindowServer::GetWindowRectFromClientResponse get_window_rect_from_client(i32 client_id, i32 window_id) override;
@@ -158,9 +160,13 @@ private:
     void set_window_has_alpha_channel(i32 window_id, bool has_alpha_channel) override;
     void set_window_alpha_hit_threshold(i32 window_id, float threshold) override;
     void set_window_icon_bitmap(i32 window_id, Gfx::ShareableBitmap const& icon) override;
+    void set_window_cursor(i32 window_id, i32 cursor_type) override;
+    void set_window_custom_cursor(i32 window_id, Gfx::ShareableBitmap const& cursor) override;
     void set_window_progress(i32 window_id, Optional<i32> const& progress) override;
     void set_fullscreen(i32 window_id, bool fullscreen) override;
+    void set_frameless(i32 window_id, bool frameless) override;
     void set_maximized(i32 window_id, bool maximized) override;
+    Messages::WindowServer::IsMaximizedResponse is_maximized(i32 window_id) override;
     void set_minimized(i32 window_id, bool minimized) override;
     void set_always_on_top(i32 window_id, bool always_on_top) override;
     void move_window_to_front(i32 window_id) override;
@@ -202,6 +208,7 @@ private:
     Messages::WindowServer::GetScreenLayoutResponse get_screen_layout() override;
     Messages::WindowServer::SetScreenLayoutResponse set_screen_layout(WindowServer::ScreenLayout const& screen_layout, bool save) override;
     Messages::WindowServer::SaveScreenLayoutResponse save_screen_layout() override;
+    Messages::WindowServer::GetDesktopDisplayScaleResponse get_desktop_display_scale(u32 screen_index) override;
     void set_output_scale(i32 scale_v120) override;
 
     // Settings the host compositor accepts but does not act on (fonts are fixed to
@@ -210,6 +217,7 @@ private:
     // synchronously, and an unhandled response blocks the application forever.
     Messages::WindowServer::SetSystemFontsResponse set_system_fonts(ByteString const& default_font_query, ByteString const& fixed_width_font_query, ByteString const& window_title_font_query) override;
     Messages::WindowServer::ApplyWorkspaceSettingsResponse apply_workspace_settings(u32 rows, u32 columns, bool save) override;
+    Messages::WindowServer::GetWorkspaceSettingsResponse get_workspace_settings() override;
     Messages::WindowServer::GetSystemThemeOverrideResponse get_system_theme_override() override;
 
     // Mouse/pointer settings (Mouse Settings, R4.6). Backed by input.ini in the

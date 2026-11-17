@@ -325,7 +325,7 @@ void WindowServerConnection::present(Window& window)
         window.id, window.bitmap->width(), window.bitmap->height(), window.last_serial, window.has_alpha_channel);
 }
 
-void WindowServerConnection::create_window(i32 window_id, i32, Gfx::IntRect const& rect, bool, bool has_alpha_channel, bool, bool, bool resizable, bool fullscreen, bool frameless, bool, float, Gfx::IntSize, Gfx::IntSize, Gfx::IntSize minimum_size, Optional<Gfx::IntSize> const&, i32 window_type, i32 window_mode, ByteString const& title, i32 parent_window_id, Gfx::IntRect const& launch_origin_rect)
+void WindowServerConnection::create_window(i32 window_id, i32, Gfx::IntRect const& rect, bool, bool has_alpha_channel, bool, bool, bool resizable, bool fullscreen, bool frameless, bool, float alpha_hit_threshold, Gfx::IntSize, Gfx::IntSize, Gfx::IntSize minimum_size, Optional<Gfx::IntSize> const&, i32 window_type, i32 window_mode, ByteString const& title, i32 parent_window_id, Gfx::IntRect const& launch_origin_rect)
 {
     auto window = make<Window>();
     window->id = window_id;
@@ -371,6 +371,10 @@ void WindowServerConnection::create_window(i32 window_id, i32, Gfx::IntRect cons
 
     auto& created_window = *m_windows.last();
     WaylandClient::the().create_window(window_id, created_window.rect.location(), created_window.rect.size(), title, has_alpha_channel, resizable, frameless, window_type, window_mode, parent_window_id, launch_origin_rect);
+    if (!minimum_size.is_empty())
+        WaylandClient::the().set_minimum_size(window_id, minimum_size);
+    if (alpha_hit_threshold > 0.0f)
+        WaylandClient::the().set_window_alpha_hit_threshold(window_id, alpha_hit_threshold);
 
     // Ask the client to paint the whole window.
     Vector<Gfx::IntRect> rects;
@@ -431,8 +435,10 @@ Messages::WindowServer::GetWindowFloatingRectResponse WindowServerConnection::ge
 
 void WindowServerConnection::set_window_minimum_size(i32 window_id, Gfx::IntSize size)
 {
-    if (auto* w = window(window_id))
+    if (auto* w = window(window_id)) {
         w->minimum_size = size;
+        WaylandClient::the().set_minimum_size(window_id, size);
+    }
 }
 
 Messages::WindowServer::GetWindowMinimumSizeResponse WindowServerConnection::get_window_minimum_size(i32 window_id)
@@ -449,8 +455,16 @@ Messages::WindowServer::GetWindowTitleResponse WindowServerConnection::get_windo
     return Messages::WindowServer::GetWindowTitleResponse { ByteString {} };
 }
 
-Messages::WindowServer::IsWindowModifiedResponse WindowServerConnection::is_window_modified(i32)
+void WindowServerConnection::set_window_modified(i32 window_id, bool modified)
 {
+    if (auto* w = window(window_id))
+        w->modified = modified;
+}
+
+Messages::WindowServer::IsWindowModifiedResponse WindowServerConnection::is_window_modified(i32 window_id)
+{
+    if (auto* w = window(window_id))
+        return Messages::WindowServer::IsWindowModifiedResponse { w->modified };
     return Messages::WindowServer::IsWindowModifiedResponse { false };
 }
 
@@ -533,17 +547,30 @@ void WindowServerConnection::did_finish_painting(i32 window_id, Vector<Gfx::IntR
 
 void WindowServerConnection::set_window_has_alpha_channel(i32 window_id, bool has_alpha_channel)
 {
-    if (auto* w = window(window_id))
+    if (auto* w = window(window_id)) {
         w->has_alpha_channel = has_alpha_channel;
+        WaylandClient::the().set_window_has_alpha_channel(window_id, has_alpha_channel);
+    }
 }
 
-void WindowServerConnection::set_window_alpha_hit_threshold(i32, float)
+void WindowServerConnection::set_window_alpha_hit_threshold(i32 window_id, float threshold)
 {
+    WaylandClient::the().set_window_alpha_hit_threshold(window_id, threshold);
 }
 
 void WindowServerConnection::set_window_icon_bitmap(i32 window_id, Gfx::ShareableBitmap const& icon)
 {
     WaylandClient::the().set_window_icon_bitmap(window_id, icon);
+}
+
+void WindowServerConnection::set_window_cursor(i32 window_id, i32 cursor_type)
+{
+    WaylandClient::the().set_window_cursor(window_id, cursor_type);
+}
+
+void WindowServerConnection::set_window_custom_cursor(i32 window_id, Gfx::ShareableBitmap const& cursor)
+{
+    WaylandClient::the().set_window_custom_cursor(window_id, cursor);
 }
 
 void WindowServerConnection::set_window_progress(i32, Optional<i32> const&)
@@ -556,10 +583,20 @@ void WindowServerConnection::set_fullscreen(i32 window_id, bool fullscreen)
     WaylandClient::the().set_fullscreen(window_id, fullscreen);
 }
 
+void WindowServerConnection::set_frameless(i32 window_id, bool frameless)
+{
+    WaylandClient::the().set_frameless(window_id, frameless);
+}
+
 void WindowServerConnection::set_maximized(i32 window_id, bool maximized)
 {
     dbgln("LibWM: set_maximized({}, {})", window_id, maximized);
     WaylandClient::the().set_maximized(window_id, maximized);
+}
+
+Messages::WindowServer::IsMaximizedResponse WindowServerConnection::is_maximized(i32 window_id)
+{
+    return Messages::WindowServer::IsMaximizedResponse { WaylandClient::the().is_window_maximized(window_id) };
 }
 
 void WindowServerConnection::set_minimized(i32 window_id, bool minimized)
