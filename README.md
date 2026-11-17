@@ -58,8 +58,8 @@ programming model.
   server-rendered **menubar and dropdown menus** with hover highlighting (clicking `File → Quit`
   works; `Help → About` opens the dialog) and **nested submenus** with full keyboard navigation
   (`F10`/`Alt`+accelerator, arrows, `Enter`, `Escape`). Window state
-  (`fullscreen`/`maximize`/`minimize`) and SerenityOS `/res/...` path redirection are in. Long-menu
-  scrolling, menu item icons and config persistence remain.
+  (`fullscreen`/`maximize`/`minimize`), menu item icons, Config INI persistence, and SerenityOS
+  `/res/...` path redirection are in. Long-menu scrolling remains.
 - **Audio** — `LibAudio` stays as upstream: a compositor/desktop-agnostic client library. On
   Linux it does its own output over **PulseAudio** for clients that use `Audio::PlaybackStream`.
   Applications that speak the SerenityOS **AudioServer / AudioManager protocols** directly
@@ -90,10 +90,7 @@ programming model.
   (`0` forces 1x, a positive value selects that scale). Fractional output scales still
   round to the nearest integer; `wp_viewporter` handles the remaining ratio in the
   compositor.
-- **Menus (M6 remainder).** Scrolling for long menus, and drawing menu-item icons (the model
-  already carries them; only the renderer ignores them).
-- **Config persistence.** The in-process Config portal is in memory only; values are not
-  written to disk between runs.
+- **Menus (M6 remainder).** Scrolling for long menus.
 - **Audio polish.** Cross-rate clients use LibAudio's naive resampler.
 - **GPU presentation and shaders.** `EGLGPU` renders on the GPU (Mesa) but reads the result
   back with `glReadPixels` into a `Gfx::Bitmap` and presents it over `wl_shm`; zero-copy

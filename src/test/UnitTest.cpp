@@ -159,6 +159,15 @@ void test_menu_controller()
     auto sub_size = controller.popup_size(30);
     controller.on_popup_button(30, { 15, sub_size.height() - 8 }, false);
     check(activated_menu == 30 && activated_id == 302 && !controller.has_open_menu(), "on_popup_button release activates submenu item 302 and closes menus"sv);
+
+    // Separator removal when rebuilding menus: separators carry no identifier in
+    // the protocol, so an unmatched remove_menu_item clears all separators.
+    auto height_with_sep = controller.popup_size(10).height();
+    controller.remove_menu_item(10, 99999);
+    controller.open_root(10, 1, { 0, 0, 40, 20 }, true);
+    auto height_without_sep = controller.popup_size(10).height();
+    check(height_without_sep < height_with_sep, "unmatched remove_menu_item drops separators from menu"sv);
+    controller.close_open_menus();
 }
 
 void test_clipboard_image_transcoding()

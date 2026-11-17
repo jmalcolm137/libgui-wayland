@@ -5,6 +5,8 @@
  */
 
 #include "LibWM.h"
+#include "WaylandClient.h"
+#include <AK/StringBuilder.h>
 #include <LibCore/MimeData.h>
 #include <LibCore/Timer.h>
 #include <LibGUI/Application.h>
@@ -110,6 +112,40 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     auto widget = window->set_main_widget<ColorWidget>();
     widget->set_fill_with_background_color(true);
     window->show();
+
+    // Exercise Wayland connection-lost reporting and graceful shutdown when the
+    // headless compositor finishes and closes the Wayland socket.
+    LibWM::WaylandClient::the().set_connection_lost_callback([&](ByteString const& reason) {
+        dbgln("TestWindow: connection lost reason='{}'", reason);
+        app->quit(0);
+    });
+
+    // Exercise zwp_text_input_v3 IME preedit and commit forwarding.
+    LibWM::WaylandClient::the().set_text_input_callbacks(
+        [](String const& committed) {
+            dbgln("TestWindow: IME commit='{}'", committed);
+        },
+        [](String const& preedit, i32 cursor_begin, i32 cursor_end) {
+            dbgln("TestWindow: IME preedit='{}' cursor={}..{}", preedit, cursor_begin, cursor_end);
+        },
+        [](i32 before, i32 after) {
+            dbgln("TestWindow: IME delete_surrounding={}..{}", before, after);
+        });
+
+    auto ime_and_title_timer = Core::Timer::create_single_shot(300, [&] {
+        // Exercise UTF-8 clamping on an oversized (>4 KiB) Wayland window title so
+        // xdg_toplevel.set_title never overflows libwayland's 4 KiB wire buffer.
+        StringBuilder oversized;
+        for (int i = 0; i < 600; ++i)
+            oversized.append("🌊Wayland"sv);
+        window->set_title(oversized.to_byte_string());
+        window->set_title("LibWM Test Window");
+        dbgln("TestWindow: oversized UTF-8 title clamped and sent");
+
+        LibWM::WaylandClient::the().set_text_input_cursor_rect({ 10, 10, 2, 16 });
+        LibWM::WaylandClient::the().set_text_input_enabled(true);
+    });
+    ime_and_title_timer->start();
 
     auto quit_timer = Core::Timer::create_single_shot(6000, [&] { app->quit(0); });
     quit_timer->start();

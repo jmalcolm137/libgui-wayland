@@ -1104,6 +1104,10 @@ void WaylandClient::destroy_window(i32 window_id)
         }
         if (m_input_state.pointer_surface == window_surface.surface || m_input_state.pointer_surface == window_surface.menubar_surface)
             m_input_state.pointer_surface = nullptr;
+        if (m_input_state.pointer_window == window_id)
+            m_input_state.pointer_window = -1;
+        if (m_input_state.focused_window == window_id)
+            m_input_state.focused_window = -1;
         for (auto& record : window_surface.menubar_buffers) {
             if (record->buffer)
                 wl_buffer_destroy(record->buffer);
