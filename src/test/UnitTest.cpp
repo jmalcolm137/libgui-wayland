@@ -168,6 +168,43 @@ void test_menu_controller()
     auto height_without_sep = controller.popup_size(10).height();
     check(height_without_sep < height_with_sep, "unmatched remove_menu_item drops separators from menu"sv);
     controller.close_open_menus();
+
+    // Item::visible: hidden items do not contribute to popup height and are skipped
+    // by keyboard navigation.
+    controller.create_menu(40, "&View", 0);
+    controller.add_menu_item(40, 401, -1, "Hidden First", true, false, false, false, false, "", nullptr, false);
+    controller.add_menu_item(40, 402, -1, "Visible Second", true, true, false, false, false, "", nullptr, false);
+    controller.add_menu_item(40, 403, -1, "Visible Third", true, true, false, false, false, "", nullptr, false);
+    controller.open_root(40, 1, { 0, 0, 40, 20 }, false);
+    auto height_two_visible = controller.popup_size(40).height();
+    controller.handle_key(1, Key_Down, 0, Mod_None, true);
+    check(entered_items.last() == 402, "Key_Down skips hidden item (visible=false) to select 402"sv);
+    controller.update_menu_item(40, 403, -1, "Visible Third", true, false, false, false, false, "", nullptr);
+    check(controller.popup_size(40).height() < height_two_visible, "hiding item via update_menu_item shrinks popup height"sv);
+    controller.close_open_menus();
+
+    // Long-menu scrolling: clamp popup height to max_popup_height, scroll on
+    // Key_Down and on_popup_wheel, and hit-test scrolled items accurately.
+    controller.set_max_popup_height(60);
+    controller.create_menu(50, "&Bookmarks", 0);
+    for (int i = 1; i <= 10; ++i)
+        controller.add_menu_item(50, 500 + i, -1, ByteString::formatted("Bookmark {}", i), true, true, false, false, false, "", nullptr, false);
+    controller.open_root(50, 1, { 0, 0, 40, 20 }, false);
+    check(controller.popup_size(50).height() == 60, "long menu popup height clamped to max_popup_height (60px)"sv);
+    check(controller.popup_scroll_offset(50) == 0, "long menu starts at scroll_offset 0"sv);
+    for (int i = 0; i < 6; ++i)
+        controller.handle_key(1, Key_Down, 0, Mod_None, true);
+    check(controller.popup_scroll_offset(50) > 0, "Key_Down past viewport bottom scrolls long menu down"sv);
+    int offset_after_keys = controller.popup_scroll_offset(50);
+    controller.on_popup_wheel(50, 1);
+    check(controller.popup_scroll_offset(50) > offset_after_keys, "on_popup_wheel(+1) scrolls long menu further down"sv);
+    controller.on_popup_wheel(50, -10);
+    // Reset to top via repeated wheel up
+    for (int i = 0; i < 10; ++i)
+        controller.on_popup_wheel(50, -1);
+    check(controller.popup_scroll_offset(50) == 0, "on_popup_wheel(-1) scrolls long menu back to top"sv);
+    controller.set_max_popup_height(0);
+    controller.close_open_menus();
 }
 
 void test_clipboard_image_transcoding()

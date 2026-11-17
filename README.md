@@ -52,14 +52,14 @@ programming model.
   a typed-path picker open, and double-clicking to traverse a directory and open a file;
   `scripts/run-pdfviewer-test.sh`). Scroll/animation polish
   remains.
-- **M6 (partly)** — clipboard and menus: done for `text/plain`, `text/html`, `text/uri-list`, and
+- **M6** — clipboard and menus: done for `text/plain`, `text/html`, `text/uri-list`, and
   `image/png` ↔ `image/x-serenityos`, including multiple representations on one clipboard item
   (all verified headlessly in both directions), plus a
   server-rendered **menubar and dropdown menus** with hover highlighting (clicking `File → Quit`
-  works; `Help → About` opens the dialog) and **nested submenus** with full keyboard navigation
-  (`F10`/`Alt`+accelerator, arrows, `Enter`, `Escape`). Window state
-  (`fullscreen`/`maximize`/`minimize`), menu item icons, Config INI persistence, and SerenityOS
-  `/res/...` path redirection are in. Long-menu scrolling remains.
+  works; `Help → About` opens the dialog), **nested submenus**, **menu item icons**, **long-menu
+  scrolling**, and full keyboard navigation (`F10`/`Alt`+accelerator, arrows, `Enter`, `Escape`).
+  Window state (`fullscreen`/`maximize`/`minimize`), Config INI persistence, and SerenityOS
+  `/res/...` path redirection are in.
 - **Audio** — `LibAudio` stays as upstream: a compositor/desktop-agnostic client library. On
   Linux it does its own output over **PulseAudio** for clients that use `Audio::PlaybackStream`.
   Applications that speak the SerenityOS **AudioServer / AudioManager protocols** directly
@@ -90,7 +90,6 @@ programming model.
   (`0` forces 1x, a positive value selects that scale). Fractional output scales still
   round to the nearest integer; `wp_viewporter` handles the remaining ratio in the
   compositor.
-- **Menus (M6 remainder).** Scrolling for long menus.
 - **Audio polish.** Cross-rate clients use LibAudio's naive resampler.
 - **GPU presentation and shaders.** `EGLGPU` renders on the GPU (Mesa) but reads the result
   back with `glReadPixels` into a `Gfx::Bitmap` and presents it over `wl_shm`; zero-copy

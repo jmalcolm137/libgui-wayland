@@ -5,6 +5,7 @@
  */
 
 #include "MenuController.h"
+#include "WaylandClient.h"
 #include <AK/CharacterTypes.h>
 #include <AK/NonnullOwnPtr.h>
 #include <Kernel/API/KeyCode.h>
@@ -53,6 +54,16 @@ MenuController::Menu const* MenuController::find_menu(i32 menu_id) const
 {
     auto it = m_menus.find(menu_id);
     return it == m_menus.end() ? nullptr : it->value.ptr();
+}
+
+int MenuController::effective_max_popup_height() const
+{
+    if (m_max_popup_height > 0)
+        return m_max_popup_height;
+    auto screen = WaylandClient::the().screen_size();
+    if (screen.height() > 64)
+        return screen.height() - 32;
+    return 0;
 }
 
 void MenuController::create_menu(i32 menu_id, ByteString const& name, i32 minimum_width)
@@ -160,6 +171,11 @@ void MenuController::update_menu_item(i32 menu_id, i32 identifier, i32 submenu_i
         }
         break;
     }
+    if (menu->is_open) {
+        layout_popup(*menu);
+        if (redraw_popup)
+            redraw_popup(menu_id);
+    }
 }
 
 void MenuController::remove_menu_item(i32 menu_id, i32 identifier)
@@ -173,6 +189,8 @@ void MenuController::remove_menu_item(i32 menu_id, i32 identifier)
         // instead of leaving them to accumulate at the top of a menu that is rebuilt.
         menu->items.remove_all_matching([](auto const& item) { return item.is_separator; });
     }
+    if (menu->is_open)
+        layout_popup(*menu);
     if (menu->window_id != -1 && menubar_changed)
         menubar_changed(menu->window_id);
 }
@@ -181,8 +199,12 @@ bool MenuController::window_has_menubar(i32 window_id) const
 {
     for (auto menu_id : m_menubar_order) {
         auto* menu = find_menu(menu_id);
-        if (menu && menu->window_id == window_id && !menu->items.is_empty())
-            return true;
+        if (!menu || menu->window_id != window_id)
+            continue;
+        for (auto const& item : menu->items) {
+            if (item.visible)
+                return true;
+        }
     }
     return false;
 }
@@ -238,7 +260,7 @@ void MenuController::layout_popup(Menu& menu)
     int widest_text = 0;
     int widest_shortcut = 0;
     for (auto& item : menu.items) {
-        if (item.is_separator)
+        if (!item.visible || item.is_separator)
             continue;
         widest_text = max(widest_text, font.width(Gfx::parse_ampersand_string(item.text)));
         if (!item.shortcut.is_empty())
@@ -251,17 +273,49 @@ void MenuController::layout_popup(Menu& menu)
 
     int y = frame;
     for (auto& item : menu.items) {
+        if (!item.visible) {
+            item.rect = {};
+            continue;
+        }
         int height = item.is_separator ? 8 : item_height();
         item.rect = { frame, y, width - frame * 2, height };
         y += height;
     }
-    menu.popup_size = { width, y + frame };
+    menu.content_height = y + frame;
+    int max_h = effective_max_popup_height();
+    int visible_h = max_h > 0 ? min(menu.content_height, max_h) : menu.content_height;
+    menu.popup_size = { width, visible_h };
+    menu.scroll_offset = clamp(menu.scroll_offset, 0, max(0, menu.content_height - visible_h));
+}
+
+void MenuController::scroll_item_into_view(Menu& menu, int index)
+{
+    if (index < 0 || index >= static_cast<int>(menu.items.size()))
+        return;
+    if (menu.content_height <= menu.popup_size.height())
+        return;
+    int const frame = 2;
+    auto const& rect = menu.items[index].rect;
+    if (rect.is_empty())
+        return;
+    int view_top = menu.scroll_offset + frame;
+    int view_bottom = menu.scroll_offset + menu.popup_size.height() - frame;
+    if (rect.y() < view_top)
+        menu.scroll_offset = max(0, rect.y() - frame);
+    else if (rect.bottom() > view_bottom)
+        menu.scroll_offset = min(max(0, menu.content_height - menu.popup_size.height()), rect.bottom() - (menu.popup_size.height() - frame));
 }
 
 Gfx::IntSize MenuController::popup_size(i32 menu_id) const
 {
     auto* menu = find_menu(menu_id);
     return menu ? menu->popup_size : Gfx::IntSize {};
+}
+
+int MenuController::popup_scroll_offset(i32 menu_id) const
+{
+    auto* menu = find_menu(menu_id);
+    return menu ? menu->scroll_offset : 0;
 }
 
 i32 MenuController::menu_window(i32 menu_id) const
@@ -280,31 +334,40 @@ void MenuController::render_popup(i32 menu_id, Gfx::Painter& painter) const
 
     Gfx::IntRect rect { {}, menu->popup_size };
     painter.draw_rect(rect, Gfx::Color::Black);
-    painter.fill_rect(rect.shrunken(2, 2), palette.menu_base());
+    auto inner_rect = rect.shrunken(2, 2);
+    painter.fill_rect(inner_rect, palette.menu_base());
     Gfx::IntRect stripe { 2, 2, 24, rect.height() - 4 };
     painter.fill_rect(stripe, palette.menu_stripe());
 
+    Gfx::PainterStateSaver saver(painter);
+    painter.add_clip_rect(inner_rect);
+
     for (size_t i = 0; i < menu->items.size(); ++i) {
         auto const& item = menu->items[i];
+        if (!item.visible || item.rect.is_empty())
+            continue;
+        auto item_rect = item.rect.translated(0, -menu->scroll_offset);
+        if (!item_rect.intersects(inner_rect))
+            continue;
         if (item.is_separator) {
-            int y = item.rect.y() + item.rect.height() / 2;
-            painter.draw_line({ item.rect.x() + 4, y }, { item.rect.right() - 4, y }, palette.threed_shadow1());
+            int y = item_rect.y() + item_rect.height() / 2;
+            painter.draw_line({ item_rect.x() + 4, y }, { item_rect.right() - 4, y }, palette.threed_shadow1());
             continue;
         }
         bool hovered = menu->hovered_valid && menu->hovered == static_cast<int>(i);
         auto text_color = item.enabled ? palette.menu_base_text() : palette.color(Gfx::ColorRole::DisabledText);
         if (hovered && item.enabled) {
-            painter.fill_rect(item.rect, palette.menu_selection());
+            painter.fill_rect(item_rect, palette.menu_selection());
             text_color = palette.menu_selection_text();
         }
-        Gfx::IntRect text_rect = item.rect.translated(24 + 6, 0);
+        Gfx::IntRect text_rect = item_rect.translated(24 + 6, 0);
 
         if (item.icon) {
-            Gfx::IntPoint icon_position { item.rect.x() + 4, 0 };
-            icon_position.set_y(item.rect.y() + max(0, (item.rect.height() - item.icon->height()) / 2));
+            Gfx::IntPoint icon_position { item_rect.x() + 4, 0 };
+            icon_position.set_y(item_rect.y() + max(0, (item_rect.height() - item.icon->height()) / 2));
             painter.blit(icon_position, *item.icon, item.icon->rect(), 1.0f);
         } else if (item.checkable) {
-            Gfx::IntRect check_rect { item.rect.x() + 6, 0, 12, 12 };
+            Gfx::IntRect check_rect { item_rect.x() + 6, 0, 12, 12 };
             check_rect.center_vertically_within(text_rect);
             if (item.checked)
                 painter.draw_text(check_rect, item.exclusive ? "\xE2\x97\x8F"sv : "\xE2\x9C\x93"sv, Gfx::TextAlignment::Center, text_color);
@@ -312,16 +375,24 @@ void MenuController::render_popup(i32 menu_id, Gfx::Painter& painter) const
 
         painter.draw_ui_text(text_rect, item.text, font, Gfx::TextAlignment::CenterLeft, text_color);
         if (!item.shortcut.is_empty())
-            painter.draw_text(item.rect.translated(-14, 0), item.shortcut, Gfx::TextAlignment::CenterRight, text_color);
+            painter.draw_text(item_rect.translated(-14, 0), item.shortcut, Gfx::TextAlignment::CenterRight, text_color);
         if (item.submenu_id != -1)
-            painter.draw_text(item.rect.translated(-6, 0), "\xE2\x96\xB6"sv, Gfx::TextAlignment::CenterRight, text_color);
+            painter.draw_text(item_rect.translated(-6, 0), "\xE2\x96\xB6"sv, Gfx::TextAlignment::CenterRight, text_color);
+    }
+
+    if (menu->content_height > menu->popup_size.height()) {
+        if (menu->scroll_offset > 0)
+            painter.draw_text(Gfx::IntRect { 2, 2, rect.width() - 4, 12 }, "\xE2\x96\xB2"sv, Gfx::TextAlignment::Center, palette.menu_base_text());
+        if (menu->scroll_offset + menu->popup_size.height() < menu->content_height)
+            painter.draw_text(Gfx::IntRect { 2, rect.height() - 14, rect.width() - 4, 12 }, "\xE2\x96\xBC"sv, Gfx::TextAlignment::Center, palette.menu_base_text());
     }
 }
 
 int MenuController::item_index_at(Menu const& menu, Gfx::IntPoint position) const
 {
+    auto content_position = position.translated(0, menu.scroll_offset);
     for (size_t i = 0; i < menu.items.size(); ++i) {
-        if (menu.items[i].rect.contains(position))
+        if (menu.items[i].visible && !menu.items[i].rect.is_empty() && menu.items[i].rect.contains(content_position))
             return static_cast<int>(i);
     }
     return -1;
@@ -338,6 +409,7 @@ void MenuController::close_all_menus()
         if (auto* menu = find_menu(menu_id)) {
             menu->is_open = false;
             menu->hovered_valid = false;
+            menu->scroll_offset = 0;
             if (window_id == -1)
                 window_id = menu->window_id;
         }
@@ -368,6 +440,7 @@ void MenuController::close_deeper_than(i32 menu_id)
         if (auto* menu = find_menu(id)) {
             menu->is_open = false;
             menu->hovered_valid = false;
+            menu->scroll_offset = 0;
         }
         if (hide_popup)
             hide_popup(id);
@@ -385,6 +458,7 @@ void MenuController::open_root(i32 menu_id, i32 window_id, Gfx::IntRect anchor, 
     close_all_menus();
     if (menu->window_id == -1)
         menu->window_id = window_id;
+    menu->scroll_offset = 0;
     layout_popup(*menu);
     menu->is_open = true;
     menu->hovered_valid = false;
@@ -419,6 +493,7 @@ void MenuController::close_menu(i32 menu_id)
         if (auto* menu = find_menu(id)) {
             menu->is_open = false;
             menu->hovered_valid = false;
+            menu->scroll_offset = 0;
             window_id = menu->window_id;
         }
         if (hide_popup)
@@ -436,7 +511,7 @@ void MenuController::open_submenu_for(Menu& parent, int index)
     if (index < 0 || index >= static_cast<int>(parent.items.size()))
         return;
     auto& item = parent.items[index];
-    if (item.submenu_id == -1)
+    if (!item.visible || item.submenu_id == -1)
         return;
     auto* submenu = find_menu(item.submenu_id);
     if (!submenu || submenu->items.is_empty())
@@ -445,12 +520,14 @@ void MenuController::open_submenu_for(Menu& parent, int index)
         return;
     close_deeper_than(parent.id);
     submenu->window_id = parent.window_id;
+    submenu->scroll_offset = 0;
     layout_popup(*submenu);
     submenu->is_open = true;
     submenu->hovered_valid = false;
     m_open_menus.append(submenu->id);
+    auto anchor = item.rect.translated(0, -parent.scroll_offset);
     if (show_popup)
-        show_popup(submenu->id, parent.window_id, parent.id, item.rect, submenu->popup_size, true, false);
+        show_popup(submenu->id, parent.window_id, parent.id, anchor, submenu->popup_size, true, false);
     if (visibility_changed)
         visibility_changed(submenu->id, true);
 }
@@ -535,7 +612,7 @@ void MenuController::on_popup_button(i32 menu_id, Gfx::IntPoint position, bool p
     if (index < 0 || index >= static_cast<int>(menu->items.size()))
         return;
     auto& item = menu->items[index];
-    if (!item.enabled || item.is_separator)
+    if (!item.visible || !item.enabled || item.is_separator)
         return;
     if (item.submenu_id != -1) {
         open_submenu_for(*menu, index);
@@ -546,6 +623,21 @@ void MenuController::on_popup_button(i32 menu_id, Gfx::IntPoint position, bool p
     close_all_menus();
 }
 
+void MenuController::on_popup_wheel(i32 menu_id, i32 delta_y)
+{
+    auto* menu = find_menu(menu_id);
+    if (!menu || menu->content_height <= menu->popup_size.height())
+        return;
+    int max_scroll = max(0, menu->content_height - menu->popup_size.height());
+    int step = max(1, item_height());
+    int next_offset = clamp(menu->scroll_offset + (delta_y > 0 ? step : -step), 0, max_scroll);
+    if (next_offset == menu->scroll_offset)
+        return;
+    menu->scroll_offset = next_offset;
+    if (redraw_popup)
+        redraw_popup(menu_id);
+}
+
 void MenuController::on_popup_closed(i32 menu_id)
 {
     close_menu(menu_id);
@@ -554,8 +646,12 @@ void MenuController::on_popup_closed(i32 menu_id)
 void MenuController::select_index(Menu& menu, int index)
 {
     int previous = menu.hovered_valid ? menu.hovered : -1;
-    if (index == previous)
+    scroll_item_into_view(menu, index);
+    if (index == previous) {
+        if (redraw_popup)
+            redraw_popup(menu.id);
         return;
+    }
     if (previous >= 0 && previous < static_cast<int>(menu.items.size()) && item_left)
         item_left(menu.id, menu.items[previous].identifier);
     menu.hovered = index;
@@ -575,7 +671,7 @@ void MenuController::move_selection(Menu& menu, int delta)
     for (int step = 0; step < count; ++step) {
         index = (index + delta + count) % count;
         auto& item = menu.items[index];
-        if (item.is_separator || !item.enabled)
+        if (!item.visible || item.is_separator || !item.enabled)
             continue;
         select_index(menu, index);
         close_deeper_than(menu.id);
@@ -588,7 +684,7 @@ void MenuController::activate_selected(Menu& menu)
     if (!menu.hovered_valid || menu.hovered < 0 || menu.hovered >= static_cast<int>(menu.items.size()))
         return;
     auto& item = menu.items[menu.hovered];
-    if (!item.enabled || item.is_separator)
+    if (!item.visible || !item.enabled || item.is_separator)
         return;
     if (item.submenu_id != -1) {
         open_submenu_for(menu, menu.hovered);

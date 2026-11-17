@@ -97,6 +97,7 @@ add_library(windowserver SHARED
     WaylandClient.cpp
     WaylandDataDevice.cpp
     WaylandInput.cpp
+    WaylandPopup.cpp
     WaylandSurface.cpp
     WindowServerConnection.cpp
     WindowServerSettings.cpp

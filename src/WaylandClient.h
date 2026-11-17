@@ -115,6 +115,7 @@ public:
         Function<void(i32 window_id, Gfx::IntPoint position)> menubar_press;
         Function<void(i32 popup_id, Gfx::IntPoint position)> popup_motion;
         Function<void(i32 popup_id, Gfx::IntPoint position, bool pressed)> popup_button;
+        Function<void(i32 popup_id, i32 wheel_delta_y)> popup_wheel;
         Function<void(i32 popup_id)> popup_closed;
     };
 

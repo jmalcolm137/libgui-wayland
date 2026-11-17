@@ -130,14 +130,37 @@ static ByteString service_binary_path(StringView name)
     return Core::Process::resolve_executable_path(ByteString::formatted("/bin/{}", name));
 }
 
+// Spawn a service executable with `SOCKET_TAKEOVER` set in its inherited
+// environment. Serialized with a mutex so concurrent portal requests never
+// clobber each other's `SOCKET_TAKEOVER` env variable.
+static ErrorOr<pid_t> spawn_with_socket_takeover(StringView executable, StringView takeover)
+{
+    static pthread_mutex_t s_takeover_mutex = PTHREAD_MUTEX_INITIALIZER;
+    WaylandClient::MutexLocker locker(s_takeover_mutex);
+
+    Optional<ByteString> previous_takeover;
+    if (auto const* existing = getenv("SOCKET_TAKEOVER"); existing && *existing)
+        previous_takeover = ByteString { existing };
+
+    TRY(Core::Environment::set("SOCKET_TAKEOVER"sv, takeover, Core::Environment::Overwrite::Yes));
+
+    Vector<ByteString> arguments;
+    auto spawned = Core::Process::spawn(executable, arguments, {}, Core::Process::KeepAsChild::No);
+
+    if (previous_takeover.has_value())
+        (void)Core::Environment::set("SOCKET_TAKEOVER"sv, previous_takeover.value(), Core::Environment::Overwrite::Yes);
+    else
+        (void)Core::Environment::unset("SOCKET_TAKEOVER"sv);
+
+    return spawned;
+}
+
 // SerenityOS runs a number of system services as one process per client: e.g.
 // WebContent (one per page) and RequestServer. SystemServer spawns a fresh
 // process per connection and hands it the accepted socket. We do the same on
 // demand - create a socketpair and pass the service one end through
 // SOCKET_TAKEOVER, the env contract Core::take_over_socket_from_system_server()
-// consumes (LibCore/SystemServerTakeover.cpp). These services are far too heavy
-// to host in-process inside every application, so they are spawned rather than
-// served.
+// consumes (LibCore/SystemServerTakeover.cpp).
 static Optional<NonnullOwnPtr<Core::LocalSocket>> spawn_single_client_service(StringView executable, StringView name)
 {
     if (Core::System::access(executable, X_OK).is_error()) {
@@ -153,29 +176,8 @@ static Optional<NonnullOwnPtr<Core::LocalSocket>> spawn_single_client_service(St
     // stays CLOEXEC, so the service never sees our end.
     ::fcntl(fds[1], F_SETFD, 0);
 
-    // The spawning process may itself be a spawned service that has not yet
-    // consumed its own SOCKET_TAKEOVER (WebContent connects to RequestServer
-    // before it takes over its socket). Give the child *this* service's
-    // takeover, then restore ours, so a nested spawn does not clobber it.
-    Optional<ByteString> previous_takeover;
-    if (auto const* existing = getenv("SOCKET_TAKEOVER"); existing && *existing)
-        previous_takeover = ByteString { existing };
-
     auto takeover = ByteString::formatted("{}:{}", name, fds[1]);
-    if (auto set = Core::Environment::set("SOCKET_TAKEOVER"sv, takeover, Core::Environment::Overwrite::Yes); set.is_error()) {
-        dbgln("LibWM: could not set SOCKET_TAKEOVER: {}", set.error());
-        ::close(fds[0]);
-        ::close(fds[1]);
-        return {};
-    }
-
-    Vector<ByteString> arguments;
-    auto spawned = Core::Process::spawn(executable, arguments, {}, Core::Process::KeepAsChild::No);
-
-    if (previous_takeover.has_value())
-        (void)Core::Environment::set("SOCKET_TAKEOVER"sv, previous_takeover.value(), Core::Environment::Overwrite::Yes);
-    else
-        (void)Core::Environment::unset("SOCKET_TAKEOVER"sv);
+    auto spawned = spawn_with_socket_takeover(executable, takeover);
     ::close(fds[1]);
 
     if (spawned.is_error()) {
@@ -235,25 +237,8 @@ static void spawn_multi_client_service(StringView executable, ByteString const& 
     // The service inherits the listening fd and accepts clients itself.
     ::fcntl(listen_fd, F_SETFD, 0);
 
-    Optional<ByteString> previous_takeover;
-    if (auto const* existing = getenv("SOCKET_TAKEOVER"); existing && *existing)
-        previous_takeover = ByteString { existing };
-
     auto takeover = ByteString::formatted("{}:{}", name, listen_fd);
-    if (auto set = Core::Environment::set("SOCKET_TAKEOVER"sv, takeover, Core::Environment::Overwrite::Yes); set.is_error()) {
-        dbgln("LibWM: could not set SOCKET_TAKEOVER: {}", set.error());
-        ::close(listen_fd);
-        return;
-    }
-
-    Vector<ByteString> arguments;
-    auto spawned = Core::Process::spawn(executable, arguments, {}, Core::Process::KeepAsChild::No);
-
-    if (previous_takeover.has_value())
-        (void)Core::Environment::set("SOCKET_TAKEOVER"sv, previous_takeover.value(), Core::Environment::Overwrite::Yes);
-    else
-        (void)Core::Environment::unset("SOCKET_TAKEOVER"sv);
-
+    auto spawned = spawn_with_socket_takeover(executable, takeover);
     ::close(listen_fd);
 
     if (spawned.is_error())
@@ -287,26 +272,8 @@ static void spawn_audio_server()
     ::fcntl(audio_fd, F_SETFD, 0);
     ::fcntl(manager_fd, F_SETFD, 0);
 
-    Optional<ByteString> previous_takeover;
-    if (auto const* existing = getenv("SOCKET_TAKEOVER"); existing && *existing)
-        previous_takeover = ByteString { existing };
-
     auto takeover = ByteString::formatted("{}:{};{}:{}", audio_path, audio_fd, manager_path, manager_fd);
-    if (auto set = Core::Environment::set("SOCKET_TAKEOVER"sv, takeover, Core::Environment::Overwrite::Yes); set.is_error()) {
-        dbgln("LibWM: could not set SOCKET_TAKEOVER: {}", set.error());
-        ::close(audio_fd);
-        ::close(manager_fd);
-        return;
-    }
-
-    Vector<ByteString> arguments;
-    auto spawned = Core::Process::spawn(executable, arguments, {}, Core::Process::KeepAsChild::No);
-
-    if (previous_takeover.has_value())
-        (void)Core::Environment::set("SOCKET_TAKEOVER"sv, previous_takeover.value(), Core::Environment::Overwrite::Yes);
-    else
-        (void)Core::Environment::unset("SOCKET_TAKEOVER"sv);
-
+    auto spawned = spawn_with_socket_takeover(executable, takeover);
     ::close(audio_fd);
     ::close(manager_fd);
 

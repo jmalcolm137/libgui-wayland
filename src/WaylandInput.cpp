@@ -642,7 +642,12 @@ void WaylandClient::on_pointer_button(u32 button, bool pressed)
 void WaylandClient::on_pointer_axis(i32 x, i32 y)
 {
     MutexLocker locker(m_mutex);
-    if (m_input_state.pointer_popup >= 0 || m_input_state.pointer_window < 0)
+    if (m_input_state.pointer_popup >= 0) {
+        if (y != 0 && m_input.popup_wheel)
+            m_input.popup_wheel(m_input_state.pointer_popup, y);
+        return;
+    }
+    if (m_input_state.pointer_window < 0)
         return;
     auto* window_surface = find(m_input_state.pointer_window);
     if (window_surface && window_surface->menubar_surface) {

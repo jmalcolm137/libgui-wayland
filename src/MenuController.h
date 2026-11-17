@@ -45,7 +45,7 @@ public:
         bool exclusive { false };
         bool is_separator { false };
         RefPtr<Gfx::Bitmap> icon;
-        Gfx::IntRect rect; // popup-local
+        Gfx::IntRect rect; // unscrolled popup-content-local
     };
 
     struct Menu {
@@ -57,6 +57,8 @@ public:
         Gfx::IntRect menubar_rect; // window-content-local
         bool is_open { false };
         Gfx::IntSize popup_size;
+        int content_height { 0 };
+        int scroll_offset { 0 };
         int hovered { -1 };
         bool hovered_valid { false };
     };
@@ -78,7 +80,9 @@ public:
     void render_menubar(i32 window_id, Gfx::Painter&, Gfx::IntRect const&);
 
     // --- popup ---
+    void set_max_popup_height(int max_height) { m_max_popup_height = max_height; }
     Gfx::IntSize popup_size(i32 menu_id) const;
+    int popup_scroll_offset(i32 menu_id) const;
     void render_popup(i32 menu_id, Gfx::Painter&) const;
     i32 menu_window(i32 menu_id) const;
     void open_root(i32 menu_id, i32 window_id, Gfx::IntRect anchor, bool from_menubar = false);
@@ -93,6 +97,7 @@ public:
     void on_menubar_press(i32 window_id, Gfx::IntPoint position);
     void on_popup_motion(i32 menu_id, Gfx::IntPoint position);
     void on_popup_button(i32 menu_id, Gfx::IntPoint position, bool pressed);
+    void on_popup_wheel(i32 menu_id, i32 delta_y);
     void on_popup_closed(i32 menu_id);
 
     // Keyboard navigation. Returns true if the key was consumed by a menu.
@@ -111,8 +116,10 @@ public:
 private:
     Menu* find_menu(i32 menu_id);
     Menu const* find_menu(i32 menu_id) const;
+    int effective_max_popup_height() const;
     void layout_menubar(i32 window_id);
     void layout_popup(Menu&);
+    void scroll_item_into_view(Menu&, int index);
     int item_index_at(Menu const&, Gfx::IntPoint) const;
     i32 open_menu_id() const { return m_open_menus.is_empty() ? -1 : m_open_menus.last(); }
     void close_all_menus();
@@ -127,6 +134,7 @@ private:
     Vector<i32> m_menubar_order;
     Vector<i32> m_open_menus; // root .. deepest
     i32 m_hovered_menubar_menu { -1 };
+    int m_max_popup_height { 0 };
 };
 
 }

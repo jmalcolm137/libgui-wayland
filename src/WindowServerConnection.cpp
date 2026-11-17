@@ -216,6 +216,7 @@ void WindowServerConnection::install_input_callbacks()
     callbacks.menubar_press = [this](i32 window_id, Gfx::IntPoint position) { m_menu.on_menubar_press(window_id, position); };
     callbacks.popup_motion = [this](i32 popup_id, Gfx::IntPoint position) { m_menu.on_popup_motion(popup_id, position); };
     callbacks.popup_button = [this](i32 popup_id, Gfx::IntPoint position, bool pressed) { m_menu.on_popup_button(popup_id, position, pressed); };
+    callbacks.popup_wheel = [this](i32 popup_id, i32 wheel_delta_y) { m_menu.on_popup_wheel(popup_id, wheel_delta_y); };
     callbacks.popup_closed = [this](i32 popup_id) { m_menu.on_popup_closed(popup_id); };
     callbacks.drag_finished = [this](bool accepted) {
         if (accepted)
