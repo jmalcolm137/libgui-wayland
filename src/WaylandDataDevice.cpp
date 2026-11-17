@@ -346,7 +346,7 @@ Gfx::IntPoint WaylandClient::adjusted_drag_position() const
 {
     MutexLocker locker(m_mutex);
     auto const* window_surface = const_cast<WaylandClient*>(this)->find(m_data_device.drag_window);
-    int inset = window_surface ? window_surface->inset : 0;
+    int inset = window_surface ? window_surface->total_top_inset() : 0;
     return m_data_device.drag_position.translated(0, -inset);
 }
 

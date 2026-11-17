@@ -7,8 +7,14 @@
 #include "WaylandClient.h"
 #include <AK/Assertions.h>
 #include <LibCore/Process.h>
+#include <LibGfx/Font/Font.h>
+#include <LibGfx/Font/FontDatabase.h>
 #include <LibGfx/Painter.h>
+#include <LibGfx/Palette.h>
+#include <LibGfx/StylePainter.h>
+#include <LibGfx/SystemTheme.h>
 #include <WindowServer/WindowType.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -152,9 +158,10 @@ static serenity_toplevel_listener const s_serenity_toplevel_listener = {
 
 // --- zxdg_toplevel_decoration_v1 ----------------------------------------------
 
-static void decoration_configure(void*, zxdg_toplevel_decoration_v1*, uint32_t mode)
+static void decoration_configure(void* data, zxdg_toplevel_decoration_v1* decoration, uint32_t mode)
 {
     dbgln("LibWM/Wayland: server-side decoration mode {}", mode);
+    static_cast<WaylandClient*>(data)->on_decoration_configure(decoration, mode);
 }
 
 static zxdg_toplevel_decoration_v1_listener const s_decoration_listener = {
@@ -206,6 +213,25 @@ WaylandClient::WindowSurface* WaylandClient::find(i32 window_id)
 
 // --- configure & close handlers -----------------------------------------------
 
+void WaylandClient::on_decoration_configure(zxdg_toplevel_decoration_v1* decoration, u32 mode)
+{
+    MutexLocker locker(m_mutex);
+    bool const force_csd = getenv("LIBWM_FORCE_CSD") && *getenv("LIBWM_FORCE_CSD") != '0';
+    for (auto const& it : m_windows) {
+        auto& w = *it.value;
+        if (w.decoration != decoration)
+            continue;
+        SurfaceLocker surface_locker(w.mutex);
+        bool const want_csd = !w.frameless && (force_csd || mode == ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE);
+        if (w.use_csd != want_csd) {
+            w.use_csd = want_csd;
+            w.csd_dirty = true;
+            w.composed_valid = false;
+        }
+        return;
+    }
+}
+
 void WaylandClient::on_toplevel_configure(xdg_toplevel* toplevel, Gfx::IntSize size, bool activated, bool fullscreen, bool maximized, bool resizing)
 {
     MutexLocker locker(m_mutex);
@@ -215,19 +241,27 @@ void WaylandClient::on_toplevel_configure(xdg_toplevel* toplevel, Gfx::IntSize s
         if (w.toplevel != toplevel)
             continue;
         SurfaceLocker surface_locker(w.mutex);
+        if (w.activated != activated) {
+            w.activated = activated;
+            w.csd_dirty = true;
+        }
         if (m_input.window_activation)
             m_input.window_activation(w.window_id, activated);
 
         bool const was_fullscreen = w.fullscreen;
         w.fullscreen = fullscreen || maximized;
+        w.maximized = maximized;
 
         if (!resizing)
             w.resizing = false;
+
+        int const top_inset = w.total_top_inset();
 
         auto resize_to = [&](Gfx::IntSize content) {
             if (content == w.size)
                 return;
             w.size = content;
+            w.csd_dirty = true;
             if (m_input.window_resize)
                 m_input.window_resize(w.window_id, content);
         };
@@ -238,7 +272,7 @@ void WaylandClient::on_toplevel_configure(xdg_toplevel* toplevel, Gfx::IntSize s
         auto stretch_to = [&](Gfx::IntSize content) {
             if (!w.viewport)
                 return false;
-            wp_viewport_set_destination(w.viewport, content.width(), content.height() + w.inset);
+            wp_viewport_set_destination(w.viewport, content.width(), content.height() + top_inset);
             w.stretch_active = true;
             wl_surface_commit(w.surface);
             wl_display_flush(m_display);
@@ -247,15 +281,15 @@ void WaylandClient::on_toplevel_configure(xdg_toplevel* toplevel, Gfx::IntSize s
 
         if (fullscreen || maximized) {
             // Fullscreen/maximize always resizes, even for non-resizable windows.
-            if (size.width() > 0 && size.height() > w.inset)
-                resize_to({ size.width(), size.height() - w.inset });
+            if (size.width() > 0 && size.height() > top_inset)
+                resize_to({ size.width(), size.height() - top_inset });
         } else if (was_fullscreen && !w.resizable) {
             // Leaving fullscreen: restore the fixed windowed size.
             resize_to(w.fixed_size);
         } else if (w.resizable) {
             // Interactive resize for resizable windows.
-            if (size.width() > 0 && size.height() > w.inset) {
-                auto content = Gfx::IntSize { size.width(), size.height() - w.inset };
+            if (size.width() > 0 && size.height() > top_inset) {
+                auto content = Gfx::IntSize { size.width(), size.height() - top_inset };
                 if (resizing) {
                     w.resizing = true;
                     // Don't re-render the client for every step; stretch instead.
@@ -474,7 +508,7 @@ void WaylandClient::add_window_damage(i32 window_id, Vector<Gfx::IntRect> const&
 
 // --- window lifecycle & presentation ------------------------------------------
 
-void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::IntSize size, ByteString const& title, bool has_alpha, bool resizable, i32 window_type, i32 window_mode, i32 parent_window_id, Gfx::IntRect const& launch_origin)
+void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::IntSize size, ByteString const& title, bool has_alpha, bool resizable, bool frameless, i32 window_type, i32 window_mode, i32 parent_window_id, Gfx::IntRect const& launch_origin)
 {
     MutexLocker locker(m_mutex);
     if (!m_compositor || !m_wm_base)
@@ -649,7 +683,12 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::In
     window_surface->size = size;
     window_surface->has_alpha = has_alpha;
     window_surface->resizable = resizable;
+    window_surface->frameless = frameless;
     window_surface->fixed_size = size;
+    bool const force_csd = getenv("LIBWM_FORCE_CSD") && *getenv("LIBWM_FORCE_CSD") != '0';
+    window_surface->use_csd = !frameless && (!m_decoration_manager || force_csd);
+    if (window_surface->use_csd)
+        dbgln("LibWM/Wayland: using client-side decorations for window {}", window_id);
     if (m_viewporter)
         window_surface->viewport = wp_viewporter_get_viewport(m_viewporter, surface);
 
@@ -666,13 +705,14 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::In
 
     // A non-resizable window pins min == max (fullscreen still overrides this).
     if (!resizable) {
-        xdg_toplevel_set_min_size(toplevel, size.width(), size.height());
-        xdg_toplevel_set_max_size(toplevel, size.width(), size.height());
+        int const h = size.height() + window_surface->total_top_inset();
+        xdg_toplevel_set_min_size(toplevel, size.width(), h);
+        xdg_toplevel_set_max_size(toplevel, size.width(), h);
     }
 
     // Ask the compositor to draw server-side decorations (titlebar, buttons,
-    // and therefore a draggable frame).
-    if (m_decoration_manager) {
+    // and therefore a draggable frame) unless client-side decorations are forced.
+    if (m_decoration_manager && !force_csd) {
         auto* decoration = zxdg_decoration_manager_v1_get_toplevel_decoration(m_decoration_manager, toplevel);
         zxdg_toplevel_decoration_v1_add_listener(decoration, &s_decoration_listener, this);
         zxdg_toplevel_decoration_v1_set_mode(decoration, ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
@@ -755,6 +795,7 @@ void WaylandClient::set_title(i32 window_id, ByteString const& title)
         SurfaceLocker surface_locker(window_surface->mutex);
         auto clamped = clamp_wayland_string(title);
         window_surface->title = clamped;
+        window_surface->csd_dirty = true;
         if (window_surface->toplevel)
             xdg_toplevel_set_title(window_surface->toplevel, clamped.characters());
         wl_display_flush(m_display);
@@ -840,7 +881,14 @@ void WaylandClient::set_window_icon_bitmap(i32 window_id, Gfx::ShareableBitmap c
 {
     MutexLocker locker(m_mutex);
     auto* window_surface = find(window_id);
-    if (!window_surface || !window_surface->chrome)
+    if (!window_surface)
+        return;
+    {
+        SurfaceLocker surface_locker(window_surface->mutex);
+        window_surface->icon_bitmap = icon.is_valid() ? icon.bitmap() : nullptr;
+        window_surface->csd_dirty = true;
+    }
+    if (!window_surface->chrome)
         return;
 
     if (!icon.is_valid() || !icon.bitmap()) {
@@ -922,6 +970,53 @@ void WaylandClient::attach_and_commit(i32 window_id, int client_fd, Gfx::IntSize
     commit_window_content(*window_surface, client_fd, size, visible_size, pitch, has_alpha);
 }
 
+void WaylandClient::render_csd_titlebar(WindowSurface const& window_surface, Gfx::Bitmap& destination, int width)
+{
+    int const csd_h = window_surface.csd_height();
+    if (csd_h <= 0 || width <= 0)
+        return;
+
+    Gfx::Painter painter(destination);
+    Gfx::Palette palette { Gfx::PaletteImpl::create_with_anonymous_buffer(Gfx::current_system_theme_buffer()) };
+
+    Gfx::IntRect const bar_rect { 0, 0, width, csd_h };
+    Gfx::StylePainter::paint_frame(painter, bar_rect, palette, Gfx::FrameStyle::RaisedPanel);
+
+    Gfx::IntRect const inner { 2, 2, max(0, width - 4), max(0, csd_h - 4) };
+    auto const c1 = window_surface.activated ? palette.active_window_border1() : palette.inactive_window_border1();
+    auto const c2 = window_surface.activated ? palette.active_window_border2() : palette.inactive_window_border2();
+    auto const text_color = window_surface.activated ? palette.active_window_title() : palette.inactive_window_title();
+    painter.fill_rect_with_gradient(Gfx::Orientation::Horizontal, inner, c1, c2);
+
+    int text_x = 6;
+    if (window_surface.icon_bitmap) {
+        Gfx::IntRect const icon_rect { 4, (csd_h - 16) / 2, 16, 16 };
+        painter.draw_scaled_bitmap(icon_rect, *window_surface.icon_bitmap, window_surface.icon_bitmap->rect());
+        text_x = 24;
+    }
+
+    Gfx::IntRect const close_rect { width - 20, 4, 16, 14 };
+    Gfx::IntRect const max_rect { width - 38, 4, 16, 14 };
+    Gfx::IntRect const min_rect { width - (window_surface.resizable ? 56 : 38), 4, 16, 14 };
+    int const buttons_left = min_rect.x();
+
+    if (buttons_left > text_x + 4) {
+        Gfx::IntRect const title_rect { text_x, 2, buttons_left - text_x - 4, csd_h - 4 };
+        painter.draw_text(title_rect, window_surface.title, Gfx::FontDatabase::window_title_font(), Gfx::TextAlignment::CenterLeft, text_color, Gfx::TextElision::Right);
+    }
+
+    auto paint_caption_button = [&](Gfx::IntRect const& rect, StringView glyph) {
+        if (rect.x() < 2)
+            return;
+        Gfx::StylePainter::paint_button(painter, rect, palette, Gfx::ButtonStyle::Normal, false);
+        painter.draw_text(rect, glyph, Gfx::FontDatabase::window_title_font(), Gfx::TextAlignment::Center, palette.button_text());
+    };
+    paint_caption_button(min_rect, "_"sv);
+    if (window_surface.resizable)
+        paint_caption_button(max_rect, "\xE2\x96\xA1"sv);
+    paint_caption_button(close_rect, "\xC3\x97"sv);
+}
+
 void WaylandClient::commit_window_content(WindowSurface& window_surface, int client_fd, Gfx::IntSize size, Gfx::IntSize visible_size, i32 pitch, bool has_alpha)
 {
     MutexLocker locker(m_mutex);
@@ -953,9 +1048,13 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
                 visible_size.width(), visible_size.height());
     }
 
-    if (window_surface.inset > 0 && window_surface.draw_inset && !window_surface.menubar_surface) {
+    int const csd_h = window_surface.csd_height();
+    int const menubar_h = (window_surface.inset > 0 && window_surface.draw_inset && !window_surface.menubar_surface) ? window_surface.inset : 0;
+    int const total_inset = csd_h + menubar_h;
+
+    if (total_inset > 0) {
         int const scale = client_scale();
-        int const logical_height = visible_size.height() + window_surface.inset;
+        int const logical_height = visible_size.height() + total_inset;
         int const display_width = visible_size.width() * scale;
         int const display_height = logical_height * scale;
         size_t const composed_pitch = Gfx::Bitmap::minimum_pitch(display_width, Gfx::BitmapFormat::BGRA8888);
@@ -987,7 +1086,7 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
                 return;
             size_t const row_bytes = static_cast<size_t>(rect.width()) * scale * 4;
             for (int row = rect.y() * scale; row < (rect.y() + rect.height()) * scale; ++row)
-                memcpy(destination.scanline(window_surface.inset * scale + row) + static_cast<size_t>(rect.x()) * scale,
+                memcpy(destination.scanline(total_inset * scale + row) + static_cast<size_t>(rect.x()) * scale,
                     source + static_cast<size_t>(row) * pitch + static_cast<size_t>(rect.x()) * scale * 4,
                     row_bytes);
         };
@@ -999,9 +1098,15 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
         }
         munmap(const_cast<u8*>(source), client_bytes);
 
-        bool const redraw_inset = recreate || window_surface.inset_dirty;
+        bool const redraw_csd = csd_h > 0 && (recreate || window_surface.csd_dirty);
+        if (redraw_csd) {
+            render_csd_titlebar(window_surface, destination, visible_size.width());
+            window_surface.csd_dirty = false;
+        }
+
+        bool const redraw_inset = menubar_h > 0 && (recreate || window_surface.inset_dirty);
         if (redraw_inset) {
-            window_surface.draw_inset(destination, { 0, 0, visible_size.width(), window_surface.inset });
+            window_surface.draw_inset(destination, { 0, csd_h, visible_size.width(), menubar_h });
             window_surface.inset_dirty = false;
         }
 
@@ -1009,12 +1114,14 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
         if (recreate || full_damage) {
             surface_damage.append({ 0, 0, visible_size.width(), logical_height });
         } else {
+            if (redraw_csd)
+                surface_damage.append({ 0, 0, visible_size.width(), csd_h });
             if (redraw_inset)
-                surface_damage.append({ 0, 0, visible_size.width(), window_surface.inset });
+                surface_damage.append({ 0, csd_h, visible_size.width(), menubar_h });
             for (auto const& rect : damage) {
                 auto clipped = rect.intersected({ 0, 0, visible_size.width(), visible_size.height() });
                 if (!clipped.is_empty())
-                    surface_damage.append({ clipped.x(), clipped.y() + window_surface.inset, clipped.width(), clipped.height() });
+                    surface_damage.append({ clipped.x(), clipped.y() + total_inset, clipped.width(), clipped.height() });
             }
             if (surface_damage.is_empty())
                 surface_damage.append({ 0, 0, visible_size.width(), logical_height });
@@ -1024,7 +1131,7 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
         bind_bitmap(window_surface.surface, window_surface.composed_buffer, destination, window_surface.buffers, &surface_damage);
         wl_surface_commit(window_surface.surface);
         wl_display_flush(m_display);
-        dbgln("LibWM/Wayland: presented window {} ({}x{} @{}x incl. {}px inset)", window_surface.window_id, visible_size.width(), visible_size.height(), scale, window_surface.inset);
+        dbgln("LibWM/Wayland: presented window {} ({}x{} @{}x incl. {}px csd + {}px inset)", window_surface.window_id, visible_size.width(), visible_size.height(), scale, csd_h, menubar_h);
         return;
     }
 

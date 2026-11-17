@@ -326,7 +326,7 @@ void WindowServerConnection::present(Window& window)
         window.id, window.bitmap->width(), window.bitmap->height(), window.last_serial, window.has_alpha_channel);
 }
 
-void WindowServerConnection::create_window(i32 window_id, i32, Gfx::IntRect const& rect, bool, bool has_alpha_channel, bool, bool, bool resizable, bool fullscreen, bool, bool, float, Gfx::IntSize, Gfx::IntSize, Gfx::IntSize minimum_size, Optional<Gfx::IntSize> const&, i32 window_type, i32 window_mode, ByteString const& title, i32 parent_window_id, Gfx::IntRect const& launch_origin_rect)
+void WindowServerConnection::create_window(i32 window_id, i32, Gfx::IntRect const& rect, bool, bool has_alpha_channel, bool, bool, bool resizable, bool fullscreen, bool frameless, bool, float, Gfx::IntSize, Gfx::IntSize, Gfx::IntSize minimum_size, Optional<Gfx::IntSize> const&, i32 window_type, i32 window_mode, ByteString const& title, i32 parent_window_id, Gfx::IntRect const& launch_origin_rect)
 {
     auto window = make<Window>();
     window->id = window_id;
@@ -371,7 +371,7 @@ void WindowServerConnection::create_window(i32 window_id, i32, Gfx::IntRect cons
     m_windows.append(move(window));
 
     auto& created_window = *m_windows.last();
-    WaylandClient::the().create_window(window_id, created_window.rect.location(), created_window.rect.size(), title, has_alpha_channel, resizable, window_type, window_mode, parent_window_id, launch_origin_rect);
+    WaylandClient::the().create_window(window_id, created_window.rect.location(), created_window.rect.size(), title, has_alpha_channel, resizable, frameless, window_type, window_mode, parent_window_id, launch_origin_rect);
 
     // Ask the client to paint the whole window.
     Vector<Gfx::IntRect> rects;

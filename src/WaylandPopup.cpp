@@ -168,7 +168,7 @@ void WaylandClient::set_window_inset(i32 window_id, int inset, Function<void(Gfx
     window_surface->inset_dirty = true;
     window_surface->composed_valid = false;
 
-    bool const direct = m_subcompositor && window_surface->chrome
+    bool const direct = m_subcompositor && window_surface->chrome && window_surface->csd_height() == 0
         && wl_proxy_get_version(reinterpret_cast<wl_proxy*>(window_surface->chrome)) >= 2;
     // Drop the old composed buffer if we are switching to the direct path.
     if (direct && window_surface->menubar_surface == nullptr) {
@@ -287,6 +287,8 @@ void WaylandClient::create_popup(i32 popup_id, i32 parent_window_id, i32 parent_
             layer_position = parent_window->layer_output_position.translated(local.x(), local.y());
         } else {
             parent_xdg = parent_window->xdg_surface_object;
+            if (!parent_window->menubar_surface && parent_window->csd_height() > 0)
+                anchor.translate_by(0, parent_window->csd_height());
         }
     }
 

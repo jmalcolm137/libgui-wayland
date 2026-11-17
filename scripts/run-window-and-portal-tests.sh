@@ -14,6 +14,7 @@ fi
 
 ninja -C "$BUILD_DIR" \
     libwm-unit-test \
+    libwm-test-window \
     libwm-fullscreen-test \
     libwm-hidpi-detail-test \
     libwm-appfile-test \
@@ -72,6 +73,50 @@ check "window-state: set_maximized(true) sent"         "grep -q 'LibWM: set_maxi
 check "window-state: set_maximized(false) sent"        "grep -q 'LibWM: set_maximized(.*, false)' '$RUNTIME/fs.app.log'"
 check "window-state: set_minimized(true) sent"         "grep -q 'LibWM: set_minimized(.*, true)' '$RUNTIME/fs.app.log'"
 check "window-state: configure resized to 800x600"     "grep -q 'FULLSCREEN-TEST: resized to 800x600' '$RUNTIME/fs.app.log'"
+
+# --- 2b. Client-Side Decorations (CSD) fallback ------------------------------
+cat > "$RUNTIME/csd.input" <<'EOF'
+sleep 900
+# Click at surface (160, 142) -> content (160, 120) after subtracting 22px CSD titlebar
+motion 160 142
+button PRESS left
+button RELEASE left
+sleep 80
+# Click on CSD titlebar drag area (100, 10) -> xdg_toplevel.move
+motion 100 10
+button PRESS left
+button RELEASE left
+sleep 80
+# Click on CSD Maximize button (290, 10) -> set_maximized
+motion 290 10
+button PRESS left
+button RELEASE left
+sleep 80
+# Click on CSD Close button (308, 10) -> window_close_request
+motion 308 10
+button PRESS left
+button RELEASE left
+sleep 300
+EOF
+"$HC" --socket libwm-csd --size 800x600 --timeout 3 \
+    --output "$RUNTIME/csd.png" --input "$RUNTIME/csd.input" > "$RUNTIME/csd.hc.log" 2>&1 &
+HC_PID=$!
+for _ in $(seq 1 100); do [[ -e "$RUNTIME/libwm-csd" ]] && break; sleep 0.1; done
+
+env XDG_RUNTIME_DIR="$RUNTIME" SDE_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY=libwm-csd \
+    LIBWM_FORCE_CSD=1 \
+    SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
+    LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    timeout 4 "$BUILD_DIR/bin/libwm-test-window" > "$RUNTIME/csd.app.log" 2>&1 || true
+wait "$HC_PID" 2>/dev/null || true
+HC_PID=""
+
+check "csd: client-side decorations enabled"           "grep -q 'using client-side decorations for window' '$RUNTIME/csd.app.log'"
+check "csd: 22px titlebar composed above content"      "grep -q 'incl. 22px csd' '$RUNTIME/csd.app.log'"
+check "csd: content click offset by 22px titlebar"     "grep -q 'TestWindow: mouse down at 160,120 button 1' '$RUNTIME/csd.app.log'"
+check "csd: titlebar drag initiated xdg_toplevel.move" "grep -q 'CSD titlebar drag move on window' '$RUNTIME/csd.app.log'"
+check "csd: maximize button toggled maximize"          "grep -q 'CSD maximize button clicked on window' '$RUNTIME/csd.app.log'"
+check "csd: close button closed the window"            "grep -q 'CSD close button clicked on window' '$RUNTIME/csd.app.log'"
 
 # --- 3. HiDPI output scale (1x vs 2x wl_output.scale & backing store) --------
 "$HC" --socket libwm-hidpi-1x --size 800x600 --scale 1 --timeout 2 \

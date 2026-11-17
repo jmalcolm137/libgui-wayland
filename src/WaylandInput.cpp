@@ -15,6 +15,7 @@
 #include <xkbcommon/xkbcommon.h>
 
 #include "text-input-unstable-v3-client-protocol.h"
+#include "xdg-shell-client-protocol.h"
 
 namespace LibWM {
 
@@ -552,16 +553,22 @@ void WaylandClient::on_pointer_motion(Gfx::IntPoint position)
             m_input.mouse_move(m_input_state.pointer_window, position, m_input_state.pointer_buttons, current_modifiers());
         return;
     }
-    int inset = window_surface ? window_surface->inset : 0;
-    if (inset > 0 && position.y() < inset) {
+    int const csd_h = window_surface ? window_surface->csd_height() : 0;
+    int const inset = window_surface ? window_surface->inset : 0;
+    if (csd_h > 0 && position.y() < csd_h) {
+        if (m_input.menubar_left)
+            m_input.menubar_left(m_input_state.pointer_window);
+        return;
+    }
+    if (inset > 0 && position.y() >= csd_h && position.y() < csd_h + inset) {
         if (m_input.menubar_motion)
-            m_input.menubar_motion(m_input_state.pointer_window, position);
+            m_input.menubar_motion(m_input_state.pointer_window, position.translated(0, -csd_h));
         return;
     }
     if (m_input.menubar_left)
         m_input.menubar_left(m_input_state.pointer_window);
     if (m_input.mouse_move)
-        m_input.mouse_move(m_input_state.pointer_window, position.translated(0, -inset), m_input_state.pointer_buttons, current_modifiers());
+        m_input.mouse_move(m_input_state.pointer_window, position.translated(0, -(csd_h + inset)), m_input_state.pointer_buttons, current_modifiers());
 }
 
 void WaylandClient::on_pointer_button(u32 button, bool pressed)
@@ -618,14 +625,45 @@ void WaylandClient::on_pointer_button(u32 button, bool pressed)
         }
         return;
     }
-    int inset = window_surface ? window_surface->inset : 0;
-    if (inset > 0 && m_input_state.pointer_position.y() < inset) {
+    int const csd_h = window_surface ? window_surface->csd_height() : 0;
+    int const inset = window_surface ? window_surface->inset : 0;
+    if (csd_h > 0 && m_input_state.pointer_position.y() < csd_h) {
+        if (pressed && window_surface) {
+            auto const pos = m_input_state.pointer_position;
+            int const w = window_surface->size.width();
+            Gfx::IntRect const close_rect { w - 20, 4, 16, 14 };
+            Gfx::IntRect const max_rect { w - 38, 4, 16, 14 };
+            Gfx::IntRect const min_rect { w - (window_surface->resizable ? 56 : 38), 4, 16, 14 };
+            if (button == BTN_LEFT) {
+                if (close_rect.contains(pos)) {
+                    dbgln("LibWM/Wayland: CSD close button clicked on window {}", m_input_state.pointer_window);
+                    if (m_input.window_close_request)
+                        m_input.window_close_request(m_input_state.pointer_window);
+                } else if (window_surface->resizable && max_rect.contains(pos)) {
+                    dbgln("LibWM/Wayland: CSD maximize button clicked on window {}", m_input_state.pointer_window);
+                    set_maximized(m_input_state.pointer_window, !window_surface->maximized);
+                } else if (min_rect.contains(pos)) {
+                    dbgln("LibWM/Wayland: CSD minimize button clicked on window {}", m_input_state.pointer_window);
+                    set_minimized(m_input_state.pointer_window);
+                } else if (window_surface->toplevel && m_input_state.seat) {
+                    dbgln("LibWM/Wayland: CSD titlebar drag move on window {}", m_input_state.pointer_window);
+                    xdg_toplevel_move(window_surface->toplevel, m_input_state.seat, m_input_state.last_serial);
+                    wl_display_flush(m_display);
+                }
+            } else if (button == BTN_RIGHT && window_surface->toplevel && m_input_state.seat) {
+                xdg_toplevel_show_window_menu(window_surface->toplevel, m_input_state.seat, m_input_state.last_serial, pos.x(), pos.y());
+                wl_display_flush(m_display);
+            }
+        }
+        return;
+    }
+    if (inset > 0 && m_input_state.pointer_position.y() >= csd_h && m_input_state.pointer_position.y() < csd_h + inset) {
         if (pressed && m_input.menubar_press)
-            m_input.menubar_press(m_input_state.pointer_window, m_input_state.pointer_position);
+            m_input.menubar_press(m_input_state.pointer_window, m_input_state.pointer_position.translated(0, -csd_h));
         return;
     }
 
-    auto position = m_input_state.pointer_position.translated(0, -inset);
+    auto position = m_input_state.pointer_position.translated(0, -(csd_h + inset));
     if (pressed) {
         m_input_state.pointer_buttons |= serenity_button;
         dbgln("LibWM/Wayland: mouse down window {} at {},{} button={}", m_input_state.pointer_window, position.x(), position.y(), serenity_button);
@@ -657,7 +695,7 @@ void WaylandClient::on_pointer_axis(i32 x, i32 y)
             m_input.mouse_wheel(m_input_state.pointer_window, m_input_state.pointer_position, m_input_state.pointer_buttons, current_modifiers(), x, y);
         return;
     }
-    int inset = window_surface ? window_surface->inset : 0;
+    int inset = window_surface ? window_surface->total_top_inset() : 0;
     if (m_input.mouse_wheel)
         m_input.mouse_wheel(m_input_state.pointer_window, m_input_state.pointer_position.translated(0, -inset), m_input_state.pointer_buttons, current_modifiers(), x, y);
 }

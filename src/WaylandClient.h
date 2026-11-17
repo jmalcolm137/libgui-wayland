@@ -200,7 +200,7 @@ public:
     }
 
     // Window <-> xdg_toplevel lifecycle.
-    void create_window(i32 window_id, Gfx::IntPoint position, Gfx::IntSize, ByteString const& title, bool has_alpha, bool resizable, i32 window_type, i32 window_mode, i32 parent_window_id, Gfx::IntRect const& launch_origin = {});
+    void create_window(i32 window_id, Gfx::IntPoint position, Gfx::IntSize, ByteString const& title, bool has_alpha, bool resizable, bool frameless, i32 window_type, i32 window_mode, i32 parent_window_id, Gfx::IntRect const& launch_origin = {});
     void destroy_window(i32 window_id);
     void set_title(i32 window_id, ByteString const& title);
 
@@ -405,6 +405,7 @@ public:
     void on_keyboard_key(u32 key, bool pressed);
     void on_keyboard_focus(wl_surface*, bool entered);
     void on_toplevel_configure(xdg_toplevel*, Gfx::IntSize size, bool activated, bool fullscreen, bool maximized, bool resizing);
+    void on_decoration_configure(zxdg_toplevel_decoration_v1*, u32 mode);
     void on_toplevel_close(xdg_toplevel*);
     void on_layer_configure(zwlr_layer_surface_v1*, Gfx::IntSize size);
     void on_layer_closed(zwlr_layer_surface_v1*);
@@ -474,6 +475,16 @@ private:
             pthread_mutexattr_destroy(&attributes);
         }
         ~WindowSurface() { pthread_mutex_destroy(&mutex); }
+        static constexpr int csd_titlebar_pixels = 22;
+        int csd_height() const
+        {
+            return (use_csd && !frameless && !fullscreen && !is_layer) ? csd_titlebar_pixels : 0;
+        }
+        int total_top_inset() const
+        {
+            return csd_height() + inset;
+        }
+
         i32 window_id { -1 };
         wl_surface* surface { nullptr };
         xdg_surface* xdg_surface_object { nullptr };
@@ -505,7 +516,13 @@ private:
         Gfx::IntSize size;
         bool has_alpha { false };
         bool resizable { true };
+        bool frameless { false };
         bool fullscreen { false };
+        bool maximized { false };
+        bool activated { true };
+        bool use_csd { false };
+        bool csd_dirty { true };
+        RefPtr<Gfx::Bitmap> icon_bitmap;
         Gfx::IntSize fixed_size;
         Vector<NonnullOwnPtr<BufferRecord>> buffers;
         // Optional top strip (menubar). The direct path presents it from a small
@@ -644,6 +661,7 @@ private:
     WindowSurface* find(i32 window_id);
     void commit_window_content(WindowSurface&, int client_fd, Gfx::IntSize size, Gfx::IntSize visible_size, i32 pitch, bool has_alpha);
     void present_menubar(WindowSurface&, Gfx::IntSize visible_size);
+    void render_csd_titlebar(WindowSurface const&, Gfx::Bitmap&, int width);
     Popup* find_popup(i32 popup_id);
     i32 popup_id_for_surface(wl_surface*) const;
     void purge_released_buffers(WindowSurface&);
