@@ -11,6 +11,9 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=lib/patches.sh
+source "$PROJECT_ROOT/scripts/lib/patches.sh"
+mapfile -t PATCHES < <(libwm_patch_series "$PROJECT_ROOT")
 SERENITY_SRC="${SERENITY_SRC:-$PROJECT_ROOT/serenity}"
 BUILD_DIR="${BUILD_DIR:-$PROJECT_ROOT/build/lagom}"
 JOBS="${JOBS:-$(nproc)}"
@@ -58,19 +61,8 @@ fi
 # patches, and the ones whose hunks overlap later patches can neither apply nor
 # reverse-apply. They are not stale -- the tree is exactly the result the patch
 # set produces -- so do not turn an idempotency detail into a rebuild failure.
-patch_set_fingerprint() {
-    {
-        git -C "$SERENITY_SRC" rev-parse HEAD
-        # Names and contents only: absolute paths differ between the development
-        # checkout and an AUR makepkg $srcdir, but the applied set is the same.
-        for patch in "$PROJECT_ROOT"/patches/*.patch; do
-            printf '%s ' "$(basename "$patch")"
-            sha256sum "$patch" | cut -d' ' -f1
-        done
-    } | sha256sum | cut -d' ' -f1
-}
-PATCH_MARKER="$(git -C "$SERENITY_SRC" rev-parse --absolute-git-dir)/sde-patch-set-applied"
-PATCH_FINGERPRINT="$(patch_set_fingerprint)"
+PATCH_MARKER="$(libwm_patch_marker "$SERENITY_SRC")"
+PATCH_FINGERPRINT="$(libwm_patch_set_fingerprint "$SERENITY_SRC" "$PROJECT_ROOT")"
 applied_count=0
 already_count=0
 unverified_count=0
@@ -78,7 +70,7 @@ unverified_names=""
 if [[ -f "$PATCH_MARKER" && "$(cat "$PATCH_MARKER")" == "$PATCH_FINGERPRINT" ]]; then
     echo "==> patch set already applied for $(git -C "$SERENITY_SRC" rev-parse --short HEAD)"
 else
-    for patch in "$PROJECT_ROOT"/patches/*.patch; do
+    for patch in "${PATCHES[@]}"; do
         name="$(basename "$patch")"
         if git -C "$SERENITY_SRC" apply --recount -C1 --reverse --check "$patch" >/dev/null 2>&1; then
             echo "==> $name already applied"
@@ -118,7 +110,7 @@ fi
 if [[ "$unverified_count" -gt 0 ]]; then
     # The pin line is SERENITY_REVISION="${SERENITY_REVISION:-<hash>}"; take
     # the first hash-looking token on it.
-    pinned="$(grep -m1 '^SERENITY_REVISION=' "${PROJECT_ROOT}/scripts/fetch-serenity.sh" 2>/dev/null | grep -oE '[0-9a-f]{7,40}' | head -1)"
+    pinned="$(libwm_pinned_serenity_revision "$PROJECT_ROOT" 2>/dev/null || true)"
     head_rev="$(git -C "$SERENITY_SRC" rev-parse HEAD 2>/dev/null || true)"
     if [[ -n "$pinned" && -n "$head_rev" && "$head_rev" != "$pinned" ]]; then
         echo "    WARNING: this checkout is at ${head_rev:0:12}, not the pinned ${pinned:0:12}." >&2

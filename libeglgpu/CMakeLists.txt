@@ -1,6 +1,6 @@
 # EGLGPU — a Mesa/EGL-backed GPU::Device (with a LibSoftGPU fallback).
 #
-# Included from the Lagom build (see patches/0007-*.patch) so it can reuse the
+# Included from the Lagom build (see patches/other-libraries/0007-*.patch) so it can reuse the
 # host include paths and the already-built SerenityOS libraries. It is loaded at
 # runtime by LibGPU's driver, not linked by applications.
 

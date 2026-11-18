@@ -44,9 +44,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .ccache
-          key: ccache-${{ hashFiles('scripts/fetch-serenity.sh', 'patches/*.patch') }}-${{ github.run_id }}
+          key: ccache-${{ hashFiles('scripts/fetch-serenity.sh', 'patches/**/*.patch') }}-${{ github.run_id }}
           restore-keys: |
-            ccache-${{ hashFiles('scripts/fetch-serenity.sh', 'patches/*.patch') }}-
+            ccache-${{ hashFiles('scripts/fetch-serenity.sh', 'patches/**/*.patch') }}-
             ccache-
 
       - name: Fetch SerenityOS and the headless compositor

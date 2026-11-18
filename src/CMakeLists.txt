@@ -1,7 +1,7 @@
 # LibWM — the Wayland <-> LibGUI compatibility layer.
 #
 # This directory is the libgui-wayland entry point of the Lagom build (see
-# patches/0001-*.patch), so it can reuse the host include paths and the
+# patches/lagom-and-resources/0001-*.patch), so it can reuse the host include paths and the
 # already-built SerenityOS libraries. It builds the shim library itself, then
 # adds the directories that depend on it:
 #

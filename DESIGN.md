@@ -485,7 +485,7 @@ were required, both handled in the build system rather than in library source:
   Serenity-specific kernel headers (syscall numbers, VM internals) are **not** touched — the
   shim boundary is the WindowServer protocol, not the kernel ABI.
 
-The change is a single build-system patch, `patches/0001-lagom-build-full-libgui.patch`
+The change is a single build-system patch, `patches/lagom-and-resources/0001-lagom-build-full-libgui.patch`
 (+30/−12 lines in `Meta/Lagom/CMakeLists.txt`), applied idempotently by
 `scripts/build-libgui.sh`. No `LibGUI`/`LibGfx` source is edited. Preferred long-term:
 contribute the full `LibGUI` target to Lagom upstream (it already builds the GML subset).
@@ -508,7 +508,7 @@ so `git rebase` does the work) and pointing `SERENITY_REVISION` at the new tip.
 
 The first vertical slice is implemented and verified on a real KDE Plasma Wayland session:
 
-* **Transport seam.** `patches/0002-libcore-host-seams.patch` adds the `Core::PortalServer`
+* **Transport seam.** `patches/libcore/0002-libcore-host-seams.patch` adds the `Core::PortalServer`
   connector to LibCore (consulted by `LocalSocket::connect`) and makes the default
   `resource://` root configurable via `SERENITY_RES_ROOT`, so namespace-scope users such as
   `LibGUI/Calendar.cpp` can load fonts from their static initializers. Both are small and
@@ -728,7 +728,7 @@ protocol to **PipeWire**.
 * **Registration.** `Core::PortalServer` was generalised from a single connector to a small
   registry (`add_connector`), so LibWM and LibSerenityAudio each register their own portals
   independently and neither owns the seam.
-* **Host seams** (`patches/0003-*`): build `LibAudio`'s `ConnectionToServer` on the host,
+* **Host seams** (`patches/other-libraries/0003-*`): build `LibAudio`'s `ConnectionToServer` on the host,
   define `THREAD_PRIORITY_MAX`, and let `LibThreading::Thread::set_priority` be called before
   `start()` (glibc faults on the unset handle).
 
@@ -800,7 +800,7 @@ details matter:
 
 * **Symbol interposition.** Serenity's `LibGL` exports the same `gl*` symbols as Mesa's `libGL`,
   so `GPU::Driver` loads every backend with `RTLD_DEEPBIND`; without it `EGLGPU`'s GL calls would
-  bind to LibGL's implementation instead of Mesa's (`patches/0007`).
+  bind to LibGL's implementation instead of Mesa's (`patches/other-libraries/0007-*`).
 * **Driver default.** `GLContext::create_context()` prefers `eglgpu`, honours an explicit
   `$LIBGL_GPU_DRIVER`, and falls back to `softgpu` if the `eglgpu` library is missing.
 
@@ -887,7 +887,7 @@ open menus, copy/paste, resize/maximise, HiDPI.
 
 | Risk | Why plausible | Mitigation |
 |---|---|---|
-| Full LibGUI does not host-compile cleanly | Lagom only ever built 6 files; `LibCore`/`LibGfx` host paths differ subtly from Serenity | **Resolved for M1**: full LibGUI builds via `patches/0001-lagom-build-full-libgui.patch`; only 3 TUs touch Serenity-only headers (§2.1) |
+| Full LibGUI does not host-compile cleanly | Lagom only ever built 6 files; `LibCore`/`LibGfx` host paths differ subtly from Serenity | **Resolved for M1**: full LibGUI builds via `patches/lagom-and-resources/0001-lagom-build-full-libgui.patch`; only 3 TUs touch Serenity-only headers (§2.1) |
 | Missing host libraries (`LibConfig`, `LibDesktop`, `LibFileSystemAccessClient`) | Not in Lagom's list | Add minimal host targets; serve their portals in-process |
 | Startup deadlock on `fast_greet` | Constructor blocks before the event loop | LibWM server thread sends `fast_greet` on accept, before `Application::create` returns |
 | Menus are server-rendered | More logic than a pure transport | `WM::MenuRenderer` is self-contained and reuses LibGfx + theme; xdg_popup + compositor grab |
@@ -990,7 +990,7 @@ README.md                     quick start, status, limitations
 LICENSE                       BSD-2-Clause (matches SerenityOS)
 .github/workflows/ci.yml      build + all LibWM suites on every push (Arch container)
 cmake/LibWMHelpers.cmake      libwm_wayland_protocol(), libwm_gui_executable()
-patches/                      build-system and host seams applied to the SerenityOS checkout
+patches/<group>/NNNN-*.patch  host seams applied to the SerenityOS checkout (see patches/README.md)
 src/                          LibWM (libwm.so); src/CMakeLists.txt is the Lagom entry point
   LibWM.{h,cpp}               portal registration, server thread, on-demand service spawning
   Environment.{h,cpp}         every environment variable LibWM reads, and the portal path table
@@ -1013,6 +1013,7 @@ libeglgpu/                    Mesa/EGL GPU::Device backend for LibGL apps
 scripts/fetch-serenity.sh     pinned, blobless, sparse checkout of SerenityOS
 scripts/build-libgui.sh       apply patches + build the framework (+ run tests unless --no-tests)
 scripts/check.sh              build + `ctest -L libwm`; what CI runs
+scripts/check-patches.sh      verify the patch series applies to the pinned revision
 scripts/run-*.sh              the integration suites (each registered with CTest)
 scripts/fetch-headless-compositor.sh, build-headless-compositor.sh   xlib-wayland test compositor
 serenity/                     pinned SerenityOS checkout (gitignored)
