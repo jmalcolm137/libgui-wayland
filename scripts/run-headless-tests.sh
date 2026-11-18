@@ -135,6 +135,8 @@ check "XKB Ctrl+C translated to ETX (3)"         "grep -q 'TestWindow: key down 
 check "outgoing drag started on Wayland"         "grep -q 'started drag (' '$RUNTIME/app.log'"
 check "outgoing drag finished cleanly"           "grep -q 'TestWindow: outgoing drag finished' '$RUNTIME/app.log'"
 check "oversized UTF-8 window title survived"    "grep -q 'TestWindow: oversized UTF-8 title clamped and sent' '$RUNTIME/app.log'"
+check "shim keeps the full title (6600 bytes)"    "grep -q 'TestWindow: shim state title_bytes=6600 ' '$RUNTIME/app.log'"
+check "shim owns min size; alpha from store"     "grep -q 'TestWindow: shim state .* min_size=120x90 alpha=true' '$RUNTIME/app.log'"
 check "zwp_text_input_v3 preedit received"       "grep -q \"TestWindow: IME preedit='ni'\" '$RUNTIME/app.log'"
 check "zwp_text_input_v3 commit received"        "grep -q \"TestWindow: IME commit='你好'\" '$RUNTIME/app.log'"
 check "connection-lost callback fired on close"  "grep -q 'TestWindow: connection lost reason=' '$RUNTIME/app.log'"

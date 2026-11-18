@@ -794,13 +794,42 @@ void WaylandClient::set_title(i32 window_id, ByteString const& title)
     MutexLocker locker(m_mutex);
     if (auto* window_surface = find(window_id)) {
         SurfaceLocker surface_locker(window_surface->mutex);
-        auto clamped = clamp_wayland_string(title);
-        window_surface->title = clamped;
+        // Keep the full title for the client's queries; only the copy sent to
+        // the compositor is clamped to what a Wayland message can carry.
+        window_surface->title = title;
         window_surface->csd_dirty = true;
-        if (window_surface->toplevel)
+        if (window_surface->toplevel) {
+            auto clamped = clamp_wayland_string(title);
             xdg_toplevel_set_title(window_surface->toplevel, clamped.characters());
+        }
         wl_display_flush(m_display);
     }
+}
+
+ByteString WaylandClient::window_title(i32 window_id) const
+{
+    MutexLocker locker(m_mutex);
+    auto it = m_windows.find(window_id);
+    if (it == m_windows.end())
+        return {};
+    SurfaceLocker surface_locker(it->value->mutex);
+    // A deep copy: ByteString's refcount is not atomic, and this is called from
+    // the LibWM server thread.
+    return ByteString { it->value->title.view() };
+}
+
+Gfx::IntSize WaylandClient::window_minimum_size(i32 window_id) const
+{
+    MutexLocker locker(m_mutex);
+    auto it = m_windows.find(window_id);
+    return it == m_windows.end() ? Gfx::IntSize {} : it->value->minimum_size;
+}
+
+bool WaylandClient::window_has_alpha(i32 window_id) const
+{
+    MutexLocker locker(m_mutex);
+    auto it = m_windows.find(window_id);
+    return it != m_windows.end() && it->value->has_alpha;
 }
 
 void WaylandClient::set_window_rect(i32 window_id, Gfx::IntSize size)
@@ -976,6 +1005,9 @@ void WaylandClient::attach_and_commit(i32 window_id, int client_fd, Gfx::IntSize
     SurfaceLocker surface_locker(window_surface->mutex);
     if (visible_size.is_empty())
         visible_size = size;
+    // The backing store's format is authoritative for whether the window has
+    // alpha (it drives the opaque-region hint and the buffer format).
+    window_surface->has_alpha = has_alpha;
 
     // A layer surface or an xdg_toplevel must not attach a buffer before its
     // first configure; hold the frame and present it from the configure handler.

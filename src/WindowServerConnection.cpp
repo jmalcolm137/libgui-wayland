@@ -323,7 +323,7 @@ void WindowServerConnection::present(Window& window)
     }
 
     dbgln("LibWM: window {} presented ({}x{}, serial {}, alpha={})",
-        window.id, window.bitmap->width(), window.bitmap->height(), window.last_serial, window.has_alpha_channel);
+        window.id, window.bitmap->width(), window.bitmap->height(), window.last_serial, window.bitmap->has_alpha_channel());
 }
 
 void WindowServerConnection::create_window(i32 window_id, i32, Gfx::IntRect const& rect, bool, bool has_alpha_channel, bool, bool, bool resizable, bool fullscreen, bool frameless, bool, float alpha_hit_threshold, Gfx::IntSize, Gfx::IntSize, Gfx::IntSize minimum_size, Optional<Gfx::IntSize> const&, i32 window_type, i32 window_mode, ByteString const& title, i32 parent_window_id, Gfx::IntRect const& launch_origin_rect)
@@ -331,9 +331,6 @@ void WindowServerConnection::create_window(i32 window_id, i32, Gfx::IntRect cons
     auto window = make<Window>();
     window->id = window_id;
     window->rect = rect;
-    window->minimum_size = minimum_size;
-    window->has_alpha_channel = has_alpha_channel;
-    window->title = title;
     window->window_mode = window_mode;
     window->parent_window_id = parent_window_id;
     window->client_positioned = window_type == static_cast<i32>(WindowServer::WindowType::Popup)
@@ -386,10 +383,8 @@ void WindowServerConnection::create_window(i32 window_id, i32, Gfx::IntRect cons
 void WindowServerConnection::set_window_title(i32 window_id, ByteString const& title)
 {
     dbgln("LibWM: set_window_title id={} title='{}'", window_id, title);
-    if (auto* w = window(window_id)) {
-        w->title = title;
+    if (window(window_id))
         WaylandClient::the().set_title(window_id, title);
-    }
 }
 
 Messages::WindowServer::DestroyWindowResponse WindowServerConnection::destroy_window(i32 window_id)
@@ -436,24 +431,18 @@ Messages::WindowServer::GetWindowFloatingRectResponse WindowServerConnection::ge
 
 void WindowServerConnection::set_window_minimum_size(i32 window_id, Gfx::IntSize size)
 {
-    if (auto* w = window(window_id)) {
-        w->minimum_size = size;
+    if (window(window_id))
         WaylandClient::the().set_minimum_size(window_id, size);
-    }
 }
 
 Messages::WindowServer::GetWindowMinimumSizeResponse WindowServerConnection::get_window_minimum_size(i32 window_id)
 {
-    if (auto* w = window(window_id))
-        return Messages::WindowServer::GetWindowMinimumSizeResponse { w->minimum_size };
-    return Messages::WindowServer::GetWindowMinimumSizeResponse { Gfx::IntSize {} };
+    return Messages::WindowServer::GetWindowMinimumSizeResponse { WaylandClient::the().window_minimum_size(window_id) };
 }
 
 Messages::WindowServer::GetWindowTitleResponse WindowServerConnection::get_window_title(i32 window_id)
 {
-    if (auto* w = window(window_id))
-        return Messages::WindowServer::GetWindowTitleResponse { w->title };
-    return Messages::WindowServer::GetWindowTitleResponse { ByteString {} };
+    return Messages::WindowServer::GetWindowTitleResponse { WaylandClient::the().window_title(window_id) };
 }
 
 void WindowServerConnection::set_window_modified(i32 window_id, bool modified)
@@ -516,7 +505,6 @@ void WindowServerConnection::set_window_backing_store(i32 window_id, i32, i32 pi
     }
 
     w->bitmap = bitmap.release_value();
-    w->has_alpha_channel = has_alpha_channel;
     w->last_serial = serial;
     present(*w);
     WaylandClient::the().attach_and_commit(window_id, anon_file.fd(), size, visible_size, pitch, has_alpha_channel);
@@ -548,10 +536,8 @@ void WindowServerConnection::did_finish_painting(i32 window_id, Vector<Gfx::IntR
 
 void WindowServerConnection::set_window_has_alpha_channel(i32 window_id, bool has_alpha_channel)
 {
-    if (auto* w = window(window_id)) {
-        w->has_alpha_channel = has_alpha_channel;
+    if (window(window_id))
         WaylandClient::the().set_window_has_alpha_channel(window_id, has_alpha_channel);
-    }
 }
 
 void WindowServerConnection::set_window_alpha_hit_threshold(i32 window_id, float threshold)

@@ -148,7 +148,6 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         for (int i = 0; i < 600; ++i)
             oversized.append("🌊Wayland"sv);
         window->set_title(oversized.to_byte_string());
-        window->set_title("LibWM Test Window");
         dbgln("TestWindow: oversized UTF-8 title clamped and sent");
 
         LibWM::WaylandClient::the().seat().set_text_input_cursor_rect({ 10, 10, 2, 16 });
@@ -162,6 +161,20 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         widget->update();
     });
     ime_and_title_timer->start();
+
+    // The shim owns the presented window state; the WindowServer connection
+    // answers the client's queries from it. The full title survives (only the
+    // copy sent to the compositor is clamped), and the alpha flag follows the
+    // backing store.
+    auto state_timer = Core::Timer::create_single_shot(1500, [&] {
+        auto& wayland = LibWM::WaylandClient::the();
+        auto const id = window->window_id();
+        auto const min_size = wayland.window_minimum_size(id);
+        dbgln("TestWindow: shim state title_bytes={} min_size={}x{} alpha={}",
+            wayland.window_title(id).length(), min_size.width(), min_size.height(), wayland.window_has_alpha(id));
+        window->set_title("LibWM Test Window");
+    });
+    state_timer->start();
 
     auto quit_timer = Core::Timer::create_single_shot(6000, [&] { app->quit(0); });
     quit_timer->start();

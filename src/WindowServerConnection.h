@@ -90,13 +90,14 @@ private:
         WaylandClient::the().clear_display_link_callback(this);
     }
 
+    // The WindowServer-protocol view of a window: what the client has been told
+    // (its rect), the last backing store, and bookkeeping that has no Wayland
+    // counterpart. State that is presented on Wayland (title, minimum size,
+    // alpha, maximized) is owned by WaylandClient and queried from there.
     struct Window {
         i32 id { 0 };
         Gfx::IntRect rect;
-        Gfx::IntSize minimum_size;
-        bool has_alpha_channel { false };
         bool modified { false };
-        ByteString title;
         // SerenityOS WindowMode (0 modeless .. 3 blocking) and the parent window
         // id (for a transient/modal dialog), from create_window.
         i32 window_mode { 0 };

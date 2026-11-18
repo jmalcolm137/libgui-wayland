@@ -160,6 +160,13 @@ public:
     void destroy_window(i32 window_id);
     void set_title(i32 window_id, ByteString const& title);
 
+    // The per-window state presented on Wayland is owned here; the WindowServer
+    // connection answers the client's queries from these rather than keeping
+    // copies. Unknown windows yield empty values.
+    ByteString window_title(i32 window_id) const;
+    Gfx::IntSize window_minimum_size(i32 window_id) const;
+    bool window_has_alpha(i32 window_id) const;
+
     // Whether the compositor currently wants the window's menu bar shown.
     bool window_menubar_visible(i32 window_id) const;
 
