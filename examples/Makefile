@@ -25,10 +25,9 @@ CPPFLAGS += \
 	-I$(CURDIR)/../compat
 
 # The Wayland support library installs the toolkit's platform hooks from a
-# static initializer, so it must be linked with --no-as-needed. Its filename
-# (libwindowserver.so) is historical; despite the name, it is an in-process
-# library, not a system service. The rpath keeps the examples runnable from the
-# build tree without LD_LIBRARY_PATH.
+# static initializer, so it must be linked with --no-as-needed. (libwm.so was
+# called libwindowserver.so before; that name remains as a symlink.) The rpath
+# keeps the examples runnable from the build tree without LD_LIBRARY_PATH.
 LDFLAGS += -L$(LAGOM)/lib -Wl,--no-as-needed -Wl,-rpath,$(LAGOM)/lib
 LDLIBS += \
 	-llagom-gui \
@@ -38,7 +37,7 @@ LDLIBS += \
 	-llagom-ipc \
 	-llagom-main \
 	-llagom-ak \
-	-lwindowserver
+	-lwm
 
 EXAMPLES := hello-world greeter notes clock
 BIN := bin

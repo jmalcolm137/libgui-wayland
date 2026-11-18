@@ -991,7 +991,7 @@ LICENSE                       BSD-2-Clause (matches SerenityOS)
 .github/workflows/ci.yml      build + all LibWM suites on every push (Arch container)
 cmake/LibWMHelpers.cmake      libwm_wayland_protocol(), libwm_gui_executable()
 patches/                      build-system and host seams applied to the SerenityOS checkout
-src/                          LibWM (libwindowserver.so); src/CMakeLists.txt is the Lagom entry point
+src/                          LibWM (libwm.so); src/CMakeLists.txt is the Lagom entry point
   LibWM.{h,cpp}               portal registration, server thread, on-demand service spawning
   Environment.{h,cpp}         every environment variable LibWM reads, and the portal path table
   WindowServerConnection.{h,cpp}, WindowServerSettings.cpp   WindowServer protocol server
@@ -1005,7 +1005,6 @@ src/                          LibWM (libwindowserver.so); src/CMakeLists.txt is 
                               wallpaper, capture, compositor-driven chrome
   MenuController.{h,cpp}      server-rendered menubar and menus
   {Clipboard,Config,Launch,FileSystemAccess}ServerConnection.{h,cpp}   in-process portals
-  *DefaultStub.h              GENERATED per-endpoint stubs (tools/gen-default-stub.py)
   protocol/                   wlr-layer-shell and serenity-window protocol XML
   test/                       LibWM test programs + CTest registration of the scripts below
 services/                     upstream WebContent, RequestServer, SQLServer (spawned on demand)
@@ -1019,7 +1018,7 @@ scripts/fetch-headless-compositor.sh, build-headless-compositor.sh   xlib-waylan
 serenity/                     pinned SerenityOS checkout (gitignored)
 third_party/xlib-wayland/     pinned checkout, used only for its headless compositor (gitignored)
 build/                        host build outputs (gitignored)
-tools/gen-default-stub.py     generate a default stub for any IPC endpoint
+tools/gen-default-stub.py     generates the per-endpoint *DefaultStub.h at build time (build/lagom/libwm/stubs)
 tools/wl-clipboard-peer.c     native libwayland-client clipboard/DnD peer (tests)
 ```
 

@@ -18,7 +18,18 @@ pkg_check_modules(XKBCOMMON REQUIRED xkbcommon)
 pkg_get_variable(WAYLAND_PROTOCOLS_DIR wayland-protocols pkgdatadir)
 find_program(WAYLAND_SCANNER wayland-scanner REQUIRED)
 
-add_library(windowserver SHARED
+# Default stubs for the endpoints LibWM serves in-process, generated from the
+# Lagom IPC headers at build time.
+set(LIBWM_STUB_DIR "${CMAKE_CURRENT_BINARY_DIR}/stubs" CACHE INTERNAL "Generated LibWM default stubs")
+set(LIBWM_STUB_OUTPUTS "")
+libwm_default_stub(WindowServer WindowServer EXTRA_INCLUDES WindowServer/ScreenLayout.h)
+libwm_default_stub(ClipboardServer Clipboard)
+libwm_default_stub(ConfigServer ConfigServer)
+libwm_default_stub(LaunchServer LaunchServer)
+libwm_default_stub(FileSystemAccessServer FileSystemAccessServer)
+add_custom_target(libwm_default_stubs DEPENDS ${LIBWM_STUB_OUTPUTS})
+
+add_library(LibWM SHARED
     ClipboardServerConnection.cpp
     ConfigServerConnection.cpp
     Environment.cpp
@@ -38,37 +49,48 @@ add_library(windowserver SHARED
     "${SERENITY_PROJECT_ROOT}/Userland/Services/ImageDecoder/ConnectionFromClient.cpp"
 )
 
-# The library's file name is historical (it was LibWindowServer); `wm` is the
-# short alias older references use.
-add_library(wm ALIAS windowserver)
+# The library is libwm.so. It used to be built as libwindowserver.so, and the
+# SerenityDE build still refers to the `windowserver` and `wm` targets, so both
+# stay as aliases, and a libwindowserver.so symlink keeps binaries linked
+# against the old name (or with -lwindowserver) working. Through the symlink the
+# loader sees one file, so the library is never loaded twice.
+set_target_properties(LibWM PROPERTIES OUTPUT_NAME wm)
+add_library(windowserver ALIAS LibWM)
+add_library(wm ALIAS LibWM)
+add_custom_command(TARGET LibWM POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E create_symlink "$<TARGET_FILE_NAME:LibWM>" "$<TARGET_FILE_DIR:LibWM>/libwindowserver.so"
+    VERBATIM
+)
 
 # Wayland protocols the shim speaks.
-libwm_wayland_protocol(windowserver xdg-shell "${WAYLAND_PROTOCOLS_DIR}/stable/xdg-shell/xdg-shell.xml")
+libwm_wayland_protocol(LibWM xdg-shell "${WAYLAND_PROTOCOLS_DIR}/stable/xdg-shell/xdg-shell.xml")
 # wp_viewporter: stretch the last frame during an interactive resize, and set
 # the logical destination size under fractional HiDPI.
-libwm_wayland_protocol(windowserver viewporter "${WAYLAND_PROTOCOLS_DIR}/stable/viewporter/viewporter.xml")
+libwm_wayland_protocol(LibWM viewporter "${WAYLAND_PROTOCOLS_DIR}/stable/viewporter/viewporter.xml")
 # wp_fractional_scale_v1: per-surface fractional scale in 1/120ths.
-libwm_wayland_protocol(windowserver fractional-scale-v1 "${WAYLAND_PROTOCOLS_DIR}/staging/fractional-scale/fractional-scale-v1.xml")
-libwm_wayland_protocol(windowserver text-input-unstable-v3 "${WAYLAND_PROTOCOLS_DIR}/unstable/text-input/text-input-unstable-v3.xml")
-libwm_wayland_protocol(windowserver xdg-decoration "${WAYLAND_PROTOCOLS_DIR}/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml")
-libwm_wayland_protocol(windowserver xdg-output "${WAYLAND_PROTOCOLS_DIR}/unstable/xdg-output/xdg-output-unstable-v1.xml")
+libwm_wayland_protocol(LibWM fractional-scale-v1 "${WAYLAND_PROTOCOLS_DIR}/staging/fractional-scale/fractional-scale-v1.xml")
+libwm_wayland_protocol(LibWM text-input-unstable-v3 "${WAYLAND_PROTOCOLS_DIR}/unstable/text-input/text-input-unstable-v3.xml")
+libwm_wayland_protocol(LibWM xdg-decoration "${WAYLAND_PROTOCOLS_DIR}/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml")
+libwm_wayland_protocol(LibWM xdg-output "${WAYLAND_PROTOCOLS_DIR}/unstable/xdg-output/xdg-output-unstable-v1.xml")
 # wlr-layer-shell: the Serenity Taskbar/Desktop/applets map to layer surfaces.
-libwm_wayland_protocol(windowserver wlr-layer-shell-unstable-v1 "${CMAKE_CURRENT_SOURCE_DIR}/protocol/wlr-layer-shell-unstable-v1.xml")
+libwm_wayland_protocol(LibWM wlr-layer-shell-unstable-v1 "${CMAKE_CURRENT_SOURCE_DIR}/protocol/wlr-layer-shell-unstable-v1.xml")
 # serenity-window: compositor <-> shim chrome control (menubar, window menu,
 # host settings, wallpaper, capture).
-libwm_wayland_protocol(windowserver serenity-window "${CMAKE_CURRENT_SOURCE_DIR}/protocol/serenity-window.xml")
+libwm_wayland_protocol(LibWM serenity-window "${CMAKE_CURRENT_SOURCE_DIR}/protocol/serenity-window.xml")
 
-target_include_directories(windowserver PRIVATE
+target_include_directories(LibWM PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${LIBWM_STUB_DIR}"
     "${CMAKE_CURRENT_BINARY_DIR}/wayland"
     ${WAYLAND_CLIENT_INCLUDE_DIRS}
     ${XKBCOMMON_INCLUDE_DIRS}
 )
-target_compile_definitions(windowserver PRIVATE "LIBWM_DEFAULT_RES=\"${SERENITY_PROJECT_ROOT}/Base/res\"")
+target_compile_definitions(LibWM PRIVATE "LIBWM_DEFAULT_RES=\"${SERENITY_PROJECT_ROOT}/Base/res\"")
 # The generated Wayland protocol code drops const in its listener trampolines.
-target_compile_options(windowserver PRIVATE -Wno-cast-qual)
-target_link_libraries(windowserver PRIVATE LibCore LibGfx LibIPC LibGUI LibLaunch LibThreading LibURL ${WAYLAND_CLIENT_LIBRARIES} ${XKBCOMMON_LIBRARIES})
-add_dependencies(windowserver
+target_compile_options(LibWM PRIVATE -Wno-cast-qual)
+target_link_libraries(LibWM PRIVATE LibCore LibGfx LibIPC LibGUI LibLaunch LibThreading LibURL ${WAYLAND_CLIENT_LIBRARIES} ${XKBCOMMON_LIBRARIES})
+add_dependencies(LibWM
+    libwm_default_stubs
     generate_WindowServerEndpoint.h
     generate_WindowClientEndpoint.h
     generate_WindowManagerServerEndpoint.h

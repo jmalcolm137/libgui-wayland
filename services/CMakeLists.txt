@@ -24,7 +24,7 @@ target_link_options(WebContent PRIVATE "-Wl,--no-as-needed")
 # WebContent is a client-stack process too: link the shim so its outgoing portal
 # connects (RequestServer, ImageDecoder) go through LibWM and are spawned/served
 # on demand, exactly as an application's are.
-target_link_libraries(WebContent PRIVATE LibCore LibFileSystem LibIPC LibGfx LibAudio LibImageDecoderClient LibJS LibWebView LibWeb LibLocale LibMain LibURL windowserver)
+target_link_libraries(WebContent PRIVATE LibCore LibFileSystem LibIPC LibGfx LibAudio LibImageDecoderClient LibJS LibWebView LibWeb LibLocale LibMain LibURL LibWM)
 add_dependencies(WebContent
     generate_WebContentClientEndpoint.h
     generate_WebContentServerEndpoint.h

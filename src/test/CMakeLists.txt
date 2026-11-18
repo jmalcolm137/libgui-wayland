@@ -8,7 +8,8 @@
 #
 # or use scripts/check.sh, which also builds first.
 
-set(LIBWM_TEST_INCLUDES "${CMAKE_CURRENT_SOURCE_DIR}/..")
+# The tests include LibWM's private headers, some of which use the generated stubs.
+set(LIBWM_TEST_INCLUDES "${CMAKE_CURRENT_SOURCE_DIR}/.." "${LIBWM_STUB_DIR}")
 
 # A minimal unmodified-style LibGUI application used to exercise the shim.
 libwm_gui_executable(libwm-test-window
@@ -60,6 +61,7 @@ libwm_gui_executable(libwm-unit-test
     SOURCES UnitTest.cpp
     INCLUDES ${LIBWM_TEST_INCLUDES}
     LIBS LibMain LibGUI LibGfx LibCore LibIPC LibConfig)
+add_dependencies(libwm-unit-test libwm_default_stubs)
 
 # --- CTest --------------------------------------------------------------------
 # Each suite is a script that builds what it needs, starts its own headless

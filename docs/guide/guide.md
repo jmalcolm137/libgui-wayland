@@ -80,7 +80,7 @@ The path from your code to the display is deliberately short:
 
 ![The application stack. Your code uses LibGUI, LibGfx, and AK; the toolkit's Wayland support presents windows through libwayland-client; the compositor owns the display. There is no WindowServer.](images/architecture.png)
 
-The support layer is an implementation detail. You do not call it directly, you do not configure it per compositor, and you do not write Wayland protocol code. It is linked into your executable because that is how the toolkit receives Wayland events in-process; there is no daemon and no extra process between your application and the compositor. The build names the support library `libwindowserver.so` for historical reasons; despite the name, it is an in-process library, not a service.
+The support layer is an implementation detail. You do not call it directly, you do not configure it per compositor, and you do not write Wayland protocol code. It is linked into your executable because that is how the toolkit receives Wayland events in-process; there is no daemon and no extra process between your application and the compositor. The build names the support library `libwm.so` for historical reasons; despite the name, it is an in-process library, not a service.
 
 Because each application is its own Wayland client, it gets the compositor's normal treatment: focus, stacking, tiling, window switching, and decorations are handled where they belong. The application does not need a global window list, a taskbar, or a workspace manager to be part of its process.
 
@@ -167,7 +167,7 @@ When it finishes, the important paths are:
 build/lagom/lib/liblagom-gui.so       LibGUI
 build/lagom/lib/liblagom-gfx.so       LibGfx
 build/lagom/lib/liblagom-ak.so        AK
-build/lagom/lib/libwindowserver.so    Wayland support (in-process; name is historical)
+build/lagom/lib/libwm.so             Wayland support (in-process)
 build/lagom/bin/Calculator            an unmodified SerenityOS application
 build/lagom/bin/GMLCompiler           the GML-to-C++ compiler
 ```
@@ -231,13 +231,13 @@ CPPFLAGS += \
 
 LDFLAGS += -L$(LAGOM)/lib -Wl,--no-as-needed -Wl,-rpath,$(LAGOM)/lib
 LDLIBS += -llagom-gui -llagom-gfx -llagom-core -llagom-corebasic \
-          -llagom-ipc -llagom-main -llagom-ak -lwindowserver
+          -llagom-ipc -llagom-main -llagom-ak -lwm
 ```
 
 Three details matter:
 
 1. **The include paths cover both the source tree and the build tree.** Some headers are generated during the Lagom build (for example, GML output and IPC endpoint definitions), so `-I$(LAGOM)/Userland/Libraries` is not optional.
-2. **`-Wl,--no-as-needed` keeps the Wayland support library loaded.** The library installs the toolkit's platform hooks from a static initialiser. Without `--no-as-needed`, the linker may drop `libwindowserver.so` because no symbol in your object files refers to it directly, and the application would then fail during startup. The library's name is historical; it is linked into the process and there is no WindowServer service behind it.
+2. **`-Wl,--no-as-needed` keeps the Wayland support library loaded.** The library installs the toolkit's platform hooks from a static initialiser. Without `--no-as-needed`, the linker may drop `libwm.so` because no symbol in your object files refers to it directly, and the application would then fail during startup. The library's name is historical; it is linked into the process and there is no WindowServer service behind it.
 3. **The rpath makes the examples runnable from the build tree.** For an installed application, use an install rpath such as `$ORIGIN/../lib`, or install the libraries in the system library directory.
 
 The examples link only what they need. A larger application may add `-llagom-desktop`, `-llagom-config`, `-llagom-filesystemaccessclient`, or `-llagom-audio` depending on which libraries it uses.
@@ -269,7 +269,7 @@ You can also add an application to the SerenityOS tree under `Userland/Applicati
 | `error: wayland-client not found` | Missing Wayland development package | Install `libwayland-dev` or the distro equivalent, then reconfigure |
 | `cannot open shared object file: liblagom-gui.so` | Library path is wrong | Run from the build tree, set `LD_LIBRARY_PATH`, or fix the rpath |
 | Window appears but text and icons are missing | `SERENITY_RES_ROOT` is not set or points at the wrong tree | Point it at `serenity/Base/res` |
-| Application exits immediately with a startup error | The Wayland support library was dropped by the linker | Add `-Wl,--no-as-needed` before `-lwindowserver` |
+| Application exits immediately with a startup error | The Wayland support library was dropped by the linker | Add `-Wl,--no-as-needed` before `-lwm` |
 | `Failed to connect to Wayland display` | No Wayland session, or `WAYLAND_DISPLAY` is unset | Run inside a Wayland session; check `echo $WAYLAND_DISPLAY` |
 | Window is placed somewhere unexpected | Wayland does not support absolute placement | Use `resize()` and let the compositor place it |
 | Menus do not appear | The compositor rejected the popup, or a grab is active | Check the application log; test on a second compositor |
@@ -1580,7 +1580,7 @@ A reasonable installation looks like this:
 
 ```text
 /usr/local/bin/notes
-/usr/local/lib/libgui-wayland/libwindowserver.so   # Wayland support, in-process
+/usr/local/lib/libgui-wayland/libwm.so   # Wayland support, in-process
 /usr/local/lib/libgui-wayland/liblagom-gui.so
 /usr/local/lib/libgui-wayland/liblagom-gfx.so
 /usr/local/lib/libgui-wayland/liblagom-ak.so
@@ -1600,7 +1600,7 @@ Set `StartupWMClass` to the executable's base name, because that is the app ID t
 
 ## 9.3 Libraries and rpath
 
-The binary needs the Wayland support library (`libwindowserver.so`, named for historical reasons) and the `liblagom-*.so` libraries it uses. You can:
+The binary needs the Wayland support library (`libwm.so`; older builds called it `libwm.so`, which remains as a symlink) and the `liblagom-*.so` libraries it uses. You can:
 
 - install them in a directory on the loader's search path and run `ldconfig`;
 - install them next to the binary and use an rpath of `$ORIGIN`;
@@ -1610,10 +1610,10 @@ A private directory is the most predictable for a bundled application:
 
 ```bash
 c++ ... -Wl,--no-as-needed -Wl,-rpath,'$ORIGIN/../lib/libgui-wayland' \
-    -L/usr/local/lib/libgui-wayland -lwindowserver -llagom-gui ...
+    -L/usr/local/lib/libgui-wayland -lwm -llagom-gui ...
 ```
 
-Keep `--no-as-needed` for `libwindowserver.so`. The static initializer is the only thing that pulls the support library in, and the linker cannot see it as a normal symbol reference.
+Keep `--no-as-needed` for `libwm.so`. The static initializer is the only thing that pulls the support library in, and the linker cannot see it as a normal symbol reference.
 
 Do not strip the libraries' SONAME or the application's rpath. If you use a packaging system, follow its policy for rpath and library placement; many distributions prefer a system-wide library directory and a package dependency instead of a private bundle.
 
@@ -1652,7 +1652,7 @@ Do not request X11 access. The application is a Wayland client and does not need
 - `[ ]` The desktop file's `Exec`, `Icon`, and `StartupWMClass` are correct.
 - `[ ]` The icon is installed in the hicolor theme.
 - `[ ]` `ldd` shows only intended dependencies; no build-tree paths remain.
-- `[ ]` `--no-as-needed` is present for `libwindowserver.so`.
+- `[ ]` `--no-as-needed` is present for `libwm.so`.
 - `[ ]` The application starts on a clean user account with no config file.
 - `[ ]` The file picker works in the packaged sandbox.
 - `[ ]` The app exits cleanly when the last window is closed.
@@ -1864,7 +1864,7 @@ For a custom root class, use `@Namespace::Class` in the GML and register the cla
 | `-Wl,--no-as-needed` | Keep the Wayland support library's static initializer alive |
 | `-Wl,-rpath,...` | Find the Lagom libraries at runtime |
 | `-llagom-gui -llagom-gfx -llagom-core -llagom-ipc -llagom-main -llagom-ak` | The core libraries |
-| `-lwindowserver` | Wayland support library (in-process; historical name) |
+| `-lwm` | Wayland support library (in-process; formerly `-lwm`) |
 
 ## C.3 Quick commands
 

@@ -29,7 +29,7 @@ if [[ ${#TARGETS[@]} -eq 0 ]]; then
     # framework's — the SDE builds them (serenity-desktop-environment's
     # scripts/build-apps.sh).
     TARGETS=(
-        LibGfx LibGUI windowserver eglgpu
+        LibGfx LibGUI LibWM eglgpu
     )
 fi
 
