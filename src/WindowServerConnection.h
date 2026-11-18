@@ -52,7 +52,14 @@ class WindowServerConnection final
                 callback(move(args)...);
                 return;
             }
-            MainThreadInvoker::post_to_server([protect = NonnullRefPtr<WindowServerConnection>(*this), callback, ... args = move(args)]() mutable {
+            // Do not add a reference here. RefCountedBase is not atomic, and a ref
+            // taken on this thread races the deref of the task's own capture on the
+            // server thread: the lost update eventually drops the count to 0 and
+            // deletes the connection under a live callback (VERIFICATION FAILED:
+            // m_ref_count > 0 in on_toplevel_position). The connection is pinned for
+            // the process lifetime by LibWM's leaked window_server_slot(), and the
+            // server loop it posts to lives just as long, so the raw pointer is safe.
+            MainThreadInvoker::post_to_server([this, callback, ... args = move(args)]() mutable {
                 callback(move(args)...);
             });
         };
