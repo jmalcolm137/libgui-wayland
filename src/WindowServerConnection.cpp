@@ -108,6 +108,7 @@ void WindowServerConnection::send_paint(Window& window, Vector<Gfx::IntRect> rec
 
 void WindowServerConnection::request_window_resize(i32 window_id, Gfx::IntSize size)
 {
+    verify_on_server_thread();
     auto* w = window(window_id);
     if (!w)
         return;
@@ -145,18 +146,18 @@ void WindowServerConnection::install_input_callbacks()
 {
     WaylandClient::InputCallbacks callbacks;
 
-    callbacks.mouse_move = [this](i32 window_id, Gfx::IntPoint position, u32 buttons, u32 modifiers) {
+    callbacks.mouse_move = on_server_thread([this](i32 window_id, Gfx::IntPoint position, u32 buttons, u32 modifiers) {
         async_mouse_move(window_id, position, 0, buttons, modifiers, 0, 0, 0, 0);
-    };
-    callbacks.mouse_down = [this](i32 window_id, Gfx::IntPoint position, u32 button, u32 buttons, u32 modifiers) {
+    });
+    callbacks.mouse_down = on_server_thread([this](i32 window_id, Gfx::IntPoint position, u32 button, u32 buttons, u32 modifiers) {
         // A press on one of our windows is outside any open menu (menu clicks are
         // routed to the popup), so dismiss it first.
         if (m_menu.has_open_menu())
             m_menu.close_open_menus();
         m_last_mouse_down_window_id = window_id;
         async_mouse_down(window_id, position, button, buttons, modifiers, 0, 0, 0, 0);
-    };
-    callbacks.mouse_up = [this](i32 window_id, Gfx::IntPoint position, u32 button, u32 buttons, u32 modifiers) {
+    });
+    callbacks.mouse_up = on_server_thread([this](i32 window_id, Gfx::IntPoint position, u32 button, u32 buttons, u32 modifiers) {
         async_mouse_up(window_id, position, button, buttons, modifiers, 0, 0, 0, 0);
 
         // Mirror WindowServer::WindowManager: a second press/release within the
@@ -181,11 +182,11 @@ void WindowServerConnection::install_input_callbacks()
             metadata.clock.start();
         }
         metadata.last_position = position;
-    };
-    callbacks.mouse_wheel = [this](i32 window_id, Gfx::IntPoint position, u32 buttons, u32 modifiers, i32 wheel_delta_x, i32 wheel_delta_y) {
+    });
+    callbacks.mouse_wheel = on_server_thread([this](i32 window_id, Gfx::IntPoint position, u32 buttons, u32 modifiers, i32 wheel_delta_x, i32 wheel_delta_y) {
         async_mouse_wheel(window_id, position, 0, buttons, modifiers, wheel_delta_x, wheel_delta_y, wheel_delta_x, wheel_delta_y);
-    };
-    callbacks.key = [this](i32 window_id, u32 code_point, u32 key, u8 map_entry_index, u32 modifiers, u32 scancode, bool is_press) {
+    });
+    callbacks.key = on_server_thread([this](i32 window_id, u32 code_point, u32 key, u8 map_entry_index, u32 modifiers, u32 scancode, bool is_press) {
         // While a menu is open (or to open one with F10/Alt+letter) the menu handles keys.
         if (m_menu.handle_key(window_id, key, code_point, modifiers, is_press))
             return;
@@ -193,11 +194,11 @@ void WindowServerConnection::install_input_callbacks()
             async_key_down(window_id, code_point, key, map_entry_index, modifiers, scancode);
         else
             async_key_up(window_id, code_point, key, map_entry_index, modifiers, scancode);
-    };
-    callbacks.window_entered = [this](i32 window_id) { async_window_entered(window_id); };
-    callbacks.window_left = [this](i32 window_id) { async_window_left(window_id); };
-    callbacks.window_close_request = [this](i32 window_id) { async_window_close_request(window_id); };
-    callbacks.window_activation = [this](i32 window_id, bool activated) {
+    });
+    callbacks.window_entered = on_server_thread([this](i32 window_id) { async_window_entered(window_id); });
+    callbacks.window_left = on_server_thread([this](i32 window_id) { async_window_left(window_id); });
+    callbacks.window_close_request = on_server_thread([this](i32 window_id) { async_window_close_request(window_id); });
+    callbacks.window_activation = on_server_thread([this](i32 window_id, bool activated) {
         if (activated) {
             m_active_window_id = window_id;
             async_window_activated(window_id);
@@ -206,29 +207,29 @@ void WindowServerConnection::install_input_callbacks()
                 m_active_window_id = -1;
             async_window_deactivated(window_id);
         }
-    };
-    callbacks.window_resize = [this](i32 window_id, Gfx::IntSize size) {
+    });
+    callbacks.window_resize = on_server_thread([this](i32 window_id, Gfx::IntSize size) {
         request_window_resize(window_id, size);
-    };
-    callbacks.menubar_motion = [this](i32 window_id, Gfx::IntPoint position) { m_menu.on_menubar_motion(window_id, position); };
-    callbacks.menubar_left = [this](i32 window_id) { m_menu.on_menubar_left(window_id); };
-    callbacks.menubar_press = [this](i32 window_id, Gfx::IntPoint position) { m_menu.on_menubar_press(window_id, position); };
-    callbacks.popup_motion = [this](i32 popup_id, Gfx::IntPoint position) { m_menu.on_popup_motion(popup_id, position); };
-    callbacks.popup_button = [this](i32 popup_id, Gfx::IntPoint position, bool pressed) { m_menu.on_popup_button(popup_id, position, pressed); };
-    callbacks.popup_wheel = [this](i32 popup_id, i32 wheel_delta_y) { m_menu.on_popup_wheel(popup_id, wheel_delta_y); };
-    callbacks.popup_closed = [this](i32 popup_id) { m_menu.on_popup_closed(popup_id); };
-    callbacks.drag_finished = [this](bool accepted) {
+    });
+    callbacks.menubar_motion = on_server_thread([this](i32 window_id, Gfx::IntPoint position) { m_menu.on_menubar_motion(window_id, position); });
+    callbacks.menubar_left = on_server_thread([this](i32 window_id) { m_menu.on_menubar_left(window_id); });
+    callbacks.menubar_press = on_server_thread([this](i32 window_id, Gfx::IntPoint position) { m_menu.on_menubar_press(window_id, position); });
+    callbacks.popup_motion = on_server_thread([this](i32 popup_id, Gfx::IntPoint position) { m_menu.on_popup_motion(popup_id, position); });
+    callbacks.popup_button = on_server_thread([this](i32 popup_id, Gfx::IntPoint position, bool pressed) { m_menu.on_popup_button(popup_id, position, pressed); });
+    callbacks.popup_wheel = on_server_thread([this](i32 popup_id, i32 wheel_delta_y) { m_menu.on_popup_wheel(popup_id, wheel_delta_y); });
+    callbacks.popup_closed = on_server_thread([this](i32 popup_id) { m_menu.on_popup_closed(popup_id); });
+    callbacks.drag_finished = on_server_thread([this](bool accepted) {
         if (accepted)
             async_drag_accepted();
         else
             async_drag_cancelled();
-    };
-    callbacks.drag_moved = [this](i32 window_id, Gfx::IntPoint position, u32 buttons, u32 modifiers, HashMap<String, ByteBuffer> mime_data) {
+    });
+    callbacks.drag_moved = on_server_thread([this](i32 window_id, Gfx::IntPoint position, u32 buttons, u32 modifiers, HashMap<String, ByteBuffer> mime_data) {
         async_drag_moved(window_id, position, 0, buttons, modifiers, {}, move(mime_data));
-    };
-    callbacks.drag_dropped = [this](i32 window_id, Gfx::IntPoint position, u32 buttons, u32 modifiers, HashMap<String, ByteBuffer> mime_data) {
+    });
+    callbacks.drag_dropped = on_server_thread([this](i32 window_id, Gfx::IntPoint position, u32 buttons, u32 modifiers, HashMap<String, ByteBuffer> mime_data) {
         async_drag_dropped(window_id, position, 0, buttons, modifiers, {}, move(mime_data));
-    };
+    });
 
     WaylandClient::the().set_input_callbacks(move(callbacks));
 }
@@ -254,18 +255,19 @@ void WindowServerConnection::install_menu_callbacks()
     m_menu.visibility_changed = [this](i32 menu_id, bool visible) { async_menu_visibility_did_change(menu_id, visible); };
     m_menu.menubar_changed = [this](i32 window_id) { update_window_menubar(window_id); };
     m_menu.redraw_popup = [this](i32 menu_id) { present_menu_popup(menu_id); };
-    WaylandClient::the().serenity_shell().set_menubar_visibility_callback([this](i32 window_id, bool) { update_window_menubar(window_id); });
-    WaylandClient::the().serenity_shell().set_dismiss_menus_callback([this] { m_menu.close_open_menus(); });
+    WaylandClient::the().serenity_shell().set_menubar_visibility_callback(on_server_thread([this](i32 window_id, bool) { update_window_menubar(window_id); }));
+    WaylandClient::the().serenity_shell().set_dismiss_menus_callback(on_server_thread([this] { m_menu.close_open_menus(); }));
     // The compositor places windows itself; adopt its position so the client's
     // screen-relative coordinates (menus, popups, tooltips) match reality.
-    WaylandClient::the().serenity_shell().set_toplevel_position_callback([this](i32 window_id, Gfx::IntPoint position) {
+    WaylandClient::the().serenity_shell().set_toplevel_position_callback(on_server_thread([this](i32 window_id, Gfx::IntPoint position) {
         if (auto* w = window(window_id))
             w->rect.set_location(position);
-    });
+    }));
 }
 
 void WindowServerConnection::present_menu_popup(i32 menu_id)
 {
+    verify_on_server_thread();
     auto size = m_menu.popup_size(menu_id);
     if (size.is_empty())
         return;
@@ -279,6 +281,7 @@ void WindowServerConnection::present_menu_popup(i32 menu_id)
 
 void WindowServerConnection::update_window_menubar(i32 window_id)
 {
+    verify_on_server_thread();
     // The compositor's window menu can hide the menu bar; the client still
     // decides whether it has one at all.
     bool present = m_menu.window_has_menubar(window_id);

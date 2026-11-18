@@ -52,11 +52,22 @@ static int mimes_has(char const *m)
     return 0;
 }
 
+// A drag MIME type whose data is never written: the peer keeps the pipe open,
+// as a stuck source would, so the receiver's timeout is exercised.
+static char const stall_mime[] = "application/x-libwm-stall";
+static int stall_offered;
+
 static void source_send(void *data, struct wl_data_source *src, const char *mime, int32_t fd)
 {
     (void)data; (void)src;
     unsigned char *bytes = NULL;
     size_t size = 0;
+
+    if (!strcmp(mime, stall_mime)) {
+        printf("PEER: stalling '%s' (fd kept open)\n", mime);
+        fflush(stdout);
+        return;
+    }
 
     for (int i = 0; i < set_count; ++i) {
         if (!strcmp(set_mimes[i], mime)) {
@@ -99,7 +110,10 @@ static void source_dnd_finished(void *d, struct wl_data_source *s)
     (void)d; (void)s;
     printf("PEER: dnd_finished\n");
     fflush(stdout);
-    exit(0);
+    // A stuck source does not go away when the drag ends: stay alive (holding the
+    // stalled pipe) until the test's timeout ends us.
+    if (!stall_offered)
+        exit(0);
 }
 static void source_action(void *d, struct wl_data_source *s, uint32_t a) { (void)d; (void)s; (void)a; }
 
@@ -219,12 +233,22 @@ int main(int argc, char **argv)
         if (set_count == 0)
             return 2;
     } else if (!strcmp(argv[1], "drag")) {
+        // drag TEXT [EXTRA_MIME...]: offer TEXT as text/plain, and the same bytes
+        // under each extra type (application/x-libwm-stall is never written).
         if (argc < 3) return 2;
         mode = 4;
         set_mimes[0] = "text/plain";
         set_datas[0] = (unsigned char *)argv[2];
         set_sizes[0] = strlen(argv[2]);
         set_count = 1;
+        for (int i = 3; i < argc && set_count < MAX_FORMATS; ++i) {
+            if (!strcmp(argv[i], stall_mime))
+                stall_offered = 1;
+            set_mimes[set_count] = argv[i];
+            set_datas[set_count] = (unsigned char *)argv[2];
+            set_sizes[set_count] = strlen(argv[2]);
+            set_count++;
+        }
     } else if (!strcmp(argv[1], "get")) {
         mode = 0;
         want_mime = argc >= 3 ? argv[2] : NULL;

@@ -8,6 +8,7 @@
 #include "WaylandClient.h"
 #include "WaylandSeat.h"
 #include <AK/ByteBuffer.h>
+#include <AK/Time.h>
 #include <errno.h>
 #include <poll.h>
 #include <string.h>
@@ -17,6 +18,13 @@
 namespace LibWM {
 
 using MutexLocker = WaylandClient::MutexLocker;
+
+// How long to wait for a peer writing an offer. The clipboard is read off the
+// event loop, so it only gives up on a peer that goes silent; a drag is read
+// during event dispatch, so it also has a total budget.
+static constexpr int clipboard_idle_timeout_ms = 2000;
+static constexpr int drag_idle_timeout_ms = 1000;
+static constexpr int drag_total_deadline_ms = 1000;
 
 // --- wl_data_device / wl_data_offer / wl_data_source -------------------------
 
@@ -245,7 +253,7 @@ void WaylandDataDevice::on_source_send(wl_data_source*, char const* mime_type, i
     // The source may be serving the clipboard selection or a drag payload.
     if (auto it = m_state.clipboard_offers.find(ByteString(mime_type)); it != m_state.clipboard_offers.end())
         write_data(it->value);
-    else if (auto it = m_state.drag_payload.find(String::from_utf8(StringView { mime_type, strlen(mime_type) }).release_value_but_fixme_should_propagate_errors()); it != m_state.drag_payload.end())
+    else if (auto it = m_state.drag_payload.find(String::from_utf8_with_replacement_character(StringView { mime_type, strlen(mime_type) })); it != m_state.drag_payload.end())
         write_data(it->value);
     close(fd);
 }
@@ -257,6 +265,46 @@ void WaylandDataDevice::on_source_cancelled(wl_data_source* source)
         m_state.selection_source = nullptr;
     if (source)
         wl_data_source_destroy(source);
+}
+
+// Read `fd` until the writer closes it. Fails with ETIMEDOUT if the writer is
+// silent for `idle_timeout_ms`, or (when given) the whole read exceeds
+// `total_deadline_ms`: a truncated offer is an error, not partial data.
+static ErrorOr<ByteBuffer> read_pipe_until_closed(int fd, int idle_timeout_ms, Optional<int> total_deadline_ms = {})
+{
+    ByteBuffer data;
+    Optional<MonotonicTime> deadline;
+    if (total_deadline_ms.has_value())
+        deadline = MonotonicTime::now() + Duration::from_milliseconds(*total_deadline_ms);
+    u8 chunk[4096];
+    for (;;) {
+        i64 remaining = idle_timeout_ms;
+        if (deadline.has_value()) {
+            remaining = min(remaining, (*deadline - MonotonicTime::now()).to_milliseconds());
+            if (remaining <= 0)
+                return Error::from_errno(ETIMEDOUT);
+        }
+        struct pollfd pfd {
+            .fd = fd,
+            .events = POLLIN,
+            .revents = 0,
+        };
+        int const rc = poll(&pfd, 1, static_cast<int>(remaining));
+        if (rc < 0 && errno == EINTR)
+            continue;
+        if (rc < 0)
+            return Error::from_errno(errno);
+        if (rc == 0)
+            return Error::from_errno(ETIMEDOUT);
+        ssize_t const n = read(fd, chunk, sizeof(chunk));
+        if (n < 0 && errno == EINTR)
+            continue;
+        if (n < 0)
+            return Error::from_errno(errno);
+        if (n == 0)
+            return data;
+        TRY(data.try_append(chunk, static_cast<size_t>(n)));
+    }
 }
 
 // --- explicit drag-and-drop --------------------------------------------------
@@ -391,17 +439,16 @@ ByteBuffer WaylandDataDevice::receive_offer_data(wl_data_offer* offer, ByteStrin
         wl_display_flush(m_client.m_display);
     }
 
-    ByteBuffer buffer;
-    u8 chunk[4096];
-    for (;;) {
-        ssize_t n = read(fds[0], chunk, sizeof(chunk));
-        if (n <= 0)
-            break;
-        if (auto appended = buffer.try_append(chunk, static_cast<size_t>(n)); appended.is_error())
-            break;
-    }
+    // Drag offers are read while Wayland events are being dispatched (with the
+    // client lock held), so a source that never closes its end must not stall
+    // this application: give up after the deadline and use what arrived.
+    auto data = read_pipe_until_closed(fds[0], drag_idle_timeout_ms, drag_total_deadline_ms);
     close(fds[0]);
-    return buffer;
+    if (data.is_error()) {
+        dbgln("LibWM/Wayland: drag data for '{}' not received: {}", mime, data.error());
+        return {};
+    }
+    return data.release_value();
 }
 
 void WaylandDataDevice::on_drag_enter(u32 serial, wl_data_offer* offer, wl_surface* surface, Gfx::IntPoint position)
@@ -424,7 +471,7 @@ void WaylandDataDevice::on_drag_enter(u32 serial, wl_data_offer* offer, wl_surfa
             for (auto const& mime : mimes) {
                 auto data = receive_offer_data(offer, mime);
                 if (!data.is_empty())
-                    m_state.drag_received.set(String::from_byte_string(mime).release_value_but_fixme_should_propagate_errors(), move(data));
+                    m_state.drag_received.set(String::from_utf8_with_replacement_character(mime.view()), move(data));
             }
         }
     }
@@ -563,34 +610,18 @@ ErrorOr<ByteBuffer> WaylandDataDevice::read_clipboard_for_mime(ByteString const&
         close(fds[1]);
     }
 
-    // Read from the pipe outside `m_mutex` so the main thread can keep
+    // Read from the pipe outside the client lock so the main thread can keep
     // dispatching Wayland events while the selection owner writes.
-    ByteBuffer data;
-    char buffer[4096];
-    for (;;) {
-        struct pollfd pfd {
-            .fd = fds[0],
-            .events = POLLIN,
-            .revents = 0,
-        };
-        int rc = poll(&pfd, 1, 2000);
-        if (rc <= 0)
-            break;
-        ssize_t n = read(fds[0], buffer, sizeof(buffer));
-        if (n <= 0)
-            break;
-        if (auto appended = data.try_append(buffer, static_cast<size_t>(n)); appended.is_error()) {
-            close(fds[0]);
-            return appended.release_error();
-        }
-    }
+    auto data = read_pipe_until_closed(fds[0], clipboard_idle_timeout_ms);
     close(fds[0]);
+    if (data.is_error())
+        return data.release_error();
 
     auto mime = wanted_mime;
     if (mime.starts_with("text/plain"sv))
         mime = ByteString("text/plain");
     out_mime_type = move(mime);
-    return data;
+    return data.release_value();
 }
 
 ErrorOr<ByteBuffer> WaylandDataDevice::read_clipboard(ByteString& out_mime_type)

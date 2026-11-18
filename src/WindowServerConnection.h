@@ -39,6 +39,26 @@ class WindowServerConnection final
     : public IPC::Connection<WindowServerEndpoint, WindowClientEndpoint>
     , public WindowServerDefaultStub
     , public WindowClientEndpoint::Proxy<WindowServerEndpoint> {
+    // Wayland events are dispatched on the main thread, but this connection, its
+    // windows and its menus belong to the LibWM server thread, and LibIPC has no
+    // send lock. Every callback handed to WaylandClient goes through here, so IPC
+    // sends and state changes only ever happen on the server thread. Arguments
+    // are copied into the posted task; the task keeps the connection alive.
+    template<typename Callback>
+    auto on_server_thread(Callback callback)
+    {
+        return [this, callback = move(callback)](auto... args) {
+            if (MainThreadInvoker::on_server_thread()) {
+                callback(move(args)...);
+                return;
+            }
+            MainThreadInvoker::post_to_server([protect = NonnullRefPtr<WindowServerConnection>(*this), callback, ... args = move(args)]() mutable {
+                callback(move(args)...);
+            });
+        };
+    }
+    static void verify_on_server_thread() { VERIFY(MainThreadInvoker::on_server_thread()); }
+
 public:
     static NonnullRefPtr<WindowServerConnection> create(NonnullOwnPtr<Core::LocalSocket> socket)
     {
@@ -79,7 +99,7 @@ private:
 
         // R5: display links. Owned like the host-settings hook: it captures
         // `this`, so the first connection owns it and the destructor clears it.
-        WaylandClient::the().set_display_link_callback(this, [this] { async_display_link_notification(); });
+        WaylandClient::the().set_display_link_callback(this, on_server_thread([this] { async_display_link_notification(); }));
     }
 
     ~WindowServerConnection()

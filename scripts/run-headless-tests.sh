@@ -101,7 +101,11 @@ APP_PID=$!
 
 for _ in $(seq 1 50); do grep -q "presented window" "$RUNTIME/dnd-app.log" 2>/dev/null && break; sleep 0.1; done
 
-WAYLAND_DISPLAY=libwm-dnd timeout 5 "$PEER_BIN" drag "peer-dropped-payload" > "$RUNTIME/dnd-peer.log" 2>&1 &
+# Besides text/plain the peer offers a MIME type that is not valid UTF-8 (which
+# used to abort the receiving app) and one it never writes (a stuck source,
+# which must time out instead of freezing the app); the drop must still work.
+WAYLAND_DISPLAY=libwm-dnd timeout 5 "$PEER_BIN" drag "peer-dropped-payload" \
+    $'application/x-libwm-\xff\xfe-not-utf8' application/x-libwm-stall > "$RUNTIME/dnd-peer.log" 2>&1 &
 PEER_PID=$!
 
 wait "$APP_PID" 2>/dev/null || true
@@ -143,6 +147,7 @@ check "connection-lost callback fired on close"  "grep -q 'TestWindow: connectio
 check "incoming Wayland drag entered widget"     "grep -q 'TestWindow: drag move at' '$RUNTIME/dnd-app.log'"
 check "incoming Wayland drop transferred text"   "grep -q \"TestWindow: drop at 145,115 text='peer-dropped-payload'\" '$RUNTIME/dnd-app.log'"
 check "external drag source got dnd_finished"    "grep -q 'PEER: dnd_finished' '$RUNTIME/dnd-peer.log'"
+check "stuck drag source timed out, not hung"     "grep -q 'PEER: stalling' '$RUNTIME/dnd-peer.log' && grep -q \"drag data for 'application/x-libwm-stall' not received\" '$RUNTIME/dnd-app.log'"
 check "frame captured to PNG"                    "[[ -s '$FRAME_OUT' ]]"
 
 if grep -q 'captured' "$RUNTIME/hc.log"; then

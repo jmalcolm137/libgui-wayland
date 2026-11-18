@@ -37,10 +37,12 @@ public:
     // Called once from the server thread, at its start.
     static void install_server(Core::EventLoop& server_loop)
     {
+        s_server_thread = pthread_self();
         s_server_loop = &server_loop;
     }
 
     static bool on_main_thread() { return pthread_equal(pthread_self(), s_main_thread); }
+    static bool on_server_thread() { return s_server_loop && pthread_equal(pthread_self(), s_server_thread); }
 
     static void post_to_main(Function<void()> fn)
     {
@@ -56,6 +58,7 @@ public:
 
 private:
     static inline pthread_t s_main_thread {};
+    static inline pthread_t s_server_thread {};
     static inline Core::EventLoop* s_main_loop { nullptr };
     static inline Core::EventLoop* s_server_loop { nullptr };
 };
