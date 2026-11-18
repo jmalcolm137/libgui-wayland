@@ -595,6 +595,17 @@ void WindowServerConnection::set_minimized(i32 window_id, bool minimized)
         WaylandClient::the().set_minimized(window_id);
 }
 
+Messages::WindowServer::IsMinimizedResponse WindowServerConnection::is_minimized(i32 window_id)
+{
+    return WaylandClient::the().is_window_minimized(window_id);
+}
+
+void WindowServerConnection::set_window_parent_from_client(i32, i32 parent_id, i32 child_id)
+{
+    // Every window of this process is ours, whatever client id the caller names.
+    WaylandClient::the().set_window_parent(child_id, parent_id);
+}
+
 void WindowServerConnection::set_always_on_top(i32 window_id, bool always_on_top)
 {
     WaylandClient::the().set_always_on_top(window_id, always_on_top);
@@ -640,6 +651,19 @@ Messages::WindowServer::GetScreenBitmapAroundCursorResponse WindowServerConnecti
 Messages::WindowServer::GetScreenBitmapAroundLocationResponse WindowServerConnection::get_screen_bitmap_around_location(Gfx::IntSize size, Gfx::IntPoint location)
 {
     return capture_around(size, location);
+}
+
+Messages::WindowServer::GetScreenBitmapResponse WindowServerConnection::get_screen_bitmap(Optional<Gfx::IntRect> const& rect, Optional<u32> const&)
+{
+    // A screenshot (the `shot` utility). Only SerenityDE can capture the screen;
+    // elsewhere the bitmap is empty, which callers report as a failed capture.
+    // Unlike the Magnifier's capture this one waits for the compositor's reply.
+    auto& wayland = WaylandClient::the();
+    Gfx::IntRect const region = rect.value_or(Gfx::IntRect { {}, wayland.outputs().screen_size() });
+    if (auto bitmap = wayland.serenity_shell().capture_now(region, 2000))
+        return bitmap->to_shareable_bitmap();
+    trace("LibWM: get_screen_bitmap: no capture available");
+    return Gfx::ShareableBitmap {};
 }
 
 Messages::WindowServer::StartDragResponse WindowServerConnection::start_drag(ByteString const& text, HashMap<String, ByteBuffer> const& mime_data, Gfx::ShareableBitmap const& drag_bitmap)

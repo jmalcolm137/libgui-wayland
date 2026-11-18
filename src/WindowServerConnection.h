@@ -226,6 +226,11 @@ private:
     Messages::WindowServer::ApplyWorkspaceSettingsResponse apply_workspace_settings(u32 rows, u32 columns, bool save) override;
     Messages::WindowServer::GetWorkspaceSettingsResponse get_workspace_settings() override;
     Messages::WindowServer::GetSystemThemeOverrideResponse get_system_theme_override() override;
+    Messages::WindowServer::SetSystemThemeOverrideResponse set_system_theme_override(Core::AnonymousBuffer const& buffer) override;
+    void clear_system_theme_override() override;
+    Messages::WindowServer::IsMinimizedResponse is_minimized(i32 window_id) override;
+    Messages::WindowServer::GetScreenBitmapResponse get_screen_bitmap(Optional<Gfx::IntRect> const& rect, Optional<u32> const& screen_index) override;
+    void set_window_parent_from_client(i32 client_id, i32 parent_id, i32 child_id) override;
 
     // Mouse/pointer settings (Mouse Settings). Backed by input.ini in the
     // shared state directory, which the compositor watches and applies to the
@@ -269,6 +274,10 @@ private:
     void watch_theme();
     void apply_theme_from_broker();
     ByteString m_theme_name { "Default" };
+    // ThemeEditor's live preview. It restyles this application only: other
+    // applications are separate processes with their own LibWM.
+    Optional<Core::AnonymousBuffer> m_theme_override;
+    Optional<Core::AnonymousBuffer> m_theme_before_override;
     RefPtr<Core::FileWatcher> m_theme_watcher;
 
     // System fonts: a session broker ($XDG_RUNTIME_DIR/sde-fonts), like the

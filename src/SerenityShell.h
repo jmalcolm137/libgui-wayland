@@ -67,6 +67,9 @@ public:
     // a capture never blocks the caller.
     RefPtr<Gfx::Bitmap> captured_bitmap() const;
     void request_capture(Gfx::IntRect const&);
+    // Capture `region` and wait for it (up to `timeout_ms`), dispatching Wayland
+    // on the calling thread. Null without the protocol or on timeout.
+    RefPtr<Gfx::Bitmap> capture_now(Gfx::IntRect const&, int timeout_ms);
 
     // Runs after the compositor delivers a new set of host settings. Owned like
     // the display-link callback: installed only if unset, cleared only by `owner`.
@@ -105,6 +108,7 @@ private:
     RefPtr<Gfx::Bitmap> m_host_wallpaper;
     RefPtr<Gfx::Bitmap> m_captured;
     u32 m_capture_serial { 0 };
+    u32 m_captured_serial { 0 };
 
     Function<void()> m_host_settings_changed;
     void* m_host_settings_changed_owner { nullptr };

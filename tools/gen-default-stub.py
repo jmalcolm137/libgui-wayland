@@ -6,10 +6,11 @@ implements the subset an application uses; this generator produces a base class
 that satisfies the rest with harmless defaults, so LibWM can override just what
 it cares about.
 
-Non-void methods return `ResponseType(nullptr)` (the generated "invalid" token
-constructor). Those defaults are never used for methods LibWM implements; if an
-unimplemented synchronous method is invoked, `Stub::handle()` turns the invalid
-response into an error instead of hanging.
+Non-void (synchronous) methods return a *valid* response built from
+default-constructed values (false, 0, empty strings, containers and bitmaps).
+They must not return the invalid `ResponseType(nullptr)`: `Stub::handle()`
+turns that into an error, LibIPC then sends no reply at all, and the client's
+`send_sync()` waits forever.
 
 Usage:
     gen-default-stub.py HEADER OUTPUT [--base WindowServer] [--extra-include ...]
@@ -17,6 +18,40 @@ Usage:
 import re
 import sys
 from collections import Counter
+
+
+def split_top_level(params: str) -> list[str]:
+    parts, depth, current = [], 0, ""
+    for ch in params:
+        if ch in "<([{":
+            depth += 1
+        elif ch in ">)]}":
+            depth -= 1
+        if ch == "," and depth == 0:
+            parts.append(current.strip())
+            current = ""
+        else:
+            current += ch
+    if current.strip():
+        parts.append(current.strip())
+    return parts
+
+
+def default_response(text: str, return_type: str) -> str:
+    """`ReturnType(T1 {}, T2 {}, ...)` from the response class's value constructor."""
+    short = return_type.split("::")[-1]
+    start = text.index(f"class {short} final")
+    end = text.index("\n};", start)
+    body = text[start:end]
+    ctor = re.compile(rf"^\s*{short}\(([^)]*)\)\s*(?::|\{{)", re.MULTILINE)
+    for match in ctor.finditer(body):
+        params = match.group(1).strip()
+        if params.startswith("decltype(nullptr)") or params.startswith(short):
+            continue
+        types = [p.rsplit(" ", 1)[0] for p in split_top_level(params)]
+        args = ", ".join(f"{t} {{}}" for t in types)
+        return f"{return_type}({args})"
+    raise ValueError(f"no value constructor for {short}")
 
 
 def main() -> int:
@@ -116,7 +151,7 @@ def main() -> int:
         if ret == "void":
             lines.append(f"    virtual void {name}({args}){qualifier} override {{ }}")
         else:
-            lines.append(f"    virtual {ret} {name}({args}){qualifier} override {{ return {ret}(nullptr); }}")
+            lines.append(f"    virtual {ret} {name}({args}){qualifier} override {{ return {default_response(text, ret)}; }}")
     lines.append("};")
     lines.append("")
     lines.append(f"}} // namespace {namespace}")

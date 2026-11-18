@@ -28,39 +28,45 @@ required; without the others LibWM falls back as noted.
 ## WindowServer requests (client → LibWM)
 
 `WindowServerConnection` (`src/WindowServerConnection.cpp`,
-`src/WindowServerSettings.cpp`) implements 91 of the 109 requests in
+`src/WindowServerSettings.cpp`) implements 96 of the 109 requests in
 `WindowServer.ipc`. The rest fall through to the generated
-`WindowServerDefaultStub`, which ignores asynchronous requests and returns an
-invalid response to synchronous ones (which LibIPC reports as an error).
+`WindowServerDefaultStub` (`tools/gen-default-stub.py`), which ignores
+asynchronous requests and answers synchronous ones with a valid default
+(false, zero, empty). It must never answer with an invalid response: LibIPC
+then sends no reply, and the client's `send_sync()` blocks forever.
 
 | Group | Implemented | Notes |
 |---|---|---|
 | Window lifecycle | `create_window`, `destroy_window`, `set_window_title`, `get_window_title`, `set_window_rect`, `get_window_rect`, `get_window_floating_rect`, `get_window_rect_from_client`, `set_window_minimum_size`, `get_window_minimum_size`, `move_window_to_front`, `set_always_on_top` | the compositor owns placement; layer-surface sizes follow `set_window_rect` |
-| Window state | `set_fullscreen`, `set_maximized`, `is_maximized`, `set_minimized`, `set_frameless`, `set_window_modified`, `is_window_modified`, `set_window_has_alpha_channel`, `set_window_alpha_hit_threshold`, `set_window_icon_bitmap`, `set_window_progress` | progress is accepted and ignored |
+| Window state | `set_fullscreen`, `set_maximized`, `is_maximized`, `set_minimized`, `is_minimized`, `set_window_parent_from_client`, `set_frameless`, `set_window_modified`, `is_window_modified`, `set_window_has_alpha_channel`, `set_window_alpha_hit_threshold`, `set_window_icon_bitmap`, `set_window_progress` | progress is accepted and ignored |
 | Painting | `set_window_backing_store`, `invalidate_rect`, `did_finish_painting`, `enable_display_link`, `disable_display_link` | frame-callback paced |
 | Cursor | `set_window_cursor`, `set_window_custom_cursor`, `get_global_cursor_position` | position reconstructed from the surface under the pointer |
 | Menus | `create_menu`, `destroy_menu`, `set_menu_name`, `set_menu_minimum_width`, `add_menu`, `add_menu_item`, `add_menu_separator`, `update_menu_item`, `remove_menu_item`, `flash_menubar_menu`, `popup_menu`, `dismiss_menu` | rendered by `MenuController` |
 | Drag and drop | `start_drag`, `set_accepts_drag` | `wl_data_device` |
-| Screen and capture | `get_screen_layout`, `set_screen_layout`, `save_screen_layout`, `get_desktop_display_scale`, `set_output_scale`, `get_screen_bitmap_around_cursor`, `get_screen_bitmap_around_location`, `get_color_under_cursor`, `get_applet_rect_on_screen` | layout and capture come from SerenityDE where available |
-| Theme, fonts, effects | `set_system_theme`, `get_system_theme`, `get_system_theme_override`, `is_system_theme_overridden`, `get_preferred_color_scheme`, `set_system_fonts`, `set_system_effects` | |
+| Screen and capture | `get_screen_layout`, `set_screen_layout`, `save_screen_layout`, `get_desktop_display_scale`, `set_output_scale`, `get_screen_bitmap`, `get_screen_bitmap_around_cursor`, `get_screen_bitmap_around_location`, `get_color_under_cursor`, `get_applet_rect_on_screen` | layout and capture come from SerenityDE where available; `get_screen_bitmap` waits up to 2 s for the capture, the Magnifier's calls return the latest one |
+| Theme, fonts, effects | `set_system_theme`, `get_system_theme`, `get_system_theme_override`, `is_system_theme_overridden`, `get_preferred_color_scheme`, `set_system_theme_override`, `clear_system_theme_override`, `set_system_fonts`, `set_system_effects` | the override (ThemeEditor's preview) restyles this application only |
 | Wallpaper and desktop | `set_wallpaper`, `get_wallpaper`, `set_wallpaper_mode`, `set_background_color`, `apply_workspace_settings`, `get_workspace_settings` | stored by SerenityDE |
 | Input settings | `get/set_mouse_acceleration` (+ min/max), `get/set_scroll_step_size` (+ min), `get/set_double_click_speed` (+ min/max), `are/set_mouse_buttons_switched`, `is/set_natural_scroll`, `get/set_keyboard_layout`, `get_keyboard_layout_names`, `get/apply_cursor_theme`, `get/set_cursor_highlight_color`, `get/set_cursor_highlight_radius` | applied by the compositor in a SerenityDE session |
 
 **Not implemented** (default stub): `start_window_resize`,
 `set_window_base_size_and_size_increment`, `set_window_resize_aspect_ratio`,
-`set_window_parent_from_client`, `set_forced_shadow`, `is_minimized`,
-`get_screen_bitmap`, `set_global_cursor_position`, `set_global_mouse_tracking`,
-`set_system_theme_override`, `clear_system_theme_override`,
+`set_forced_shadow`, `set_global_cursor_position`, `set_global_mouse_tracking`,
 `refresh_system_theme`, `show_screen_numbers`, `set_flash_flush`, `pong`,
 `add_window_stealing_for_client`, `remove_window_stealing_for_client`,
 `remove_window_stealing`.
 
-Most of these are global window-manager duties that belong to the compositor
-(DESIGN.md §1.2). Two have direct Wayland equivalents and are worth adding:
+All are asynchronous or have an empty reply, which LibIPC sends itself, so none
+can block the caller. Most are global window-manager duties that belong to the
+compositor (DESIGN.md §1.2); window stealing lets another process's windows
+parent ours, which has no meaning when every application is its own Wayland
+client. Two have direct Wayland equivalents and are worth adding:
 `start_window_resize` (LibGUI's `ResizeCorner`) maps to `xdg_toplevel.resize`,
-and `set_window_base_size_and_size_increment` / `set_window_resize_aspect_ratio`
-could constrain `xdg_toplevel` configures. The synchronous ones
-(`is_minimized`, `get_screen_bitmap`) currently return an error to the caller.
+and `set_window_base_size_and_size_increment` /
+`set_window_resize_aspect_ratio` could constrain `xdg_toplevel` configures.
+
+`is_minimized` is LibWM's own record, since `xdg_toplevel` never reports
+minimization: set by `set_minimized`, cleared when the compositor activates the
+window again.
 
 ## WindowClient events (LibWM → client)
 

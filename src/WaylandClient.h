@@ -186,6 +186,11 @@ public:
     void set_maximized(i32 window_id, bool maximized);
     bool is_window_maximized(i32 window_id) const;
     void set_minimized(i32 window_id);
+    // xdg_toplevel never reports minimization, so this is LibWM's own record:
+    // set by set_minimized(), cleared when the compositor activates the window.
+    bool is_window_minimized(i32 window_id) const;
+    // Make `child` a transient of `parent` (xdg_toplevel.set_parent).
+    void set_window_parent(i32 child_window_id, i32 parent_window_id);
     void set_always_on_top(i32 window_id, bool always_on_top);
     void set_minimum_size(i32 window_id, Gfx::IntSize size);
     void set_frameless(i32 window_id, bool frameless);
@@ -220,6 +225,11 @@ public:
 
     // Wayland event dispatch (registered on the owning event loop).
     void dispatch();
+    // Dispatch Wayland events on the calling thread until `done()` holds or
+    // `timeout_ms` passes. For a synchronous portal request that needs a reply
+    // from the compositor: the application's main thread, which normally
+    // dispatches, is blocked waiting for that very request. Returns done().
+    bool dispatch_until(Function<bool()> done, int timeout_ms);
 
     // --- registry globals and protocol events (called by the C listeners) ---
     struct BufferRecord {
@@ -367,6 +377,7 @@ private:
         bool frameless { false };
         bool fullscreen { false };
         bool maximized { false };
+        bool minimized { false };
         bool activated { true };
         bool use_csd { false };
         bool csd_dirty { true };

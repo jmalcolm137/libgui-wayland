@@ -16,7 +16,9 @@
 #include <LibGUI/Painter.h>
 #include <LibGUI/Widget.h>
 #include <LibGUI/Window.h>
+#include <LibGUI/ConnectionToWindowServer.h>
 #include <LibGfx/Bitmap.h>
+#include <LibGfx/SystemTheme.h>
 #include <LibGfx/Color.h>
 #include <LibGfx/StandardCursor.h>
 #include <LibMain/Main.h>
@@ -175,6 +177,24 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         window->set_title("LibWM Test Window");
     });
     state_timer->start();
+
+    // Synchronous WindowServer requests that once had no handler: LibIPC sent no
+    // reply and the application blocked forever. Each must answer.
+    auto sync_timer = Core::Timer::create_single_shot(2000, [&] {
+        auto& server = GUI::ConnectionToWindowServer::the();
+        auto const id = window->window_id();
+        bool const minimized_before = server.is_minimized(id);
+        auto screen = server.get_screen_bitmap({}, {});
+        bool const override_applied = server.set_system_theme_override(Gfx::current_system_theme_buffer());
+        bool const overridden = server.is_system_theme_overridden();
+        server.async_clear_system_theme_override();
+        bool const cleared = !server.is_system_theme_overridden();
+        window->set_minimized(true);
+        bool const minimized_after = server.is_minimized(id);
+        dbgln("TestWindow: sync requests answered minimized={}->{} screen_bitmap={} theme_override={} overridden={} cleared={}",
+            minimized_before, minimized_after, screen.is_valid(), override_applied, overridden, cleared);
+    });
+    sync_timer->start();
 
     auto quit_timer = Core::Timer::create_single_shot(6000, [&] { app->quit(0); });
     quit_timer->start();

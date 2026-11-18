@@ -280,7 +280,29 @@ void WindowServerConnection::apply_fonts_from_broker()
 
 Messages::WindowServer::IsSystemThemeOverriddenResponse WindowServerConnection::is_system_theme_overridden()
 {
-    return false;
+    return m_theme_override.has_value();
+}
+
+Messages::WindowServer::SetSystemThemeOverrideResponse WindowServerConnection::set_system_theme_override(Core::AnonymousBuffer const& buffer)
+{
+    if (!buffer.is_valid())
+        return false;
+    if (!m_theme_override.has_value())
+        m_theme_before_override = Gfx::current_system_theme_buffer();
+    m_theme_override = buffer;
+    async_update_system_theme(buffer);
+    trace("LibWM: system theme override applied");
+    return true;
+}
+
+void WindowServerConnection::clear_system_theme_override()
+{
+    if (!m_theme_override.has_value())
+        return;
+    m_theme_override.clear();
+    if (m_theme_before_override.has_value())
+        async_update_system_theme(m_theme_before_override.release_value());
+    trace("LibWM: system theme override cleared");
 }
 
 Messages::WindowServer::GetPreferredColorSchemeResponse WindowServerConnection::get_preferred_color_scheme()
@@ -593,9 +615,8 @@ Messages::WindowServer::GetWorkspaceSettingsResponse WindowServerConnection::get
 
 Messages::WindowServer::GetSystemThemeOverrideResponse WindowServerConnection::get_system_theme_override()
 {
-    // The port has no theme override (set_system_theme_override); report none.
     // Must be a valid response: the theme-change handler calls this synchronously.
-    return Optional<Core::AnonymousBuffer> {};
+    return m_theme_override;
 }
 
 }

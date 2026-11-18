@@ -5,6 +5,7 @@
  */
 
 #include "WaylandClient.h"
+#include <AK/Time.h>
 #include "Environment.h"
 #include "SerenityShell.h"
 #include "WaylandDataDevice.h"
@@ -142,6 +143,39 @@ ErrorOr<void> WaylandClient::ensure_connected()
     trace("LibWM/Wayland: connected; screen {}x{}, output scale {}/120",
         screen.width(), screen.height(), m_outputs->output_scale_v120());
     return {};
+}
+
+bool WaylandClient::dispatch_until(Function<bool()> done, int timeout_ms)
+{
+    auto const deadline = MonotonicTime::now() + Duration::from_milliseconds(timeout_ms);
+    for (;;) {
+        {
+            MutexLocker locker(m_mutex);
+            if (done())
+                return true;
+            if (!m_display)
+                return false;
+            // The standard multi-reader sequence: safe alongside the main
+            // thread's own dispatch, which takes the same mutex.
+            while (wl_display_prepare_read(m_display) != 0)
+                wl_display_dispatch_pending(m_display);
+            wl_display_flush(m_display);
+        }
+        auto const remaining = (deadline - MonotonicTime::now()).to_milliseconds();
+        struct pollfd pfd {
+            wl_display_get_fd(m_display), POLLIN, 0
+        };
+        bool const readable = remaining > 0 && poll(&pfd, 1, static_cast<int>(min<i64>(remaining, 50))) > 0;
+        MutexLocker locker(m_mutex);
+        if (readable && wl_display_read_events(m_display) == 0)
+            wl_display_dispatch_pending(m_display);
+        else if (!readable)
+            wl_display_cancel_read(m_display);
+        if (done())
+            return true;
+        if (MonotonicTime::now() >= deadline)
+            return false;
+    }
 }
 
 void WaylandClient::dispatch()

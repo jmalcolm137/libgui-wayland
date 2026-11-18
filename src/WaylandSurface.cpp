@@ -281,6 +281,9 @@ void WaylandClient::on_toplevel_configure(xdg_toplevel* toplevel, Gfx::IntSize s
         bool const was_fullscreen = w.fullscreen;
         w.fullscreen = fullscreen || maximized;
         w.maximized = maximized;
+        // A minimized window is restored by the compositor activating it.
+        if (activated)
+            w.minimized = false;
 
         if (!resizing)
             w.resizing = false;
@@ -948,8 +951,27 @@ void WaylandClient::set_minimized(i32 window_id)
         if (!window_surface->toplevel)
             return;
         xdg_toplevel_set_minimized(window_surface->toplevel);
+        window_surface->minimized = true;
         wl_display_flush(m_display);
     }
+}
+
+bool WaylandClient::is_window_minimized(i32 window_id) const
+{
+    MutexLocker locker(m_mutex);
+    auto it = m_windows.find(window_id);
+    return it != m_windows.end() && it->value->minimized;
+}
+
+void WaylandClient::set_window_parent(i32 child_window_id, i32 parent_window_id)
+{
+    MutexLocker locker(m_mutex);
+    auto* child = find(child_window_id);
+    if (!child || !child->toplevel)
+        return;
+    auto* parent = find(parent_window_id);
+    xdg_toplevel_set_parent(child->toplevel, parent ? parent->toplevel : nullptr);
+    wl_display_flush(m_display);
 }
 
 void WaylandClient::set_always_on_top(i32 window_id, bool always_on_top)

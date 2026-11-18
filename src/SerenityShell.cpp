@@ -274,11 +274,27 @@ void SerenityShell::request_capture(Gfx::IntRect const& region)
     wl_display_flush(m_client.m_display);
 }
 
-void SerenityShell::on_captured(u32, i32 width, i32 height, i32 pitch, u32 format, i32 fd)
+void SerenityShell::on_captured(u32 serial, i32 width, i32 height, i32 pitch, u32 format, i32 fd)
 {
     MutexLocker locker(m_client.m_mutex);
     if (auto bitmap = bitmap_from_fd(width, height, pitch, format, fd))
         m_captured = move(bitmap);
+    m_captured_serial = max(m_captured_serial, serial);
+}
+
+RefPtr<Gfx::Bitmap> SerenityShell::capture_now(Gfx::IntRect const& region, int timeout_ms)
+{
+    u32 serial = 0;
+    {
+        MutexLocker locker(m_client.m_mutex);
+        if (!m_manager || region.is_empty())
+            return nullptr;
+        serial = m_capture_serial + 1;
+    }
+    request_capture(region);
+    bool const arrived = m_client.dispatch_until([&] { return m_captured_serial >= serial; }, timeout_ms);
+    MutexLocker locker(m_client.m_mutex);
+    return arrived ? m_captured : nullptr;
 }
 
 void SerenityShell::set_dismiss_menus_callback(Function<void()> callback)
