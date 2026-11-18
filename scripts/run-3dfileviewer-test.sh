@@ -24,6 +24,13 @@ FRAME_OUT="${FRAME_OUT:-$PROJECT_ROOT/build/3dfileviewer-window.png}"
 if [[ ! -x "$HC" ]]; then
     "$PROJECT_ROOT/scripts/build-headless-compositor.sh"
 fi
+# 3DFileViewer is part of the SerenityDE application set (its patches add the
+# Lagom target), not of this framework's build. Without it there is nothing to
+# run: exit 77, which CTest reports as "skipped" rather than passed or failed.
+if ! ninja -C "$BUILD_DIR" -t query 3DFileViewer >/dev/null 2>&1; then
+    echo "==> 3DFileViewer is not part of this build (it comes from the SerenityDE app set); skipping"
+    exit 77
+fi
 ninja -C "$BUILD_DIR" 3DFileViewer >/dev/null
 
 RUNTIME="$(mktemp -d "${TMPDIR:-/tmp}/libwm-3d.XXXXXX")"
