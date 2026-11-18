@@ -234,7 +234,7 @@ void WindowServerConnection::apply_theme_from_broker()
         // Say which theme this client settled on and where it heard about it: an
         // empty theme name is what made Display Settings' Themes page show a theme
         // other than the running one, and it was invisible from the outside.
-        dbgln("LibWM: system theme is '{}' (from {})", m_theme_name,
+        trace("LibWM: system theme is '{}' (from {})", m_theme_name,
             from_broker ? "the broker"sv : "the host settings"sv);
         async_update_system_theme(buffer.value());
     }
@@ -266,7 +266,7 @@ void WindowServerConnection::apply_fonts_from_broker()
     auto queries = read_fonts_broker();
     if (queries.default_query.is_empty())
         return;
-    dbgln("LibWM: applying font broker (default '{}')", queries.default_query);
+    trace("LibWM: applying font broker (default '{}')", queries.default_query);
     // The connection runs in-process with the client, so set the queries directly
     // too: widgets created afterwards (e.g. Display Settings' Fonts tab) then see
     // the chosen font, not just those relayouted by the async notification.
@@ -374,7 +374,7 @@ void WindowServerConnection::set_output_scale(i32 scale_v120)
     // The desktop owns the output scale; hand it over (the compositor applies and
     // persists it) rather than writing its config.
     WaylandClient::the().serenity_shell().set_host_setting("output.default_scale"sv, ByteString::formatted("{}", scale));
-    dbgln("LibWM: set output scale {}x", scale);
+    trace("LibWM: set output scale {}x", scale);
 }
 
 // --- mouse/pointer settings (R4.6) -----------------------------------------

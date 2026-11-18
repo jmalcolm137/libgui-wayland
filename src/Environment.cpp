@@ -80,6 +80,12 @@ bool force_csd()
     return is_enabled("LIBWM_FORCE_CSD");
 }
 
+bool trace_enabled()
+{
+    static bool const s_enabled = is_enabled("LIBWM_TRACE");
+    return s_enabled;
+}
+
 }
 
 namespace LibWM::PortalPaths {

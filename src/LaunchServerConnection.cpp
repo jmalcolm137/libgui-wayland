@@ -22,12 +22,12 @@ LaunchServerConnection::LaunchServerConnection(NonnullOwnPtr<Core::LocalSocket> 
 
 void LaunchServerConnection::add_allowed_handler_with_only_specific_urls(ByteString const& handler_name, Vector<URL::URL> const& urls)
 {
-    dbgln("LibWM: LaunchServer allowlist handler '{}' ({} urls)", handler_name, urls.size());
+    trace("LibWM: LaunchServer allowlist handler '{}' ({} urls)", handler_name, urls.size());
 }
 
 void LaunchServerConnection::seal_allowlist()
 {
-    dbgln("LibWM: LaunchServer seal_allowlist");
+    trace("LibWM: LaunchServer seal_allowlist");
 }
 
 Messages::LaunchServer::OpenUrlResponse LaunchServerConnection::open_url(URL::URL const& url, ByteString const& handler_name)
@@ -51,7 +51,7 @@ Messages::LaunchServer::OpenUrlResponse LaunchServerConnection::open_url(URL::UR
                 dbgln("LibWM: LaunchServer: failed to launch executable '{}': {}", file_path, result.error());
                 return false;
             }
-            dbgln("LibWM: LaunchServer: launched executable '{}'", file_path);
+            trace("LibWM: LaunchServer: launched executable '{}'", file_path);
             return true;
         }
     }
@@ -85,7 +85,7 @@ Messages::LaunchServer::OpenUrlResponse LaunchServerConnection::open_url(URL::UR
         dbgln("LibWM: LaunchServer: failed to spawn '{}': {}", path, result.error());
         return false;
     }
-    dbgln("LibWM: LaunchServer: launched '{}' with '{}'", path, argument);
+    trace("LibWM: LaunchServer: launched '{}' with '{}'", path, argument);
     return true;
 }
 

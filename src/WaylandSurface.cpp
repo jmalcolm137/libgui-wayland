@@ -161,7 +161,7 @@ void WaylandClient::on_preferred_scale(wp_fractional_scale_v1* fractional, u32 s
     if (scale_v120 < 60)
         return;
     m_outputs->set_preferred_scale_v120(static_cast<int>(scale_v120));
-    dbgln("LibWM/Wayland: preferred fractional scale {}/120 ({:.2f}x, backing {}x)",
+    trace("LibWM/Wayland: preferred fractional scale {}/120 ({:.2f}x, backing {}x)",
         scale_v120, static_cast<double>(scale_v120) / 120.0, m_outputs->output_scale());
 
     if (Environment::client_scale_override_v120().has_value())
@@ -190,7 +190,7 @@ void WaylandClient::on_preferred_scale(wp_fractional_scale_v1* fractional, u32 s
 
 static void decoration_configure(void* data, zxdg_toplevel_decoration_v1* decoration, uint32_t mode)
 {
-    dbgln("LibWM/Wayland: server-side decoration mode {}", mode);
+    trace("LibWM/Wayland: server-side decoration mode {}", mode);
     static_cast<WaylandClient*>(data)->on_decoration_configure(decoration, mode);
 }
 
@@ -265,7 +265,7 @@ void WaylandClient::on_decoration_configure(zxdg_toplevel_decoration_v1* decorat
 void WaylandClient::on_toplevel_configure(xdg_toplevel* toplevel, Gfx::IntSize size, bool activated, bool fullscreen, bool maximized, bool resizing)
 {
     MutexLocker locker(m_mutex);
-    dbgln("LibWM/Wayland: toplevel configure {}x{} activated={} fullscreen={} maximized={} resizing={}", size.width(), size.height(), activated, fullscreen, maximized, resizing);
+    trace("LibWM/Wayland: toplevel configure {}x{} activated={} fullscreen={} maximized={} resizing={}", size.width(), size.height(), activated, fullscreen, maximized, resizing);
     for (auto const& it : m_windows) {
         auto& w = *it.value;
         if (w.toplevel != toplevel)
@@ -354,7 +354,7 @@ void WaylandClient::on_layer_configure(zwlr_layer_surface_v1* layer_surface, Gfx
         if (w.layer_surface != layer_surface)
             continue;
         SurfaceLocker surface_locker(w.mutex);
-        dbgln("LibWM/Wayland: layer configure {}x{}", size.width(), size.height());
+        trace("LibWM/Wayland: layer configure {}x{}", size.width(), size.height());
         // Always deliver the first configure: the client's Window may still be at
         // its requested size (the Desktop is created zero-sized and sized by the
         // compositor), so skipping an equal-sized configure would leave it
@@ -662,7 +662,7 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::In
 
         m_windows.set(window_id, move(window_surface));
         wl_display_flush(m_display);
-        dbgln("LibWM/Wayland: popup window {} ({}x{}) at {},{}", window_id, size.width(), size.height(), position.x(), position.y());
+        trace("LibWM/Wayland: popup window {} ({}x{}) at {},{}", window_id, size.width(), size.height(), position.x(), position.y());
         return;
     }
 
@@ -696,7 +696,7 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::In
     bool const force_csd = Environment::force_csd();
     window_surface->use_csd = !frameless && (!m_decoration_manager || force_csd);
     if (window_surface->use_csd)
-        dbgln("LibWM/Wayland: using client-side decorations for window {}", window_id);
+        trace("LibWM/Wayland: using client-side decorations for window {}", window_id);
     if (m_viewporter)
         window_surface->viewport = wp_viewporter_get_viewport(m_viewporter, surface);
     if (m_fractional_scale_manager) {
@@ -902,7 +902,7 @@ void WaylandClient::set_minimum_size(i32 window_id, Gfx::IntSize size)
             int const min_h = size.height() > 0 ? size.height() + window_surface->total_top_inset() : 0;
             xdg_toplevel_set_min_size(window_surface->toplevel, min_w, min_h);
             wl_display_flush(m_display);
-            dbgln("LibWM/Wayland: set_min_size window {} -> {}x{}", window_id, min_w, min_h);
+            trace("LibWM/Wayland: set_min_size window {} -> {}x{}", window_id, min_w, min_h);
         }
     }
 }
@@ -1132,7 +1132,7 @@ void WaylandClient::update_opaque_region(WindowSurface& window_surface, Gfx::Int
         wl_region_add(opaque, 0, 0, wanted.width(), wanted.height());
         wl_surface_set_opaque_region(window_surface.surface, opaque);
         wl_region_destroy(opaque);
-        dbgln("LibWM/Wayland: set opaque region on window {} ({}x{})", window_surface.window_id, wanted.width(), wanted.height());
+        trace("LibWM/Wayland: set opaque region on window {} ({}x{})", window_surface.window_id, wanted.width(), wanted.height());
     }
 }
 
@@ -1180,7 +1180,7 @@ void WaylandClient::update_input_region(WindowSurface& window_surface, u8 const*
         wl_surface_set_input_region(window_surface.surface, input_region);
         wl_region_destroy(input_region);
         window_surface.input_region_active = true;
-        dbgln("LibWM/Wayland: applied alpha input region on window {} (threshold={:.2f}, spans={})",
+        trace("LibWM/Wayland: applied alpha input region on window {} (threshold={:.2f}, spans={})",
             window_surface.window_id, window_surface.alpha_hit_threshold, span_count);
     } else if (window_surface.input_region_active) {
         wl_surface_set_input_region(window_surface.surface, nullptr);
@@ -1253,7 +1253,7 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
         bind_bitmap(window_surface.surface, window_surface.fractional_buffer, *window_surface.fractional_bitmap, window_surface.buffers, &frac_damage);
         wl_surface_commit(window_surface.surface);
         wl_display_flush(m_display);
-        dbgln("LibWM/Wayland: presented window {} ({}x{} @{:.2f}x -> {}x{}px incl. {}px csd + {}px inset)",
+        trace("LibWM/Wayland: presented window {} ({}x{} @{:.2f}x -> {}x{}px incl. {}px csd + {}px inset)",
             window_surface.window_id, visible_size.width(), visible_size.height(),
             static_cast<double>(scale_v120) / 120.0, frac_w, frac_h, csd_h, menubar_h);
         return true;
@@ -1342,7 +1342,7 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
         bind_bitmap(window_surface.surface, window_surface.composed_buffer, destination, window_surface.buffers, &surface_damage);
         wl_surface_commit(window_surface.surface);
         wl_display_flush(m_display);
-        dbgln("LibWM/Wayland: presented window {} ({}x{} @{}x incl. {}px csd + {}px inset)", window_surface.window_id, visible_size.width(), visible_size.height(), scale, csd_h, menubar_h);
+        trace("LibWM/Wayland: presented window {} ({}x{} @{}x incl. {}px csd + {}px inset)", window_surface.window_id, visible_size.width(), visible_size.height(), scale, csd_h, menubar_h);
         return;
     }
 
@@ -1409,7 +1409,7 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
     wl_buffer_add_listener(buffer, &s_buffer_listener, record.ptr());
     window_surface.buffers.append(move(record));
 
-    dbgln("LibWM/Wayland: presented window {} ({}x{})", window_surface.window_id, visible_size.width(), visible_size.height());
+    trace("LibWM/Wayland: presented window {} ({}x{})", window_surface.window_id, visible_size.width(), visible_size.height());
 }
 
 void WaylandClient::on_frame_done(wl_callback* callback)

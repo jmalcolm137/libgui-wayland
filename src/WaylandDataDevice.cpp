@@ -5,6 +5,7 @@
  */
 
 #include "WaylandDataDevice.h"
+#include "Environment.h"
 #include "WaylandClient.h"
 #include "WaylandSeat.h"
 #include <AK/ByteBuffer.h>
@@ -170,7 +171,7 @@ void WaylandDataDevice::maybe_create_data_device()
     if (m_state.device || !m_client.m_seat->wayland_seat() || !m_state.manager)
         return;
     m_state.device = wl_data_device_manager_get_data_device(m_state.manager, m_client.m_seat->wayland_seat());
-    dbgln("LibWM/Wayland: data device created: {}", m_state.device != nullptr);
+    trace("LibWM/Wayland: data device created: {}", m_state.device != nullptr);
     if (m_state.device)
         wl_data_device_add_listener(m_state.device, &s_data_device_listener, this);
 }
@@ -195,7 +196,7 @@ ByteString WaylandDataDevice::preferred_mime_for(wl_data_offer* offer) const
 void WaylandDataDevice::on_data_offer(wl_data_offer* offer)
 {
     MutexLocker locker(m_client.m_mutex);
-    dbgln("LibWM/Wayland: data offer {}", static_cast<void*>(offer));
+    trace("LibWM/Wayland: data offer {}", static_cast<void*>(offer));
     m_state.pending_offers.append(offer);
     m_state.offer_mime_types.set(reinterpret_cast<u64>(offer), {});
     wl_data_offer_add_listener(offer, &s_data_offer_listener, this);
@@ -233,7 +234,7 @@ void WaylandDataDevice::on_selection(wl_data_offer* offer)
         if (mime.starts_with("text/plain"sv))
             mime = ByteString("text/plain");
     }
-    dbgln("LibWM/Wayland: selection changed (mime='{}')", mime);
+    trace("LibWM/Wayland: selection changed (mime='{}')", mime);
     if (m_state.on_clipboard_changed)
         m_state.on_clipboard_changed(mime);
 }
@@ -374,7 +375,7 @@ bool WaylandDataDevice::start_drag(ByteString const&, HashMap<String, ByteBuffer
 
     wl_data_device_start_drag(m_state.device, m_state.drag_source, origin->surface, m_state.drag_icon, m_client.m_seat->last_serial());
     wl_display_flush(m_client.m_display);
-    dbgln("LibWM/Wayland: started drag ({} representation(s), serial {})", mime_data.size(), m_client.m_seat->last_serial());
+    trace("LibWM/Wayland: started drag ({} representation(s), serial {})", mime_data.size(), m_client.m_seat->last_serial());
     return true;
 }
 
@@ -679,7 +680,7 @@ void WaylandDataDevice::write_clipboard(HashMap<ByteString, ByteBuffer> offers)
         wl_data_source_offer(m_state.selection_source, it.key.characters());
     wl_data_device_set_selection(m_state.device, m_state.selection_source, m_client.m_seat->last_serial());
     wl_display_flush(m_client.m_display);
-    dbgln("LibWM/Wayland: set clipboard ({} representation(s), serial {})", m_state.clipboard_offers.size(), m_client.m_seat->last_serial());
+    trace("LibWM/Wayland: set clipboard ({} representation(s), serial {})", m_state.clipboard_offers.size(), m_client.m_seat->last_serial());
 }
 
 }

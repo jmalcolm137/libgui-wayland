@@ -8,6 +8,9 @@
 #   - wl_data_device incoming external drag-and-drop (Wayland peer -> drop_event)
 set -euo pipefail
 
+# The checks below assert on LibWM's trace output (see Environment.h).
+export LIBWM_TRACE="${LIBWM_TRACE:-1}"
+
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERENITY_SRC="${SERENITY_SRC:-$PROJECT_ROOT/serenity}"
 BUILD_DIR="${BUILD_DIR:-$PROJECT_ROOT/build/lagom}"

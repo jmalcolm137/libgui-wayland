@@ -5,6 +5,7 @@
  */
 
 #include "SerenityShell.h"
+#include "Environment.h"
 #include "WaylandClient.h"
 #include <string.h>
 #include <sys/mman.h>
@@ -156,7 +157,7 @@ void SerenityShell::on_host_config(u32 workspace_rows, u32 workspace_columns, do
     m_host_config.scroll_step_min = scroll_step_min;
     m_host_config.double_click_min = double_click_min;
     m_host_config.double_click_max = double_click_max;
-    dbgln("LibWM: host config: workspaces {}x{}, accel {}-{}, scroll min {}, double-click {}-{}",
+    trace("LibWM: host config: workspaces {}x{}, accel {}-{}, scroll min {}, double-click {}-{}",
         m_host_config.workspace_rows, m_host_config.workspace_columns, m_host_config.accel_min, m_host_config.accel_max,
         m_host_config.scroll_step_min, m_host_config.double_click_min, m_host_config.double_click_max);
 }
@@ -173,7 +174,7 @@ void SerenityShell::on_host_settings(StringView blob)
             continue;
         m_host_settings.set(line.substring_view(0, *separator).to_byte_string(), line.substring_view(*separator + 1).to_byte_string());
     }
-    dbgln("LibWM: host settings: {} entries", m_host_settings.size());
+    trace("LibWM: host settings: {} entries", m_host_settings.size());
     if (m_host_settings_changed)
         m_host_settings_changed();
 }
@@ -230,7 +231,7 @@ void SerenityShell::on_host_wallpaper(i32 width, i32 height, i32 pitch, u32 form
 {
     MutexLocker locker(m_client.m_mutex);
     m_host_wallpaper = bitmap_from_fd(width, height, pitch, format, fd);
-    dbgln("LibWM: host wallpaper {}x{}", width, height);
+    trace("LibWM: host wallpaper {}x{}", width, height);
 }
 
 void SerenityShell::set_host_wallpaper(Gfx::Bitmap* bitmap)

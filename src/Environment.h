@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/ByteString.h>
+#include <AK/Format.h>
 #include <AK/Optional.h>
 #include <AK/StringView.h>
 
@@ -48,6 +49,24 @@ Optional<int> client_scale_override_v120();
 // $LIBWM_FORCE_CSD: draw client-side titlebars even when the compositor offers
 // server-side decorations.
 bool force_csd();
+
+// $LIBWM_TRACE: log protocol traffic and lifecycle events (every presented
+// frame, pointer event, configure, portal connection...). Read once.
+bool trace_enabled();
+
+}
+
+namespace LibWM {
+
+// Informational logging, off unless $LIBWM_TRACE is set. Failures and warnings
+// use dbgln() directly so they are always reported. The integration tests turn
+// tracing on and assert on these lines.
+template<typename... Parameters>
+void trace(CheckedFormatString<Parameters...>&& format, Parameters const&... parameters)
+{
+    if (Environment::trace_enabled())
+        dbgln(move(format), parameters...);
+}
 
 }
 

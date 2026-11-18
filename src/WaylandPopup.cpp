@@ -5,6 +5,7 @@
  */
 
 #include "WaylandClient.h"
+#include "Environment.h"
 #include "SerenityShell.h"
 #include "WaylandOutputs.h"
 #include "WaylandSeat.h"
@@ -52,7 +53,7 @@ static xdg_surface_listener const s_popup_xdg_surface_listener = {
 
 static void popup_configure(void*, xdg_popup*, int32_t x, int32_t y, int32_t width, int32_t height)
 {
-    dbgln("LibWM/Wayland: popup configure at {},{} size {}x{}", x, y, width, height);
+    trace("LibWM/Wayland: popup configure at {},{} size {}x{}", x, y, width, height);
 }
 
 static void popup_done(void* data, xdg_popup* popup)
@@ -307,7 +308,7 @@ void WaylandClient::create_popup(i32 popup_id, i32 parent_window_id, i32 parent_
         p->layer_position = layer_position;
         m_popups.set(popup_id, move(p));
         wl_display_flush(m_display);
-        dbgln("LibWM/Wayland: menu layer {} created ({}x{}) at {},{} submenu={}", popup_id, size.width(), size.height(), layer_position.x(), layer_position.y(), is_submenu);
+        trace("LibWM/Wayland: menu layer {} created ({}x{}) at {},{} submenu={}", popup_id, size.width(), size.height(), layer_position.x(), layer_position.y(), is_submenu);
         return;
     }
 
@@ -340,7 +341,7 @@ void WaylandClient::create_popup(i32 popup_id, i32 parent_window_id, i32 parent_
     p->popup = popup;
     m_popups.set(popup_id, move(p));
     wl_display_flush(m_display);
-    dbgln("LibWM/Wayland: popup {} created ({}x{}) at {},{} submenu={}", popup_id, size.width(), size.height(), anchor.x(), anchor.y(), is_submenu);
+    trace("LibWM/Wayland: popup {} created ({}x{}) at {},{} submenu={}", popup_id, size.width(), size.height(), anchor.x(), anchor.y(), is_submenu);
 }
 
 void WaylandClient::present_popup(i32 popup_id, Gfx::Bitmap const& source)

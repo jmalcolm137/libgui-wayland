@@ -125,7 +125,7 @@ void WindowServerConnection::request_window_resize(i32 window_id, Gfx::IntSize s
 
     w->resize_in_flight = true;
     w->rect.set_size(size);
-    dbgln("LibWM: window_resized {} -> {}x{}", window_id, size.width(), size.height());
+    trace("LibWM: window_resized {} -> {}x{}", window_id, size.width(), size.height());
     async_window_resized(window_id, w->rect);
     Vector<Gfx::IntRect> rects;
     rects.append({ 0, 0, size.width(), size.height() });
@@ -175,7 +175,7 @@ void WindowServerConnection::install_input_callbacks()
             && metadata.clock.elapsed_milliseconds() < m_double_click_speed
             && distance_squared <= m_max_distance_for_double_click * m_max_distance_for_double_click;
         if (is_double_click) {
-            dbgln("LibWM: mouse double-click window {} at {},{} button={}", window_id, position.x(), position.y(), button);
+            trace("LibWM: mouse double-click window {} at {},{} button={}", window_id, position.x(), position.y(), button);
             async_mouse_double_click(window_id, position, button, buttons, modifiers, 0, 0, 0, 0);
             metadata.clock.reset();
         } else {
@@ -247,7 +247,7 @@ void WindowServerConnection::install_menu_callbacks()
     };
     m_menu.hide_popup = [](i32 menu_id) { WaylandClient::the().destroy_popup(menu_id); };
     m_menu.item_activated = [this](i32 menu_id, u32 identifier) {
-        dbgln("LibWM: menu item activated menu={} id={}", menu_id, identifier);
+        trace("LibWM: menu item activated menu={} id={}", menu_id, identifier);
         async_menu_item_activated(menu_id, identifier);
     };
     m_menu.item_entered = [this](i32 menu_id, u32 identifier) { async_menu_item_entered(menu_id, identifier); };
@@ -319,13 +319,13 @@ void WindowServerConnection::present(Window& window)
                     dbgln("LibWM: failed to write dump {}: {}", path, strerror(errno));
                 ::close(fd);
             }
-            dbgln("LibWM: dumped window {} ({}x{}) to {}", window.id, window.bitmap->width(), window.bitmap->height(), path);
+            trace("LibWM: dumped window {} ({}x{}) to {}", window.id, window.bitmap->width(), window.bitmap->height(), path);
         } else {
             dbgln("LibWM: PNG encode failed: {}", encoded.error());
         }
     }
 
-    dbgln("LibWM: window {} presented ({}x{}, serial {}, alpha={})",
+    trace("LibWM: window {} presented ({}x{}, serial {}, alpha={})",
         window.id, window.bitmap->width(), window.bitmap->height(), window.last_serial, window.bitmap->has_alpha_channel());
 }
 
@@ -367,7 +367,7 @@ void WindowServerConnection::create_window(i32 window_id, i32, Gfx::IntRect cons
         }
     }
 
-    dbgln("LibWM: create_window id={} rect={},{},{}x{} fullscreen={} title='{}'", window_id, window->rect.x(), window->rect.y(), window->rect.width(), window->rect.height(), fullscreen, title);
+    trace("LibWM: create_window id={} rect={},{},{}x{} fullscreen={} title='{}'", window_id, window->rect.x(), window->rect.y(), window->rect.width(), window->rect.height(), fullscreen, title);
     m_windows.append(move(window));
 
     auto& created_window = *m_windows.last();
@@ -385,7 +385,7 @@ void WindowServerConnection::create_window(i32 window_id, i32, Gfx::IntRect cons
 
 void WindowServerConnection::set_window_title(i32 window_id, ByteString const& title)
 {
-    dbgln("LibWM: set_window_title id={} title='{}'", window_id, title);
+    trace("LibWM: set_window_title id={} title='{}'", window_id, title);
     if (window(window_id))
         WaylandClient::the().set_title(window_id, title);
 }
@@ -569,7 +569,7 @@ void WindowServerConnection::set_window_progress(i32, Optional<i32> const&)
 
 void WindowServerConnection::set_fullscreen(i32 window_id, bool fullscreen)
 {
-    dbgln("LibWM: set_fullscreen({}, {})", window_id, fullscreen);
+    trace("LibWM: set_fullscreen({}, {})", window_id, fullscreen);
     WaylandClient::the().set_fullscreen(window_id, fullscreen);
 }
 
@@ -580,7 +580,7 @@ void WindowServerConnection::set_frameless(i32 window_id, bool frameless)
 
 void WindowServerConnection::set_maximized(i32 window_id, bool maximized)
 {
-    dbgln("LibWM: set_maximized({}, {})", window_id, maximized);
+    trace("LibWM: set_maximized({}, {})", window_id, maximized);
     WaylandClient::the().set_maximized(window_id, maximized);
 }
 
@@ -591,7 +591,7 @@ Messages::WindowServer::IsMaximizedResponse WindowServerConnection::is_maximized
 
 void WindowServerConnection::set_minimized(i32 window_id, bool minimized)
 {
-    dbgln("LibWM: set_minimized({}, {})", window_id, minimized);
+    trace("LibWM: set_minimized({}, {})", window_id, minimized);
     if (minimized)
         WaylandClient::the().set_minimized(window_id);
 }

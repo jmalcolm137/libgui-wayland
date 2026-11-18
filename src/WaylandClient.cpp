@@ -5,6 +5,7 @@
  */
 
 #include "WaylandClient.h"
+#include "Environment.h"
 #include "SerenityShell.h"
 #include "WaylandDataDevice.h"
 #include "WaylandOutputs.h"
@@ -49,7 +50,7 @@ static void registry_global(void* data, wl_registry* registry, uint32_t name, ch
     else if (!strcmp(interface, zxdg_decoration_manager_v1_interface.name))
         self.set_decoration_manager(reinterpret_cast<zxdg_decoration_manager_v1*>(wl_registry_bind(registry, name, &zxdg_decoration_manager_v1_interface, min(version, 1u))));
     else if (!strcmp(interface, wl_data_device_manager_interface.name)) {
-        dbgln("LibWM/Wayland: found wl_data_device_manager v{}", version);
+        trace("LibWM/Wayland: found wl_data_device_manager v{}", version);
         self.data_device().bind(reinterpret_cast<wl_data_device_manager*>(wl_registry_bind(registry, name, &wl_data_device_manager_interface, min(version, 3u))));
     } else if (!strcmp(interface, zxdg_output_manager_v1_interface.name)) {
         self.outputs().set_xdg_output_manager(reinterpret_cast<zxdg_output_manager_v1*>(wl_registry_bind(registry, name, &zxdg_output_manager_v1_interface, min(version, 3u))));
@@ -77,7 +78,7 @@ static wl_registry_listener const s_registry_listener = {
 
 static void wm_base_ping(void*, xdg_wm_base* base, uint32_t serial)
 {
-    dbgln("LibWM/Wayland: xdg_wm_base ping serial={} -> pong", serial);
+    trace("LibWM/Wayland: xdg_wm_base ping serial={} -> pong", serial);
     xdg_wm_base_pong(base, serial);
 }
 
@@ -138,7 +139,7 @@ ErrorOr<void> WaylandClient::ensure_connected()
     m_notifier->on_activation = [this] { dispatch(); };
 
     auto const screen = m_outputs->screen_size();
-    dbgln("LibWM/Wayland: connected; screen {}x{}, output scale {}/120",
+    trace("LibWM/Wayland: connected; screen {}x{}, output scale {}/120",
         screen.width(), screen.height(), m_outputs->output_scale_v120());
     return {};
 }

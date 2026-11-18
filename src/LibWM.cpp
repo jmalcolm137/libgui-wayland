@@ -167,7 +167,7 @@ static Optional<NonnullOwnPtr<Core::LocalSocket>> spawn_single_client_service(St
         return {};
     }
     (void)socket.value()->set_blocking(true);
-    dbgln("LibWM: spawned {} pid={}", name, spawned.value());
+    trace("LibWM: spawned {} pid={}", name, spawned.value());
     return socket.release_value();
 }
 
@@ -219,7 +219,7 @@ static void spawn_multi_client_service(StringView executable, ByteString const& 
     if (spawned.is_error())
         dbgln("LibWM: failed to spawn '{}': {}", name, spawned.error());
     else
-        dbgln("LibWM: spawned {} pid={} (listening on '{}')", name, spawned.value(), path);
+        trace("LibWM: spawned {} pid={} (listening on '{}')", name, spawned.value(), path);
 }
 
 // The AudioServer serves TWO portals (audio + audiomanager) from one process, so
@@ -255,7 +255,7 @@ static void spawn_audio_server()
     if (spawned.is_error())
         dbgln("LibWM: failed to spawn 'AudioServer': {}", spawned.error());
     else
-        dbgln("LibWM: spawned AudioServer pid={} (listening on '{}')", spawned.value(), audio_path);
+        trace("LibWM: spawned AudioServer pid={} (listening on '{}')", spawned.value(), audio_path);
 }
 
 // All portals are served from a single thread with a single Core::EventLoop.
@@ -370,7 +370,7 @@ static void start_server_thread()
 
 static Optional<NonnullOwnPtr<Core::LocalSocket>> make_portal(ByteString const& path)
 {
-    dbgln("LibWM: portal connect request '{}'", path);
+    trace("LibWM: portal connect request '{}'", path);
 
     // Prefer a real session service listening on the portal path (e.g. SDE's
     // LaunchServer): if a socket exists there and is actually accepting
@@ -395,7 +395,7 @@ static Optional<NonnullOwnPtr<Core::LocalSocket>> make_portal(ByteString const& 
             ::close(probe);
         }
         if (alive) {
-            dbgln("LibWM: deferring to the session service on '{}'", path);
+            trace("LibWM: deferring to the session service on '{}'", path);
             return {};
         }
         dbgln("LibWM: portal socket '{}' is stale; serving in-process", path);

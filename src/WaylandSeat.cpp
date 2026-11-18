@@ -560,7 +560,7 @@ void WaylandSeat::on_seat_capabilities(u32 capabilities)
         m_state.keyboard = wl_seat_get_keyboard(m_state.seat);
         wl_keyboard_add_listener(m_state.keyboard, &s_keyboard_listener, this);
     }
-    dbgln("LibWM/Wayland: seat capabilities 0x{:x} (pointer={}, keyboard={})", capabilities,
+    trace("LibWM/Wayland: seat capabilities 0x{:x} (pointer={}, keyboard={})", capabilities,
         m_state.pointer != nullptr, m_state.keyboard != nullptr);
 }
 
@@ -571,7 +571,7 @@ void WaylandSeat::on_pointer_enter(wl_surface* surface, Gfx::IntPoint position)
     m_state.pointer_window = m_state.pointer_popup >= 0 ? -1 : m_client.window_id_for_surface(surface);
     m_state.pointer_surface = surface;
     m_state.pointer_position = position;
-    dbgln("LibWM/Wayland: pointer entered {} {} at {},{}",
+    trace("LibWM/Wayland: pointer entered {} {} at {},{}",
         m_state.pointer_popup >= 0 ? "popup" : "window",
         m_state.pointer_popup >= 0 ? m_state.pointer_popup : m_state.pointer_window,
         position.x(), position.y());
@@ -716,17 +716,17 @@ void WaylandSeat::on_pointer_button(u32 button, bool pressed)
             Gfx::IntRect const min_rect { w - (window_surface->resizable ? 56 : 38), 4, 16, 14 };
             if (button == BTN_LEFT) {
                 if (close_rect.contains(pos)) {
-                    dbgln("LibWM/Wayland: CSD close button clicked on window {}", m_state.pointer_window);
+                    trace("LibWM/Wayland: CSD close button clicked on window {}", m_state.pointer_window);
                     if (m_client.m_input.window_close_request)
                         m_client.m_input.window_close_request(m_state.pointer_window);
                 } else if (window_surface->resizable && max_rect.contains(pos)) {
-                    dbgln("LibWM/Wayland: CSD maximize button clicked on window {}", m_state.pointer_window);
+                    trace("LibWM/Wayland: CSD maximize button clicked on window {}", m_state.pointer_window);
                     m_client.set_maximized(m_state.pointer_window, !window_surface->maximized);
                 } else if (min_rect.contains(pos)) {
-                    dbgln("LibWM/Wayland: CSD minimize button clicked on window {}", m_state.pointer_window);
+                    trace("LibWM/Wayland: CSD minimize button clicked on window {}", m_state.pointer_window);
                     m_client.set_minimized(m_state.pointer_window);
                 } else if (window_surface->toplevel && m_state.seat) {
-                    dbgln("LibWM/Wayland: CSD titlebar drag move on window {}", m_state.pointer_window);
+                    trace("LibWM/Wayland: CSD titlebar drag move on window {}", m_state.pointer_window);
                     xdg_toplevel_move(window_surface->toplevel, m_state.seat, m_state.last_serial);
                     wl_display_flush(m_client.m_display);
                 }
@@ -746,12 +746,12 @@ void WaylandSeat::on_pointer_button(u32 button, bool pressed)
     auto position = m_state.pointer_position.translated(0, -(csd_h + inset));
     if (pressed) {
         m_state.pointer_buttons |= serenity_button;
-        dbgln("LibWM/Wayland: mouse down window {} at {},{} button={}", m_state.pointer_window, position.x(), position.y(), serenity_button);
+        trace("LibWM/Wayland: mouse down window {} at {},{} button={}", m_state.pointer_window, position.x(), position.y(), serenity_button);
         if (m_client.m_input.mouse_down)
             m_client.m_input.mouse_down(m_state.pointer_window, position, serenity_button, m_state.pointer_buttons, current_modifiers());
     } else {
         m_state.pointer_buttons &= ~serenity_button;
-        dbgln("LibWM/Wayland: mouse up window {} at {},{} button={}", m_state.pointer_window, position.x(), position.y(), serenity_button);
+        trace("LibWM/Wayland: mouse up window {} at {},{} button={}", m_state.pointer_window, position.x(), position.y(), serenity_button);
         if (m_client.m_input.mouse_up)
             m_client.m_input.mouse_up(m_state.pointer_window, position, serenity_button, m_state.pointer_buttons, current_modifiers());
     }
@@ -791,7 +791,7 @@ void WaylandSeat::on_pointer_axis_delta(double x, double y)
     auto step_x = static_cast<i32>(m_state.axis_accum_x);
     auto step_y = static_cast<i32>(m_state.axis_accum_y);
     if (Environment::is_enabled("LIBWM_AXIS_DEBUG"))
-        dbgln("LibWM/Wayland: axis delta {}x{} -> step {}x{}", x, y, step_x, step_y);
+        trace("LibWM/Wayland: axis delta {}x{} -> step {}x{}", x, y, step_x, step_y);
     if (step_x == 0 && step_y == 0)
         return;
     m_state.axis_accum_x -= step_x;
@@ -821,7 +821,7 @@ void WaylandSeat::on_keyboard_keymap(int fd, u32 size)
         xkb_state_unref(m_state.xkb_state);
     m_state.xkb_state = m_state.xkb_keymap ? xkb_state_new(m_state.xkb_keymap) : nullptr;
 
-    dbgln("LibWM/Wayland: received keymap ({} bytes), state={}", size, m_state.xkb_state != nullptr);
+    trace("LibWM/Wayland: received keymap ({} bytes), state={}", size, m_state.xkb_state != nullptr);
 }
 
 u32 WaylandSeat::current_modifiers() const
@@ -837,7 +837,7 @@ void WaylandSeat::on_keyboard_modifiers(u32 depressed, u32 latched, u32 locked, 
     // enough: if a release is lost because focus moved while Ctrl/Alt was held,
     // the next click and wheel event would silently keep that modifier forever.
     if (!m_state.xkb_state) {
-        dbgln("LibWM/Wayland: modifiers depressed={:#x} locked={:#x} group={}", depressed, locked, group);
+        trace("LibWM/Wayland: modifiers depressed={:#x} locked={:#x} group={}", depressed, locked, group);
         return;
     }
 
@@ -854,7 +854,7 @@ void WaylandSeat::on_keyboard_modifiers(u32 depressed, u32 latched, u32 locked, 
         modifiers |= Mod_Super;
     m_state.modifiers = modifiers;
 
-    dbgln("LibWM/Wayland: modifiers depressed={:#x} locked={:#x} group={} -> {:#x}", depressed, locked, group, m_state.modifiers);
+    trace("LibWM/Wayland: modifiers depressed={:#x} locked={:#x} group={} -> {:#x}", depressed, locked, group, m_state.modifiers);
 }
 
 static u32 modifier_bit_for_evdev(u32 key)
@@ -1029,7 +1029,7 @@ void WaylandSeat::apply_window_cursor(WaylandClient::WindowSurface const& window
         m_state.applied_cursor = nullptr;
         m_state.applied_cursor_hidden = true;
         m_state.applied_cursor_serial = m_state.pointer_enter_serial;
-        dbgln("LibWM/Wayland: hid cursor on window {}", window_surface.window_id);
+        trace("LibWM/Wayland: hid cursor on window {}", window_surface.window_id);
         return;
     }
 
@@ -1082,7 +1082,7 @@ void WaylandSeat::apply_window_cursor(WaylandClient::WindowSurface const& window
     m_state.applied_cursor = bitmap;
     m_state.applied_cursor_hidden = false;
     m_state.applied_cursor_serial = m_state.pointer_enter_serial;
-    dbgln("LibWM/Wayland: set cursor on window {} ({}x{}, hotspot {},{})",
+    trace("LibWM/Wayland: set cursor on window {} ({}x{}, hotspot {},{})",
         window_surface.window_id, bitmap->width(), bitmap->height(), cursor_entry.hotspot.x(), cursor_entry.hotspot.y());
 }
 
