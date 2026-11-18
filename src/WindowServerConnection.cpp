@@ -79,7 +79,7 @@ void WindowServerConnection::send_fast_greet()
     wayland.outputs().set_client_scale_v120(Environment::client_scale_override_v120().value_or(wayland.outputs().output_scale_v120()));
     GUI::Window::set_backing_store_scale(wayland.outputs().client_scale());
 
-    // R4.7: the session font. Prefer the font broker (else the Katica/Csilla
+    // The session font. Prefer the font broker (else the Katica/Csilla
     // bitmap defaults), so a client's first FontDatabase update already uses it.
     auto font_queries = read_fonts_broker();
     ByteString default_query = font_queries.default_query.is_empty() ? ByteString { "Katica 10 400 0" } : font_queries.default_query;
@@ -356,8 +356,7 @@ void WindowServerConnection::create_window(i32 window_id, i32, Gfx::IntRect cons
     // though. A panel or applet is laid out by the compositor from its applet
     // area, so a screen-sized placeholder is allocated and thrown away: the Audio
     // applet (the only one that shows an unsized window) allocated three
-    // 1280x720 buffers before its 16x16 configure — ~10 MB of memfd
-    // (docs/25-performance.md §4).
+    // 1280x720 buffers before its 16x16 configure — ~10 MB of memfd.
     if (fullscreen || window->rect.size().is_empty()) {
         auto screen = WaylandClient::the().outputs().screen_size();
         if (!screen.is_empty()) {
@@ -619,7 +618,7 @@ Messages::WindowServer::GetColorUnderCursorResponse WindowServerConnection::get_
 }
 
 namespace {
-// R5 accessibility (docs/29): the Magnifier's capture. Ask for the region and answer
+// Accessibility: the Magnifier's capture. Ask for the region and answer
 // with the most recent one the compositor pushed; the first ask returns empty and
 // the next display-link tick paints it (one refresh interval of latency).
 Gfx::ShareableBitmap capture_around(Gfx::IntSize size, Gfx::IntPoint location)

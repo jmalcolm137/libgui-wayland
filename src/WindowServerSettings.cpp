@@ -290,7 +290,7 @@ Messages::WindowServer::GetPreferredColorSchemeResponse WindowServerConnection::
 
 Messages::WindowServer::GetScreenLayoutResponse WindowServerConnection::get_screen_layout()
 {
-    // R4.5: the desktop owns the output layout; it is served over serenity-window
+    // The desktop owns the output layout; it is served over serenity-window
     // as "screenlayout" (main=<i>;<Mode>,<Device>,<L>,<T>,<W>,<H>,<Scale>;...).
     auto encoded = WaylandClient::the().serenity_shell().host_setting("screenlayout"sv);
     if (!encoded.is_empty()) {
@@ -340,7 +340,7 @@ Messages::WindowServer::GetScreenLayoutResponse WindowServerConnection::get_scre
 
 Messages::WindowServer::SetScreenLayoutResponse WindowServerConnection::set_screen_layout(WindowServer::ScreenLayout const& screen_layout, bool save)
 {
-    // R4.5: the desktop owns the output layout, so hand it over (the compositor
+    // The desktop owns the output layout, so hand it over (the compositor
     // applies and persists it) rather than writing its screenlayout.ini.
     (void)save;
     StringBuilder encoded;
@@ -365,9 +365,8 @@ Messages::WindowServer::GetDesktopDisplayScaleResponse WindowServerConnection::g
 
 void WindowServerConnection::set_output_scale(i32 scale_v120)
 {
-    // R6 HiDPI: the DisplaySettings scale control calls this; we write the
-    // compositor's [Output] DefaultScale, which it live-applies (see
-    // docs/14-r4.4-config.md). v120 carries a fractional scale exactly (1.5 -> 180).
+    // HiDPI: the DisplaySettings scale control calls this; we write the
+    // compositor's [Output] DefaultScale, which it live-applies. v120 carries a fractional scale exactly (1.5 -> 180).
     if (scale_v120 < 60) // ignore nonsense (< 0.5x)
         return;
     double const scale = static_cast<double>(scale_v120) / 120.0;
@@ -377,7 +376,7 @@ void WindowServerConnection::set_output_scale(i32 scale_v120)
     trace("LibWM: set output scale {}x", scale);
 }
 
-// --- mouse/pointer settings (R4.6) -----------------------------------------
+// --- mouse/pointer settings -----------------------------------------------
 
 void WindowServerConnection::set_mouse_acceleration(float factor)
 {
@@ -546,7 +545,7 @@ Messages::WindowServer::GetKeyboardLayoutNamesResponse WindowServerConnection::g
 void WindowServerConnection::set_system_effects(Vector<bool> const& effects, u8 geometry, u8 tile_window)
 {
     // Apply to this client (LibGUI's SystemEffects) and record the choices so the
-    // compositor (geometry HUD) and other clients pick them up (R4.7).
+    // compositor (geometry HUD) and other clients pick them up.
     async_update_system_effects(effects);
     WaylandClient::the().serenity_shell().set_host_setting("effects.show_geometry"sv, WindowServer::ShowGeometryTools::enum_to_string(static_cast<WindowServer::ShowGeometry>(geometry)));
     WaylandClient::the().serenity_shell().set_host_setting("effects.tile_window"sv, WindowServer::TileWindowTools::enum_to_string(static_cast<WindowServer::TileWindow>(tile_window)));
@@ -563,7 +562,7 @@ Messages::WindowServer::SetSystemFontsResponse WindowServerConnection::set_syste
 {
     // Apply in-process (so subsequent lookups resolve the new font), restyle this
     // client and tell it to re-layout, then record the choice in the session font
-    // broker so the compositor and other clients pick it up (R4.7).
+    // broker so the compositor and other clients pick it up.
     Gfx::FontDatabase::set_default_font_query(default_font_query);
     if (!fixed_width_font_query.is_empty())
         Gfx::FontDatabase::set_fixed_width_font_query(fixed_width_font_query);
@@ -577,7 +576,7 @@ Messages::WindowServer::SetSystemFontsResponse WindowServerConnection::set_syste
 Messages::WindowServer::ApplyWorkspaceSettingsResponse WindowServerConnection::apply_workspace_settings(u32 rows, u32 columns, bool save)
 {
     // Write the grid to the session config; the compositor live-reloads it and the
-    // workspace picker follows (R4.8). `save` is implied: the file is the store.
+    // workspace picker follows. `save` is implied: the file is the store.
     (void)save;
     if (rows < 1 || columns < 1)
         return false;

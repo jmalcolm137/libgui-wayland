@@ -98,7 +98,7 @@ programming model.
   back with `glReadPixels` into a `Gfx::Bitmap` and presents it over `wl_shm`; zero-copy
   `zwp_linux_dmabuf_v1` hand-off is not implemented, and the compositor still cannot render GL on
   a client's behalf. `EGLGPU` also does not support GLSL shaders (`glCreateShader`); programs
-  that need them must use `LibSoftGPU`. See [DESIGN.md](DESIGN.md) §4.11.
+  that need them must use `LibSoftGPU`. See [docs/development-history.md](docs/development-history.md) §4.11.
 - **Serenity-only applications and settings (host exclusions).** A handful of apps and
   settings target SerenityOS *system services* rather than a portable protocol; they are
   deferred until a **Serenity Desktop Environment on Linux** exists — see
@@ -163,7 +163,7 @@ ctest --test-dir build/lagom -R libwm.menu                       # one suite
 (Arch package names, as installed by `.github/workflows/ci.yml`): `base-devel git cmake ninja
 meson python wayland wayland-protocols libxkbcommon mesa libglvnd systemd-libs elfutils
 libunwind`, plus `cairo freetype2 fontconfig pixman libxrender` for the headless test compositor.
-Runtime environment variables are listed in DESIGN.md §8.2.
+Runtime environment variables are listed in [docs/environment.md](docs/environment.md); [docs/testing.md](docs/testing.md) describes the suites and [DESIGN.md](DESIGN.md) links the rest of the documentation.
 
 To keep a log and get a Jev triage card when the build or a test fails:
 

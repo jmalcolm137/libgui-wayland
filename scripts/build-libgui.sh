@@ -98,7 +98,7 @@ if [[ -n "$unverified_names" ]]; then
     # proceed.
     echo "    unverifiable (they would not be applied):$unverified_names" >&2
     echo "    A patch that neither applies nor reverse-applies no longer matches the tree." >&2
-    echo "    Refresh it (see docs/26-ci.md): regenerate the hunks against the current" >&2
+    echo "    Refresh it (see patches/README.md): regenerate the hunks against the current" >&2
     echo "    revision, then the patch set and the tree agree again." >&2
     if [[ "${ALLOW_UNVERIFIED_PATCHES:-0}" != 1 ]]; then
         exit 1

@@ -97,7 +97,7 @@ private:
         watch_theme();
         watch_fonts();
 
-        // R5: display links. Owned like the host-settings hook: it captures
+        // Display links. Owned like the host-settings hook: it captures
         // `this`, so the first connection owns it and the destructor clears it.
         WaylandClient::the().set_display_link_callback(this, on_server_thread([this] { async_display_link_notification(); }));
     }
@@ -227,7 +227,7 @@ private:
     Messages::WindowServer::GetWorkspaceSettingsResponse get_workspace_settings() override;
     Messages::WindowServer::GetSystemThemeOverrideResponse get_system_theme_override() override;
 
-    // Mouse/pointer settings (Mouse Settings, R4.6). Backed by input.ini in the
+    // Mouse/pointer settings (Mouse Settings). Backed by input.ini in the
     // shared state directory, which the compositor watches and applies to the
     // (libinput) devices.
     void set_mouse_acceleration(float factor) override;
@@ -246,8 +246,8 @@ private:
     Messages::WindowServer::GetDoubleClickSpeedMinResponse get_double_click_speed_min() override;
     Messages::WindowServer::GetDoubleClickSpeedMaxResponse get_double_click_speed_max() override;
 
-    // Cursor theme/highlight (Mouse Settings, R4.6 groundwork; the compositor
-    // applies these in R4.7). Backed by cursor.ini in the state directory.
+    // Cursor theme/highlight (Mouse Settings; the SerenityDE compositor applies
+    // them). Backed by cursor.ini in the state directory.
     Messages::WindowServer::GetCursorThemeResponse get_cursor_theme() override;
     void apply_cursor_theme(ByteString const& name) override;
     Messages::WindowServer::GetCursorHighlightRadiusResponse get_cursor_highlight_radius() override;
@@ -255,12 +255,12 @@ private:
     Messages::WindowServer::GetCursorHighlightColorResponse get_cursor_highlight_color() override;
     void set_cursor_highlight_color(Gfx::Color color) override;
 
-    // Keyboard layouts (Keyboard Settings, R4.6). Backed by input.ini [Keyboard].
+    // Keyboard layouts (Keyboard Settings). Backed by input.ini [Keyboard].
     Messages::WindowServer::GetKeyboardLayoutResponse get_keyboard_layout() override;
     void set_keyboard_layout(ByteString const& layouts, ByteString const& variant, ByteString const& model, ByteString const& options) override;
     Messages::WindowServer::GetKeyboardLayoutNamesResponse get_keyboard_layout_names() override;
 
-    // Effects (Display Settings ▸ Effects, R4.7): apply to this client and record
+    // Effects (Display Settings ▸ Effects): apply to this client and record
     // the choices in WindowServer.ini [Effects] for the compositor and others.
     void set_system_effects(Vector<bool> const& effects, u8 geometry, u8 tile_window) override;
 
@@ -273,7 +273,7 @@ private:
 
     // System fonts: a session broker ($XDG_RUNTIME_DIR/sde-fonts), like the
     // theme broker, so a font change applies to every client and the compositor
-    // (R4.7). Also what makes size-based zoom work with a scalable family.
+    // Also what makes size-based zoom work with a scalable family.
     struct FontQueries {
         ByteString default_query;
         ByteString fixed_width_query;

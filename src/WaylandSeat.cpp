@@ -791,7 +791,7 @@ void WaylandSeat::on_pointer_axis_delta(double x, double y)
     auto step_x = static_cast<i32>(m_state.axis_accum_x);
     auto step_y = static_cast<i32>(m_state.axis_accum_y);
     if (Environment::is_enabled("LIBWM_AXIS_DEBUG"))
-        trace("LibWM/Wayland: axis delta {}x{} -> step {}x{}", x, y, step_x, step_y);
+        dbgln("LibWM/Wayland: axis delta {}x{} -> step {}x{}", x, y, step_x, step_y);
     if (step_x == 0 && step_y == 0)
         return;
     m_state.axis_accum_x -= step_x;
