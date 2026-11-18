@@ -6,6 +6,7 @@
 
 #include "WaylandClient.h"
 #include "SerenityShell.h"
+#include "WaylandOutputs.h"
 #include <LibCore/EventLoop.h>
 #include <LibCore/Notifier.h>
 #include <errno.h>
@@ -40,7 +41,7 @@ static void registry_global(void* data, wl_registry* registry, uint32_t name, ch
     else if (!strcmp(interface, wl_seat_interface.name))
         self.add_seat(reinterpret_cast<wl_seat*>(wl_registry_bind(registry, name, &wl_seat_interface, 1)));
     else if (!strcmp(interface, wl_output_interface.name))
-        self.add_output(reinterpret_cast<wl_output*>(wl_registry_bind(registry, name, &wl_output_interface, min(version, 2u))));
+        self.outputs().add_output(reinterpret_cast<wl_output*>(wl_registry_bind(registry, name, &wl_output_interface, min(version, 2u))));
     else if (!strcmp(interface, xdg_wm_base_interface.name))
         self.add_wm_base(reinterpret_cast<xdg_wm_base*>(wl_registry_bind(registry, name, &xdg_wm_base_interface, 1)));
     else if (!strcmp(interface, zxdg_decoration_manager_v1_interface.name))
@@ -49,7 +50,7 @@ static void registry_global(void* data, wl_registry* registry, uint32_t name, ch
         dbgln("LibWM/Wayland: found wl_data_device_manager v{}", version);
         self.set_data_device_manager(reinterpret_cast<wl_data_device_manager*>(wl_registry_bind(registry, name, &wl_data_device_manager_interface, min(version, 3u))));
     } else if (!strcmp(interface, zxdg_output_manager_v1_interface.name)) {
-        self.set_xdg_output_manager(reinterpret_cast<zxdg_output_manager_v1*>(wl_registry_bind(registry, name, &zxdg_output_manager_v1_interface, min(version, 3u))));
+        self.outputs().set_xdg_output_manager(reinterpret_cast<zxdg_output_manager_v1*>(wl_registry_bind(registry, name, &zxdg_output_manager_v1_interface, min(version, 3u))));
     } else if (!strcmp(interface, wp_viewporter_interface.name)) {
         self.set_viewporter(reinterpret_cast<wp_viewporter*>(wl_registry_bind(registry, name, &wp_viewporter_interface, 1)));
     } else if (!strcmp(interface, wp_fractional_scale_manager_v1_interface.name)) {
@@ -82,64 +83,11 @@ static xdg_wm_base_listener const s_wm_base_listener = {
     .ping = wm_base_ping,
 };
 
-// --- wl_output ----------------------------------------------------------------
-
-static void output_geometry(void*, wl_output*, int32_t, int32_t, int32_t, int32_t, int32_t, char const*, char const*, int32_t) { }
-
-static void output_mode(void* data, wl_output*, uint32_t flags, int32_t width, int32_t height, int32_t)
-{
-    if (!(flags & WL_OUTPUT_MODE_CURRENT))
-        return;
-    static_cast<WaylandClient*>(data)->on_output_mode({ width, height });
-}
-
-static void output_done(void* data, wl_output*)
-{
-    static_cast<WaylandClient*>(data)->on_output_done();
-}
-
-static void output_scale(void* data, wl_output*, int32_t factor)
-{
-    static_cast<WaylandClient*>(data)->on_output_scale(factor);
-}
-
-static void output_name(void*, wl_output*, char const*) { }
-static void output_description(void*, wl_output*, char const*) { }
-
-static wl_output_listener const s_output_listener = {
-    .geometry = output_geometry,
-    .mode = output_mode,
-    .done = output_done,
-    .scale = output_scale,
-    .name = output_name,
-    .description = output_description,
-};
-
-// --- zxdg_output_v1 (logical size under fractional scaling) -------------------
-
-static void xdg_output_logical_position(void*, zxdg_output_v1*, int32_t, int32_t) { }
-
-static void xdg_output_logical_size(void* data, zxdg_output_v1*, int32_t width, int32_t height)
-{
-    static_cast<WaylandClient*>(data)->on_output_logical_size(nullptr, { width, height });
-}
-
-static void xdg_output_done(void*, zxdg_output_v1*) { }
-static void xdg_output_name(void*, zxdg_output_v1*, char const*) { }
-static void xdg_output_description(void*, zxdg_output_v1*, char const*) { }
-
-static zxdg_output_v1_listener const s_xdg_output_listener = {
-    .logical_position = xdg_output_logical_position,
-    .logical_size = xdg_output_logical_size,
-    .done = xdg_output_done,
-    .name = xdg_output_name,
-    .description = xdg_output_description,
-};
-
 // --- connection & output lifecycle --------------------------------------------
 
 WaylandClient::WaylandClient()
     : m_serenity_shell(make<SerenityShell>(*this))
+    , m_outputs(make<WaylandOutputs>(*this))
 {
     pthread_mutexattr_t attributes;
     pthread_mutexattr_init(&attributes);
@@ -185,8 +133,9 @@ ErrorOr<void> WaylandClient::ensure_connected()
     m_notifier = Core::Notifier::construct(wl_display_get_fd(m_display), Core::Notifier::Type::Read);
     m_notifier->on_activation = [this] { dispatch(); };
 
-    dbgln("LibWM/Wayland: connected; screen {}x{} @{}x, output scale {}",
-        m_output_state.screen_size.width(), m_output_state.screen_size.height(), m_output_state.scale, m_output_state.scale);
+    auto const screen = m_outputs->screen_size();
+    dbgln("LibWM/Wayland: connected; screen {}x{}, output scale {}/120",
+        screen.width(), screen.height(), m_outputs->output_scale_v120());
     return {};
 }
 
@@ -244,75 +193,11 @@ void WaylandClient::dispatch()
         Core::EventLoop::current().quit(0);
 }
 
-void WaylandClient::add_output(wl_output* output)
-{
-    MutexLocker locker(m_mutex);
-    m_output_state.primary = output;
-    m_output_state.outputs.append(output);
-    wl_output_add_listener(output, &s_output_listener, this);
-    if (m_output_state.xdg_manager) {
-        auto* xdg_output = zxdg_output_manager_v1_get_xdg_output(m_output_state.xdg_manager, output);
-        zxdg_output_v1_add_listener(xdg_output, &s_xdg_output_listener, this);
-    }
-}
-
-void WaylandClient::set_xdg_output_manager(zxdg_output_manager_v1* manager)
-{
-    MutexLocker locker(m_mutex);
-    m_output_state.xdg_manager = manager;
-    for (auto* output : m_output_state.outputs) {
-        auto* xdg_output = zxdg_output_manager_v1_get_xdg_output(manager, output);
-        zxdg_output_v1_add_listener(xdg_output, &s_xdg_output_listener, this);
-    }
-}
-
 void WaylandClient::add_wm_base(xdg_wm_base* wm_base)
 {
     MutexLocker locker(m_mutex);
     m_wm_base = wm_base;
     xdg_wm_base_add_listener(wm_base, &s_wm_base_listener, this);
-}
-
-void WaylandClient::on_output_logical_size(wl_output*, Gfx::IntSize logical_size)
-{
-    MutexLocker locker(m_mutex);
-    if (logical_size.is_empty())
-        return;
-    m_output_state.have_logical_size = true;
-    m_output_state.screen_size = logical_size;
-    if (!m_output_state.physical_size.is_empty() && logical_size.width() > 0) {
-        int raw_v120 = static_cast<int>(__builtin_lround(static_cast<double>(m_output_state.physical_size.width()) * 120.0 / static_cast<double>(logical_size.width())));
-        int snapped_v120 = ((raw_v120 + 7) / 15) * 15;
-        if (__builtin_abs(raw_v120 - snapped_v120) <= 2)
-            raw_v120 = snapped_v120;
-        m_output_state.scale_v120 = max(120, raw_v120);
-        m_output_state.scale = max(1, (m_output_state.scale_v120 + 119) / 120);
-    }
-}
-
-void WaylandClient::on_output_done()
-{
-    MutexLocker locker(m_mutex);
-    // zxdg_output_v1 gives the real logical size under fractional scaling and
-    // takes precedence over mode/scale.
-    if (m_output_state.have_logical_size) {
-        if (!m_output_state.physical_size.is_empty() && m_output_state.screen_size.width() > 0) {
-            int raw_v120 = static_cast<int>(__builtin_lround(static_cast<double>(m_output_state.physical_size.width()) * 120.0 / static_cast<double>(m_output_state.screen_size.width())));
-            int snapped_v120 = ((raw_v120 + 7) / 15) * 15;
-            if (__builtin_abs(raw_v120 - snapped_v120) <= 2)
-                raw_v120 = snapped_v120;
-            m_output_state.scale_v120 = max(120, raw_v120);
-            m_output_state.scale = max(1, (m_output_state.scale_v120 + 119) / 120);
-        }
-        return;
-    }
-    if (m_output_state.physical_size.is_empty())
-        return;
-    m_output_state.screen_size = {
-        m_output_state.physical_size.width() / m_output_state.scale,
-        m_output_state.physical_size.height() / m_output_state.scale,
-    };
-    m_output_state.scale_v120 = m_output_state.scale * 120;
 }
 
 // --- display link -------------------------------------------------------------

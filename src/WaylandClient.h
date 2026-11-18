@@ -73,6 +73,7 @@ enum class StandardCursor;
 namespace LibWM {
 
 class SerenityShell;
+class WaylandOutputs;
 
 // A thin wrapper over the real Wayland compositor.
 //
@@ -135,48 +136,9 @@ public:
         return m_display != nullptr;
     }
 
-    // Logical screen size and output scale as reported by the compositor.
-    Gfx::IntSize screen_size() const
-    {
-        MutexLocker locker(m_mutex);
-        return m_output_state.screen_size;
-    }
-    int output_scale() const
-    {
-        MutexLocker locker(m_mutex);
-        return m_output_state.scale;
-    }
-    int output_scale_v120() const
-    {
-        MutexLocker locker(m_mutex);
-        return m_output_state.scale_v120;
-    }
-    // The integer backing-store scale the shim told the client to render at
-    // (ceil(client_scale_v120 / 120.0); 1 when client scaling is disabled).
-    int client_scale() const
-    {
-        MutexLocker locker(m_mutex);
-        return m_output_state.client_scale;
-    }
-    int client_scale_v120() const
-    {
-        MutexLocker locker(m_mutex);
-        return m_output_state.client_scale_v120;
-    }
-    void set_client_scale(int scale)
-    {
-        MutexLocker locker(m_mutex);
-        int clamped = scale < 1 ? 1 : scale;
-        m_output_state.client_scale = clamped;
-        m_output_state.client_scale_v120 = clamped * 120;
-    }
-    void set_client_scale_v120(int scale_v120)
-    {
-        MutexLocker locker(m_mutex);
-        int clamped = scale_v120 < 60 ? 120 : scale_v120;
-        m_output_state.client_scale_v120 = clamped;
-        m_output_state.client_scale = max(1, (clamped + 119) / 120);
-    }
+    // Screen size and output/client scales (wl_output, zxdg_output_v1).
+    WaylandOutputs& outputs() { return *m_outputs; }
+    WaylandOutputs const& outputs() const { return *m_outputs; }
 
     // The pointer's position in output coordinates, reconstructed from the
     // surface under the pointer and that surface's known origin. The compositor
@@ -355,22 +317,6 @@ public:
     void on_text_input_commit(String);
     void on_text_input_preedit(String, i32 cursor_begin, i32 cursor_end);
     void on_text_input_delete_surrounding(i32 before_length, i32 after_length);
-    void add_output(wl_output* output);
-    void set_xdg_output_manager(zxdg_output_manager_v1* manager);
-    void on_output_logical_size(wl_output*, Gfx::IntSize logical_size);
-    void on_output_mode(Gfx::IntSize physical_size)
-    {
-        MutexLocker locker(m_mutex);
-        m_output_state.physical_size = physical_size;
-    }
-    void on_output_scale(int factor)
-    {
-        MutexLocker locker(m_mutex);
-        m_output_state.scale = factor > 0 ? factor : 1;
-        if (!m_output_state.have_logical_size)
-            m_output_state.scale_v120 = m_output_state.scale * 120;
-    }
-    void on_output_done();
 
     void on_seat_capabilities(u32 capabilities);
     i32 window_id_for_surface(wl_surface*) const;
@@ -434,6 +380,7 @@ public:
 
 private:
     friend class SerenityShell;
+    friend class WaylandOutputs;
 
     WaylandClient();
     ~WaylandClient();
@@ -572,19 +519,6 @@ private:
         Vector<NonnullOwnPtr<BufferRecord>> buffers;
     };
 
-    struct OutputState {
-        wl_output* primary { nullptr };
-        Vector<wl_output*> outputs;
-        zxdg_output_manager_v1* xdg_manager { nullptr };
-        Gfx::IntSize physical_size;
-        Gfx::IntSize screen_size;
-        int scale { 1 };
-        int scale_v120 { 120 };
-        int client_scale { 1 };
-        int client_scale_v120 { 120 };
-        bool have_logical_size { false };
-    };
-
     struct CachedCursor {
         RefPtr<Gfx::Bitmap> bitmap;
         Gfx::IntPoint hotspot;
@@ -698,13 +632,13 @@ private:
     zwlr_layer_shell_v1* m_layer_shell { nullptr };
     RefPtr<Core::Notifier> m_notifier;
 
-    OutputState m_output_state;
     InputState m_input_state;
     TextInputState m_text_input;
     DataDeviceState m_data_device;
     DisplayLinkState m_display_link;
 
     NonnullOwnPtr<SerenityShell> m_serenity_shell;
+    NonnullOwnPtr<WaylandOutputs> m_outputs;
 
     InputCallbacks m_input;
     Function<void(ByteString const&)> m_connection_lost;

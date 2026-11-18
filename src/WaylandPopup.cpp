@@ -6,6 +6,7 @@
 
 #include "WaylandClient.h"
 #include "SerenityShell.h"
+#include "WaylandOutputs.h"
 #include <LibGfx/Bitmap.h>
 #include <string.h>
 #include <wayland-client.h>
@@ -202,7 +203,7 @@ void WaylandClient::present_menubar(WindowSurface& window_surface, Gfx::IntSize 
     if (!window_surface.menubar_surface || !window_surface.draw_inset || window_surface.inset <= 0)
         return;
 
-    int const scale = client_scale();
+    int const scale = m_outputs->client_scale();
     Gfx::IntSize const logical { visible_size.width(), window_surface.inset };
     bool const recreate = !window_surface.menubar_bitmap
         || window_surface.menubar_bitmap->size() != logical
@@ -282,14 +283,14 @@ void WaylandClient::create_popup(i32 popup_id, i32 parent_window_id, i32 parent_
         // bottom, flip it above the anchor (as WindowServer does for buttons).
         int menu_x = layer_position.x();
         int menu_y = layer_position.y();
-        if (!m_output_state.screen_size.is_empty()) {
+        if (auto const screen_size = m_outputs->screen_size(); !screen_size.is_empty()) {
             // A button menu flips above its button when it would run off the
             // bottom. A submenu just slides up so it stays on-screen, keeping the
             // item's row reachable (otherwise it would jump above its parent).
-            if (!is_submenu && menu_y + size.height() > m_output_state.screen_size.height())
+            if (!is_submenu && menu_y + size.height() > screen_size.height())
                 menu_y -= size.height() + max(0, anchor.height() - 1);
-            menu_x = clamp(menu_x, 0, max(0, m_output_state.screen_size.width() - size.width()));
-            menu_y = clamp(menu_y, 0, max(0, m_output_state.screen_size.height() - size.height()));
+            menu_x = clamp(menu_x, 0, max(0, screen_size.width() - size.width()));
+            menu_y = clamp(menu_y, 0, max(0, screen_size.height() - size.height()));
         }
         layer_position = { menu_x, menu_y };
         zwlr_layer_surface_v1_set_margin(layer_surface, layer_position.y(), 0, 0, layer_position.x());

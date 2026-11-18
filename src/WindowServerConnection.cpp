@@ -8,6 +8,7 @@
 #include "Environment.h"
 #include "SerenityShell.h"
 #include "WaylandClient.h"
+#include "WaylandOutputs.h"
 #include <LibCore/AnonymousBuffer.h>
 #include <LibGfx/Font/FontDatabase.h>
 #include <LibGfx/ImageFormats/PNGWriter.h>
@@ -47,7 +48,7 @@ void WindowServerConnection::send_fast_greet()
     if (auto result = wayland.ensure_connected(); result.is_error())
         dbgln("LibWM: running without a Wayland compositor: {}", result.error());
 
-    auto screen = wayland.screen_size();
+    auto screen = wayland.outputs().screen_size();
     if (screen.is_empty())
         screen = m_screen_size;
 
@@ -73,8 +74,8 @@ void WindowServerConnection::send_fast_greet()
     // like 1.25x, 1.5x, 1.75x) so windows are drawn at native resolution on any
     // compositor. Set SDE_CLIENT_SCALE=0 to force 1x, or a positive integer or
     // fractional value (e.g. 1.5, 1.75, 2) to select that scale explicitly.
-    wayland.set_client_scale_v120(Environment::client_scale_override_v120().value_or(wayland.output_scale_v120()));
-    GUI::Window::set_backing_store_scale(wayland.client_scale());
+    wayland.outputs().set_client_scale_v120(Environment::client_scale_override_v120().value_or(wayland.outputs().output_scale_v120()));
+    GUI::Window::set_backing_store_scale(wayland.outputs().client_scale());
 
     // R4.7: the session font. Prefer the font broker (else the Katica/Csilla
     // bitmap defaults), so a client's first FontDatabase update already uses it.
@@ -356,7 +357,7 @@ void WindowServerConnection::create_window(i32 window_id, i32, Gfx::IntRect cons
     // 1280x720 buffers before its 16x16 configure — ~10 MB of memfd
     // (docs/25-performance.md §4).
     if (fullscreen || window->rect.size().is_empty()) {
-        auto screen = WaylandClient::the().screen_size();
+        auto screen = WaylandClient::the().outputs().screen_size();
         if (!screen.is_empty()) {
             bool const compositor_sized = window_type == static_cast<i32>(WindowServer::WindowType::Applet)
                 || window_type == static_cast<i32>(WindowServer::WindowType::Taskbar);

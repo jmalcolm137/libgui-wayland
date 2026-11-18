@@ -6,6 +6,7 @@
 
 #include "WaylandClient.h"
 #include "SerenityShell.h"
+#include "WaylandOutputs.h"
 #include "Environment.h"
 #include <AK/Assertions.h>
 #include <LibCore/Process.h>
@@ -158,17 +159,17 @@ void WaylandClient::on_preferred_scale(wp_fractional_scale_v1* fractional, u32 s
     MutexLocker locker(m_mutex);
     if (scale_v120 < 60)
         return;
-    m_output_state.scale_v120 = static_cast<int>(scale_v120);
-    m_output_state.scale = max(1, static_cast<int>(scale_v120 + 119) / 120);
+    m_outputs->set_preferred_scale_v120(static_cast<int>(scale_v120));
     dbgln("LibWM/Wayland: preferred fractional scale {}/120 ({:.2f}x, backing {}x)",
-        scale_v120, static_cast<double>(scale_v120) / 120.0, m_output_state.scale);
+        scale_v120, static_cast<double>(scale_v120) / 120.0, m_outputs->output_scale());
 
     if (Environment::client_scale_override_v120().has_value())
         return;
 
-    int const previous_backing_scale = m_output_state.client_scale;
-    set_client_scale_v120(static_cast<int>(scale_v120));
-    GUI::Window::set_backing_store_scale(m_output_state.client_scale);
+    int const previous_backing_scale = m_outputs->client_scale();
+    m_outputs->set_client_scale_v120(static_cast<int>(scale_v120));
+    int const backing_scale = m_outputs->client_scale();
+    GUI::Window::set_backing_store_scale(backing_scale);
 
     for (auto const& it : m_windows) {
         auto& w = *it.value;
@@ -178,7 +179,7 @@ void WaylandClient::on_preferred_scale(wp_fractional_scale_v1* fractional, u32 s
         w.composed_valid = false;
         w.csd_dirty = true;
         w.inset_dirty = true;
-        if (m_output_state.client_scale != previous_backing_scale && m_input.window_resize)
+        if (backing_scale != previous_backing_scale && m_input.window_resize)
             m_input.window_resize(w.window_id, w.size);
         return;
     }
@@ -598,10 +599,10 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::In
             window_surface->layer_output_position = { 0, 0 };
             break;
         case WindowServer::WindowType::Taskbar:
-            window_surface->layer_output_position = { 0, m_output_state.screen_size.height() - size.height() };
+            window_surface->layer_output_position = { 0, m_outputs->screen_size().height() - size.height() };
             break;
         case WindowServer::WindowType::Applet:
-            window_surface->layer_output_position = { m_output_state.screen_size.width() - size.width(), m_output_state.screen_size.height() - size.height() };
+            window_surface->layer_output_position = { m_outputs->screen_size().width() - size.width(), m_outputs->screen_size().height() - size.height() };
             break;
         default:
             break;
@@ -1147,8 +1148,8 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
         window_surface.frame_in_flight = true;
     };
 
-    int const scale = client_scale();
-    int const scale_v120 = client_scale_v120();
+    int const scale = m_outputs->client_scale();
+    int const scale_v120 = m_outputs->client_scale_v120();
     bool const is_fractional = (scale_v120 % 120) != 0;
 
     if (window_surface.stretch_active && !window_surface.resizing) {

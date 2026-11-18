@@ -8,6 +8,7 @@
 #include "Environment.h"
 #include "SerenityShell.h"
 #include "WaylandClient.h"
+#include "WaylandOutputs.h"
 #include <AK/LexicalPath.h>
 #include <AK/QuickSort.h>
 #include <LibCore/AnonymousBuffer.h>
@@ -359,7 +360,7 @@ Messages::WindowServer::SaveScreenLayoutResponse WindowServerConnection::save_sc
 
 Messages::WindowServer::GetDesktopDisplayScaleResponse WindowServerConnection::get_desktop_display_scale(u32)
 {
-    return WaylandClient::the().output_scale();
+    return WaylandClient::the().outputs().output_scale();
 }
 
 void WindowServerConnection::set_output_scale(i32 scale_v120)

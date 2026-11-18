@@ -6,6 +6,7 @@
 
 #include "MenuController.h"
 #include "WaylandClient.h"
+#include "WaylandOutputs.h"
 #include <AK/CharacterTypes.h>
 #include <AK/NonnullOwnPtr.h>
 #include <Kernel/API/KeyCode.h>
@@ -60,7 +61,7 @@ int MenuController::effective_max_popup_height() const
 {
     if (m_max_popup_height > 0)
         return m_max_popup_height;
-    auto screen = WaylandClient::the().screen_size();
+    auto screen = WaylandClient::the().outputs().screen_size();
     if (screen.height() > 64)
         return screen.height() - 32;
     return 0;

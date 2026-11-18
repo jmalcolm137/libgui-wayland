@@ -30,6 +30,7 @@ add_library(windowserver SHARED
     WaylandClient.cpp
     WaylandDataDevice.cpp
     WaylandInput.cpp
+    WaylandOutputs.cpp
     WaylandPopup.cpp
     WaylandSurface.cpp
     WindowServerConnection.cpp

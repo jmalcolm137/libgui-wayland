@@ -10,6 +10,7 @@
 #include "MenuController.h"
 #include "SerenityShell.h"
 #include "WaylandClient.h"
+#include "WaylandOutputs.h"
 #include <AK/Format.h>
 #include <Kernel/API/KeyCode.h>
 #include <LibConfig/Client.h>
@@ -333,8 +334,8 @@ void test_wayland_client_thread_safety()
                     (void)c.clipboard_mime_types();
                     (void)c.window_menubar_visible(1);
                     (void)c.global_pointer_position();
-                    c.set_client_scale((i % 2) + 1);
-                    (void)c.client_scale();
+                    c.outputs().set_client_scale((i % 2) + 1);
+                    (void)c.outputs().client_scale();
                 }
                 return nullptr;
             },
@@ -345,7 +346,7 @@ void test_wayland_client_thread_safety()
     for (int i = 0; i < iterations; ++i) {
         client.serenity_shell().on_host_settings("mouse.acceleration=2.0\ncursor.theme=Default\n"sv);
         client.serenity_shell().on_host_config(2, 2, 0.5, 3.5, 1, 100, 900);
-        client.on_output_scale((i % 2) + 1);
+        client.outputs().on_output_scale((i % 2) + 1);
     }
 
     for (auto tid : threads)
@@ -357,13 +358,13 @@ void test_wayland_client_thread_safety()
         "WaylandClient concurrent host_setting reads/writes are race-free"sv);
 
     // Fractional scale inference from physical mode (2560x1600) + zxdg_output_v1 logical size (1463x914 -> 1.75x = 210/120).
-    client.on_output_mode({ 2560, 1600 });
-    client.on_output_logical_size(nullptr, { 1463, 914 });
-    check(client.output_scale_v120() == 210 && client.output_scale() == 2,
+    client.outputs().on_output_mode({ 2560, 1600 });
+    client.outputs().on_output_logical_size({ 1463, 914 });
+    check(client.outputs().output_scale_v120() == 210 && client.outputs().output_scale() == 2,
         "zxdg_output_v1 1463x914 on 2560x1600 infers 1.75x (210/120) and ceil scale 2"sv);
 
-    client.set_client_scale_v120(180);
-    check(client.client_scale_v120() == 180 && client.client_scale() == 2,
+    client.outputs().set_client_scale_v120(180);
+    check(client.outputs().client_scale_v120() == 180 && client.outputs().client_scale() == 2,
         "set_client_scale_v120(180) sets 1.5x presentation and 2x backing scale"sv);
 }
 
