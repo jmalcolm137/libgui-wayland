@@ -8,6 +8,7 @@
 #include "ConfigServerConnection.h"
 #include "LibWM.h"
 #include "MenuController.h"
+#include "SerenityShell.h"
 #include "WaylandClient.h"
 #include <AK/Format.h>
 #include <Kernel/API/KeyCode.h>
@@ -324,11 +325,11 @@ void test_wayland_client_thread_safety()
             &tid, nullptr, +[](void*) -> void* {
                 auto& c = LibWM::WaylandClient::the();
                 for (int i = 0; i < iterations; ++i) {
-                    c.set_host_setting("mouse.acceleration"sv, "1.5"sv);
-                    (void)c.host_setting("mouse.acceleration"sv, "1.0"sv);
-                    (void)c.host_config();
-                    (void)c.host_wallpaper();
-                    (void)c.captured_bitmap();
+                    c.serenity_shell().set_host_setting("mouse.acceleration"sv, "1.5"sv);
+                    (void)c.serenity_shell().host_setting("mouse.acceleration"sv, "1.0"sv);
+                    (void)c.serenity_shell().host_config();
+                    (void)c.serenity_shell().host_wallpaper();
+                    (void)c.serenity_shell().captured_bitmap();
                     (void)c.clipboard_mime_types();
                     (void)c.window_menubar_visible(1);
                     (void)c.global_pointer_position();
@@ -342,17 +343,17 @@ void test_wayland_client_thread_safety()
     }
 
     for (int i = 0; i < iterations; ++i) {
-        client.on_host_settings("mouse.acceleration=2.0\ncursor.theme=Default\n"sv);
-        client.on_host_config(2, 2, 0.5, 3.5, 1, 100, 900);
+        client.serenity_shell().on_host_settings("mouse.acceleration=2.0\ncursor.theme=Default\n"sv);
+        client.serenity_shell().on_host_config(2, 2, 0.5, 3.5, 1, 100, 900);
         client.on_output_scale((i % 2) + 1);
     }
 
     for (auto tid : threads)
         pthread_join(tid, nullptr);
 
-    check(client.host_config().workspace_rows == 2 && client.host_config().workspace_columns == 2,
+    check(client.serenity_shell().host_config().workspace_rows == 2 && client.serenity_shell().host_config().workspace_columns == 2,
         "WaylandClient concurrent host_config updates are race-free"sv);
-    check(!client.host_setting("mouse.acceleration"sv).is_empty(),
+    check(!client.serenity_shell().host_setting("mouse.acceleration"sv).is_empty(),
         "WaylandClient concurrent host_setting reads/writes are race-free"sv);
 
     // Fractional scale inference from physical mode (2560x1600) + zxdg_output_v1 logical size (1463x914 -> 1.75x = 210/120).

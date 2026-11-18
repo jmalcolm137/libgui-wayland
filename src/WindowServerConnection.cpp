@@ -6,6 +6,7 @@
 
 #include "WindowServerConnection.h"
 #include "Environment.h"
+#include "SerenityShell.h"
 #include "WaylandClient.h"
 #include <LibCore/AnonymousBuffer.h>
 #include <LibGfx/Font/FontDatabase.h>
@@ -64,8 +65,8 @@ void WindowServerConnection::send_fast_greet()
 
     // The compositor owns the grid and sends it over serenity-window; the shim
     // does not read the desktop's config file (see WaylandClient::host_config()).
-    unsigned const workspace_rows = WaylandClient::the().host_config().workspace_rows;
-    unsigned const workspace_columns = WaylandClient::the().host_config().workspace_columns;
+    unsigned const workspace_rows = WaylandClient::the().serenity_shell().host_config().workspace_rows;
+    unsigned const workspace_columns = WaylandClient::the().serenity_shell().host_config().workspace_columns;
 
     // Client-side HiDPI: rasterise at the compositor's output scale (or
     // ceil(fractional_scale) with wp_viewport downsampling for fractional scales
@@ -250,11 +251,11 @@ void WindowServerConnection::install_menu_callbacks()
     m_menu.visibility_changed = [this](i32 menu_id, bool visible) { async_menu_visibility_did_change(menu_id, visible); };
     m_menu.menubar_changed = [this](i32 window_id) { update_window_menubar(window_id); };
     m_menu.redraw_popup = [this](i32 menu_id) { present_menu_popup(menu_id); };
-    WaylandClient::the().set_menubar_visibility_callback([this](i32 window_id, bool) { update_window_menubar(window_id); });
-    WaylandClient::the().set_dismiss_menus_callback([this] { m_menu.close_open_menus(); });
+    WaylandClient::the().serenity_shell().set_menubar_visibility_callback([this](i32 window_id, bool) { update_window_menubar(window_id); });
+    WaylandClient::the().serenity_shell().set_dismiss_menus_callback([this] { m_menu.close_open_menus(); });
     // The compositor places windows itself; adopt its position so the client's
     // screen-relative coordinates (menus, popups, tooltips) match reality.
-    WaylandClient::the().set_toplevel_position_callback([this](i32 window_id, Gfx::IntPoint position) {
+    WaylandClient::the().serenity_shell().set_toplevel_position_callback([this](i32 window_id, Gfx::IntPoint position) {
         if (auto* w = window(window_id))
             w->rect.set_location(position);
     });
@@ -633,8 +634,8 @@ Gfx::ShareableBitmap capture_around(Gfx::IntSize size, Gfx::IntPoint location)
 {
     auto& wayland = WaylandClient::the();
     Gfx::IntRect const region { { location.x() - size.width() / 2, location.y() - size.height() / 2 }, size };
-    wayland.request_capture(region);
-    if (auto bitmap = wayland.captured_bitmap())
+    wayland.serenity_shell().request_capture(region);
+    if (auto bitmap = wayland.serenity_shell().captured_bitmap())
         return bitmap->to_shareable_bitmap();
     return Gfx::ShareableBitmap {};
 }

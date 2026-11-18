@@ -5,6 +5,7 @@
  */
 
 #include "WaylandClient.h"
+#include "SerenityShell.h"
 #include "Environment.h"
 #include <AK/Assertions.h>
 #include <LibCore/Process.h>
@@ -23,7 +24,6 @@
 #include <wayland-client.h>
 
 #include "fractional-scale-v1-client-protocol.h"
-#include "serenity-window-client-protocol.h"
 #include "viewporter-client-protocol.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "xdg-decoration-client-protocol.h"
@@ -140,23 +140,6 @@ static void layer_surface_closed(void* data, zwlr_layer_surface_v1* layer_surfac
 static zwlr_layer_surface_v1_listener const s_layer_surface_listener = {
     .configure = layer_surface_configure,
     .closed = layer_surface_closed,
-};
-
-// --- serenity_toplevel (compositor-driven window chrome) ----------------------
-
-static void serenity_toplevel_menubar_visibility(void* data, serenity_toplevel* resource, int32_t visible)
-{
-    static_cast<WaylandClient*>(data)->on_menubar_visibility(resource, visible != 0);
-}
-
-static void serenity_toplevel_position(void* data, serenity_toplevel* resource, int32_t x, int32_t y)
-{
-    static_cast<WaylandClient*>(data)->on_toplevel_position(resource, x, y);
-}
-
-static serenity_toplevel_listener const s_serenity_toplevel_listener = {
-    .menubar_visibility = serenity_toplevel_menubar_visibility,
-    .position = serenity_toplevel_position,
 };
 
 // --- wp_fractional_scale_v1 ---------------------------------------------------
@@ -411,25 +394,6 @@ void WaylandClient::on_layer_closed(zwlr_layer_surface_v1* layer_surface)
     }
 }
 
-void WaylandClient::on_toplevel_position(serenity_toplevel* resource, int32_t x, int32_t y)
-{
-    MutexLocker locker(m_mutex);
-    for (auto const& it : m_windows) {
-        if (it.value->chrome == resource) {
-            SurfaceLocker surface_locker(it.value->mutex);
-            // Layer surfaces (applets) are laid out by the compositor, so their
-            // origin comes from here, not from their anchored corner.
-            if (it.value->is_layer)
-                it.value->layer_output_position = { x, y };
-            else
-                it.value->global_position = { x, y };
-            if (m_toplevel_position_changed)
-                m_toplevel_position_changed(it.value->window_id, Gfx::IntPoint { x, y });
-            return;
-        }
-    }
-}
-
 void WaylandClient::on_surface_configured(xdg_surface* surface)
 {
     MutexLocker locker(m_mutex);
@@ -653,12 +617,7 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::In
         // Let the compositor report this layer surface's real output position:
         // the applet area moves applets away from their anchored corner, so the
         // client's own origin would otherwise be stale.
-        if (m_serenity_window_manager) {
-            if (auto* chrome = serenity_window_manager_get_toplevel(m_serenity_window_manager, layer_surface_object)) {
-                window_surface->chrome = chrome;
-                serenity_toplevel_add_listener(chrome, &s_serenity_toplevel_listener, this);
-            }
-        }
+        window_surface->chrome = m_serenity_shell->create_toplevel(layer_surface_object);
 
         m_windows.set(window_id, move(window_surface));
         wl_display_flush(m_display);
@@ -745,15 +704,7 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::In
     }
 
     // Let the compositor drive this window's chrome (the menu bar).
-    if (m_serenity_window_manager) {
-        if (auto* chrome = serenity_window_manager_get_toplevel(m_serenity_window_manager, surface)) {
-            window_surface->chrome = chrome;
-            serenity_toplevel_add_listener(chrome, &s_serenity_toplevel_listener, this);
-            serenity_toplevel_set_window_mode(chrome, static_cast<uint32_t>(window_mode));
-            if (!launch_origin.is_empty())
-                serenity_toplevel_set_launch_origin(chrome, launch_origin.x(), launch_origin.y(), launch_origin.width(), launch_origin.height());
-        }
-    }
+    window_surface->chrome = m_serenity_shell->create_toplevel(surface, window_mode, launch_origin);
 
     // A non-resizable window pins min == max (fullscreen still overrides this).
     if (!resizable) {
@@ -798,8 +749,7 @@ void WaylandClient::destroy_window(i32 window_id)
         }
         if (window_surface.layer_surface)
             zwlr_layer_surface_v1_destroy(window_surface.layer_surface);
-        if (window_surface.chrome)
-            serenity_toplevel_destroy(window_surface.chrome);
+        m_serenity_shell->destroy_toplevel(window_surface.chrome);
         if (window_surface.decoration)
             zxdg_toplevel_decoration_v1_destroy(window_surface.decoration);
         if (window_surface.toplevel)
@@ -979,14 +929,8 @@ void WaylandClient::set_minimized(i32 window_id)
 void WaylandClient::set_always_on_top(i32 window_id, bool always_on_top)
 {
     MutexLocker locker(m_mutex);
-    if (auto* window_surface = find(window_id)) {
-        if (!window_surface->chrome)
-            return;
-        if (wl_proxy_get_version(reinterpret_cast<wl_proxy*>(window_surface->chrome)) < 3)
-            return;
-        serenity_toplevel_set_always_on_top(window_surface->chrome, always_on_top ? 1 : 0);
-        wl_display_flush(m_display);
-    }
+    if (auto* window_surface = find(window_id))
+        m_serenity_shell->set_always_on_top(window_surface->chrome, always_on_top);
 }
 
 void WaylandClient::set_window_icon_bitmap(i32 window_id, Gfx::ShareableBitmap const& icon)
@@ -1000,39 +944,7 @@ void WaylandClient::set_window_icon_bitmap(i32 window_id, Gfx::ShareableBitmap c
         window_surface->icon_bitmap = icon.is_valid() ? icon.bitmap() : nullptr;
         window_surface->csd_dirty = true;
     }
-    if (!window_surface->chrome)
-        return;
-
-    if (!icon.is_valid() || !icon.bitmap()) {
-        serenity_toplevel_set_icon(window_surface->chrome, 0, 0, 0, 0, -1);
-        wl_display_flush(m_display);
-        return;
-    }
-
-    auto const& bitmap = *icon.bitmap();
-    int const width = bitmap.width();
-    int const height = bitmap.height();
-    int const stride = bitmap.pitch();
-    if (width <= 0 || height <= 0 || stride <= 0)
-        return;
-
-    size_t const size = static_cast<size_t>(stride) * static_cast<size_t>(height);
-    int fd = memfd_create("sde-window-icon", MFD_CLOEXEC);
-    if (fd < 0)
-        return;
-    if (ftruncate(fd, static_cast<off_t>(size)) != 0) {
-        close(fd);
-        return;
-    }
-    void* mapping = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    if (mapping != MAP_FAILED) {
-        for (int y = 0; y < height; ++y)
-            memcpy(static_cast<u8*>(mapping) + static_cast<size_t>(y) * stride, bitmap.scanline(y), static_cast<size_t>(stride));
-        munmap(mapping, size);
-    }
-    serenity_toplevel_set_icon(window_surface->chrome, width, height, stride, 0, fd);
-    close(fd);
-    wl_display_flush(m_display);
+    m_serenity_shell->set_icon(window_surface->chrome, window_surface->icon_bitmap.ptr());
 }
 
 void WaylandClient::attach_and_commit(i32 window_id, int client_fd, Gfx::IntSize size, Gfx::IntSize visible_size, i32 pitch, bool has_alpha)

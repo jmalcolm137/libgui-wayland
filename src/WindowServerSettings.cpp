@@ -6,6 +6,7 @@
 
 #include "WindowServerConnection.h"
 #include "Environment.h"
+#include "SerenityShell.h"
 #include "WaylandClient.h"
 #include <AK/LexicalPath.h>
 #include <AK/QuickSort.h>
@@ -125,7 +126,7 @@ Messages::WindowServer::GetWallpaperResponse WindowServerConnection::get_wallpap
         return m_wallpaper->to_shareable_bitmap();
     // Rolling-upgrade compatibility: an older compositor still pushes the
     // wallpaper over serenity-window. New compositors leave it unset.
-    if (auto host = WaylandClient::the().host_wallpaper()) {
+    if (auto host = WaylandClient::the().serenity_shell().host_wallpaper()) {
         m_wallpaper = host;
         return m_wallpaper->to_shareable_bitmap();
     }
@@ -143,19 +144,19 @@ Messages::WindowServer::SetWallpaperResponse WindowServerConnection::set_wallpap
     m_wallpaper = wallpaper_bitmap.bitmap();
     // The desktop owns the wallpaper: hand the raw pixels over (no PNG encode,
     // which would stall this application's UI thread).
-    WaylandClient::the().set_host_wallpaper(m_wallpaper.ptr());
+    WaylandClient::the().serenity_shell().set_host_wallpaper(m_wallpaper.ptr());
     return true;
 }
 
 void WindowServerConnection::set_wallpaper_mode(ByteString const& mode)
 {
     m_wallpaper_mode = mode;
-    WaylandClient::the().set_host_setting("wallpaper.mode"sv, mode);
+    WaylandClient::the().serenity_shell().set_host_setting("wallpaper.mode"sv, mode);
 }
 
 void WindowServerConnection::set_background_color(ByteString const& background_color)
 {
-    WaylandClient::the().set_host_setting("wallpaper.color"sv, background_color);
+    WaylandClient::the().serenity_shell().set_host_setting("wallpaper.color"sv, background_color);
 }
 
 Messages::WindowServer::GetSystemThemeResponse WindowServerConnection::get_system_theme()
@@ -182,8 +183,8 @@ Messages::WindowServer::SetSystemThemeResponse WindowServerConnection::set_syste
         (void)file.value()->write_until_depleted(host_theme);
     // Persist the choice so it survives a restart (the compositor applies [Theme]
     // at startup).
-    WaylandClient::the().set_host_setting("theme.name"sv, theme_name);
-    WaylandClient::the().set_host_setting("theme.path"sv, host_theme);
+    WaylandClient::the().serenity_shell().set_host_setting("theme.name"sv, theme_name);
+    WaylandClient::the().serenity_shell().set_host_setting("theme.path"sv, host_theme);
     return true;
 }
 
@@ -223,11 +224,11 @@ void WindowServerConnection::apply_theme_from_broker()
     }
     // Fall back to the persisted theme ([Theme]) when there is no live broker value.
     if (host_theme.is_empty())
-        host_theme = WaylandClient::the().host_setting("theme.path"sv, ""sv);
+        host_theme = WaylandClient::the().serenity_shell().host_setting("theme.path"sv, ""sv);
     if (host_theme.is_empty())
         return;
     if (auto buffer = Gfx::load_system_theme(host_theme, {}); !buffer.is_error()) {
-        auto name = WaylandClient::the().host_setting("theme.name"sv, ""sv);
+        auto name = WaylandClient::the().serenity_shell().host_setting("theme.name"sv, ""sv);
         m_theme_name = name.is_empty() ? ByteString { LexicalPath(host_theme).title() } : name;
         // Say which theme this client settled on and where it heard about it: an
         // empty theme name is what made Display Settings' Themes page show a theme
@@ -290,7 +291,7 @@ Messages::WindowServer::GetScreenLayoutResponse WindowServerConnection::get_scre
 {
     // R4.5: the desktop owns the output layout; it is served over serenity-window
     // as "screenlayout" (main=<i>;<Mode>,<Device>,<L>,<T>,<W>,<H>,<Scale>;...).
-    auto encoded = WaylandClient::the().host_setting("screenlayout"sv);
+    auto encoded = WaylandClient::the().serenity_shell().host_setting("screenlayout"sv);
     if (!encoded.is_empty()) {
         WindowServer::ScreenLayout parsed;
         for (auto field : encoded.split_view(';')) {
@@ -347,7 +348,7 @@ Messages::WindowServer::SetScreenLayoutResponse WindowServerConnection::set_scre
         encoded.appendff(";{},{},{},{},{},{},{}", WindowServer::ScreenLayout::Screen::mode_to_string(screen.mode),
             screen.device.value_or(ByteString {}), screen.location.x(), screen.location.y(),
             screen.resolution.width(), screen.resolution.height(), screen.scale_factor);
-    WaylandClient::the().set_host_setting("screenlayout"sv, encoded.string_view());
+    WaylandClient::the().serenity_shell().set_host_setting("screenlayout"sv, encoded.string_view());
     return { true, {} };
 }
 
@@ -371,7 +372,7 @@ void WindowServerConnection::set_output_scale(i32 scale_v120)
     double const scale = static_cast<double>(scale_v120) / 120.0;
     // The desktop owns the output scale; hand it over (the compositor applies and
     // persists it) rather than writing its config.
-    WaylandClient::the().set_host_setting("output.default_scale"sv, ByteString::formatted("{}", scale));
+    WaylandClient::the().serenity_shell().set_host_setting("output.default_scale"sv, ByteString::formatted("{}", scale));
     dbgln("LibWM: set output scale {}x", scale);
 }
 
@@ -379,127 +380,127 @@ void WindowServerConnection::set_output_scale(i32 scale_v120)
 
 void WindowServerConnection::set_mouse_acceleration(float factor)
 {
-    WaylandClient::the().set_host_setting("mouse.acceleration"sv, ByteString::formatted("{}", factor));
+    WaylandClient::the().serenity_shell().set_host_setting("mouse.acceleration"sv, ByteString::formatted("{}", factor));
 }
 
 Messages::WindowServer::GetMouseAccelerationResponse WindowServerConnection::get_mouse_acceleration()
 {
-    return WaylandClient::the().host_setting("mouse.acceleration"sv, "1.0"sv).to_number<double>().value_or(1.0);
+    return WaylandClient::the().serenity_shell().host_setting("mouse.acceleration"sv, "1.0"sv).to_number<double>().value_or(1.0);
 }
 
 void WindowServerConnection::set_scroll_step_size(u32 step_size)
 {
-    WaylandClient::the().set_host_setting("mouse.scroll_step_size"sv, ByteString::number(step_size));
+    WaylandClient::the().serenity_shell().set_host_setting("mouse.scroll_step_size"sv, ByteString::number(step_size));
 }
 
 Messages::WindowServer::GetScrollStepSizeResponse WindowServerConnection::get_scroll_step_size()
 {
-    return WaylandClient::the().host_setting("mouse.scroll_step_size"sv, "1"sv).to_number<u32>().value_or(1);
+    return WaylandClient::the().serenity_shell().host_setting("mouse.scroll_step_size"sv, "1"sv).to_number<u32>().value_or(1);
 }
 
 void WindowServerConnection::set_double_click_speed(int speed)
 {
     m_double_click_speed = speed;
-    WaylandClient::the().set_host_setting("mouse.double_click_speed"sv, ByteString::number(speed));
+    WaylandClient::the().serenity_shell().set_host_setting("mouse.double_click_speed"sv, ByteString::number(speed));
 }
 
 Messages::WindowServer::GetDoubleClickSpeedResponse WindowServerConnection::get_double_click_speed()
 {
-    m_double_click_speed = WaylandClient::the().host_setting("mouse.double_click_speed"sv, "250"sv).to_number<int>().value_or(250);
+    m_double_click_speed = WaylandClient::the().serenity_shell().host_setting("mouse.double_click_speed"sv, "250"sv).to_number<int>().value_or(250);
     return m_double_click_speed;
 }
 
 void WindowServerConnection::set_mouse_buttons_switched(bool switched)
 {
-    WaylandClient::the().set_host_setting("mouse.buttons_switched"sv, switched ? "true"sv : "false"sv);
+    WaylandClient::the().serenity_shell().set_host_setting("mouse.buttons_switched"sv, switched ? "true"sv : "false"sv);
 }
 
 Messages::WindowServer::AreMouseButtonsSwitchedResponse WindowServerConnection::are_mouse_buttons_switched()
 {
-    return WaylandClient::the().host_setting("mouse.buttons_switched"sv, "false"sv) == "true"sv;
+    return WaylandClient::the().serenity_shell().host_setting("mouse.buttons_switched"sv, "false"sv) == "true"sv;
 }
 
 void WindowServerConnection::set_natural_scroll(bool inverted)
 {
-    WaylandClient::the().set_host_setting("mouse.natural_scroll"sv, inverted ? "true"sv : "false"sv);
+    WaylandClient::the().serenity_shell().set_host_setting("mouse.natural_scroll"sv, inverted ? "true"sv : "false"sv);
 }
 
 Messages::WindowServer::IsNaturalScrollResponse WindowServerConnection::is_natural_scroll()
 {
-    return WaylandClient::the().host_setting("mouse.natural_scroll"sv, "false"sv) == "true"sv;
+    return WaylandClient::the().serenity_shell().host_setting("mouse.natural_scroll"sv, "false"sv) == "true"sv;
 }
 
 Messages::WindowServer::GetMouseAccelerationMinResponse WindowServerConnection::get_mouse_acceleration_min()
 {
-    return static_cast<float>(WaylandClient::the().host_config().accel_min);
+    return static_cast<float>(WaylandClient::the().serenity_shell().host_config().accel_min);
 }
 
 Messages::WindowServer::GetMouseAccelerationMaxResponse WindowServerConnection::get_mouse_acceleration_max()
 {
-    return static_cast<float>(WaylandClient::the().host_config().accel_max);
+    return static_cast<float>(WaylandClient::the().serenity_shell().host_config().accel_max);
 }
 
 Messages::WindowServer::GetScrollStepSizeMinResponse WindowServerConnection::get_scroll_step_size_min()
 {
-    return WaylandClient::the().host_config().scroll_step_min;
+    return WaylandClient::the().serenity_shell().host_config().scroll_step_min;
 }
 
 Messages::WindowServer::GetDoubleClickSpeedMinResponse WindowServerConnection::get_double_click_speed_min()
 {
-    return WaylandClient::the().host_config().double_click_min;
+    return WaylandClient::the().serenity_shell().host_config().double_click_min;
 }
 
 Messages::WindowServer::GetDoubleClickSpeedMaxResponse WindowServerConnection::get_double_click_speed_max()
 {
-    return WaylandClient::the().host_config().double_click_max;
+    return WaylandClient::the().serenity_shell().host_config().double_click_max;
 }
 
 Messages::WindowServer::GetCursorThemeResponse WindowServerConnection::get_cursor_theme()
 {
-    return WaylandClient::the().host_setting("cursor.theme"sv, "Default"sv);
+    return WaylandClient::the().serenity_shell().host_setting("cursor.theme"sv, "Default"sv);
 }
 
 void WindowServerConnection::apply_cursor_theme(ByteString const& name)
 {
-    WaylandClient::the().set_host_setting("cursor.theme"sv, name);
+    WaylandClient::the().serenity_shell().set_host_setting("cursor.theme"sv, name);
 }
 
 Messages::WindowServer::GetCursorHighlightRadiusResponse WindowServerConnection::get_cursor_highlight_radius()
 {
-    return WaylandClient::the().host_setting("cursor.highlight_radius"sv, "0"sv).to_number<int>().value_or(0);
+    return WaylandClient::the().serenity_shell().host_setting("cursor.highlight_radius"sv, "0"sv).to_number<int>().value_or(0);
 }
 
 void WindowServerConnection::set_cursor_highlight_radius(int radius)
 {
-    WaylandClient::the().set_host_setting("cursor.highlight_radius"sv, ByteString::number(radius));
+    WaylandClient::the().serenity_shell().set_host_setting("cursor.highlight_radius"sv, ByteString::number(radius));
 }
 
 Messages::WindowServer::GetCursorHighlightColorResponse WindowServerConnection::get_cursor_highlight_color()
 {
-    if (auto color = Gfx::Color::from_string(WaylandClient::the().host_setting("cursor.highlight_color"sv, "#000000"sv)); color.has_value())
+    if (auto color = Gfx::Color::from_string(WaylandClient::the().serenity_shell().host_setting("cursor.highlight_color"sv, "#000000"sv)); color.has_value())
         return color.value();
     return Gfx::Color::Black;
 }
 
 void WindowServerConnection::set_cursor_highlight_color(Gfx::Color color)
 {
-    WaylandClient::the().set_host_setting("cursor.highlight_color"sv, color.to_byte_string());
+    WaylandClient::the().serenity_shell().set_host_setting("cursor.highlight_color"sv, color.to_byte_string());
 }
 
 Messages::WindowServer::GetKeyboardLayoutResponse WindowServerConnection::get_keyboard_layout()
 {
-    return { WaylandClient::the().host_setting("keyboard.layouts"sv, "us"sv),
-        WaylandClient::the().host_setting("keyboard.variant"sv, ""sv),
-        WaylandClient::the().host_setting("keyboard.model"sv, "pc105"sv),
-        WaylandClient::the().host_setting("keyboard.options"sv, ""sv) };
+    return { WaylandClient::the().serenity_shell().host_setting("keyboard.layouts"sv, "us"sv),
+        WaylandClient::the().serenity_shell().host_setting("keyboard.variant"sv, ""sv),
+        WaylandClient::the().serenity_shell().host_setting("keyboard.model"sv, "pc105"sv),
+        WaylandClient::the().serenity_shell().host_setting("keyboard.options"sv, ""sv) };
 }
 
 void WindowServerConnection::set_keyboard_layout(ByteString const& layouts, ByteString const& variant, ByteString const& model, ByteString const& options)
 {
-    WaylandClient::the().set_host_setting("keyboard.layouts"sv, layouts);
-    WaylandClient::the().set_host_setting("keyboard.variant"sv, variant);
-    WaylandClient::the().set_host_setting("keyboard.model"sv, model);
-    WaylandClient::the().set_host_setting("keyboard.options"sv, options);
+    WaylandClient::the().serenity_shell().set_host_setting("keyboard.layouts"sv, layouts);
+    WaylandClient::the().serenity_shell().set_host_setting("keyboard.variant"sv, variant);
+    WaylandClient::the().serenity_shell().set_host_setting("keyboard.model"sv, model);
+    WaylandClient::the().serenity_shell().set_host_setting("keyboard.options"sv, options);
 }
 
 Messages::WindowServer::GetKeyboardLayoutNamesResponse WindowServerConnection::get_keyboard_layout_names()
@@ -546,15 +547,15 @@ void WindowServerConnection::set_system_effects(Vector<bool> const& effects, u8 
     // Apply to this client (LibGUI's SystemEffects) and record the choices so the
     // compositor (geometry HUD) and other clients pick them up (R4.7).
     async_update_system_effects(effects);
-    WaylandClient::the().set_host_setting("effects.show_geometry"sv, WindowServer::ShowGeometryTools::enum_to_string(static_cast<WindowServer::ShowGeometry>(geometry)));
-    WaylandClient::the().set_host_setting("effects.tile_window"sv, WindowServer::TileWindowTools::enum_to_string(static_cast<WindowServer::TileWindow>(tile_window)));
+    WaylandClient::the().serenity_shell().set_host_setting("effects.show_geometry"sv, WindowServer::ShowGeometryTools::enum_to_string(static_cast<WindowServer::ShowGeometry>(geometry)));
+    WaylandClient::the().serenity_shell().set_host_setting("effects.tile_window"sv, WindowServer::TileWindowTools::enum_to_string(static_cast<WindowServer::TileWindow>(tile_window)));
     static constexpr Array effect_names = {
         "AnimateMenus"sv, "FlashMenus"sv, "AnimateWindows"sv, "SmoothScrolling"sv,
         "TabAccents"sv, "SplitterKnurls"sv, "Tooltips"sv, "MenuShadow"sv,
         "WindowShadow"sv, "TooltipShadow"sv,
     };
     for (size_t i = 0; i < effects.size() && i < effect_names.size(); ++i)
-        WaylandClient::the().set_host_setting(ByteString::formatted("effects.{}", effect_names[i]), effects[i] ? "true"sv : "false"sv);
+        WaylandClient::the().serenity_shell().set_host_setting(ByteString::formatted("effects.{}", effect_names[i]), effects[i] ? "true"sv : "false"sv);
 }
 
 Messages::WindowServer::SetSystemFontsResponse WindowServerConnection::set_system_fonts(ByteString const& default_font_query, ByteString const& fixed_width_font_query, ByteString const& window_title_font_query)
@@ -579,14 +580,14 @@ Messages::WindowServer::ApplyWorkspaceSettingsResponse WindowServerConnection::a
     (void)save;
     if (rows < 1 || columns < 1)
         return false;
-    WaylandClient::the().set_host_setting("workspaces.rows"sv, ByteString::number(rows));
-    WaylandClient::the().set_host_setting("workspaces.columns"sv, ByteString::number(columns));
+    WaylandClient::the().serenity_shell().set_host_setting("workspaces.rows"sv, ByteString::number(rows));
+    WaylandClient::the().serenity_shell().set_host_setting("workspaces.columns"sv, ByteString::number(columns));
     return true;
 }
 
 Messages::WindowServer::GetWorkspaceSettingsResponse WindowServerConnection::get_workspace_settings()
 {
-    auto cfg = WaylandClient::the().host_config();
+    auto cfg = WaylandClient::the().serenity_shell().host_config();
     return { cfg.workspace_rows, cfg.workspace_columns, 8u, 8u };
 }
 

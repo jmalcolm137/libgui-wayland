@@ -5,6 +5,7 @@
  */
 
 #include "WaylandClient.h"
+#include "SerenityShell.h"
 #include "Environment.h"
 #include <Kernel/API/KeyCode.h>
 #include <LibGUI/Event.h>
@@ -914,7 +915,7 @@ Optional<WaylandClient::CachedCursor> WaylandClient::load_standard_cursor(Gfx::S
     if (filename.is_empty())
         return {};
 
-    auto theme = host_setting("cursor.theme"sv, "Default"sv);
+    auto theme = m_serenity_shell->host_setting("cursor.theme"sv, "Default"sv);
     auto cache_key = ByteString::formatted("{}/{}", theme, filename);
     if (auto cached = m_input_state.cursor_cache.get(cache_key); cached.has_value())
         return cached.value();

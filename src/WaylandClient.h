@@ -56,7 +56,6 @@ struct zxdg_decoration_manager_v1;
 struct zxdg_toplevel_decoration_v1;
 struct zwlr_layer_shell_v1;
 struct zwlr_layer_surface_v1;
-struct serenity_window_manager;
 struct serenity_toplevel;
 
 struct xkb_context;
@@ -72,6 +71,8 @@ enum class StandardCursor;
 }
 
 namespace LibWM {
+
+class SerenityShell;
 
 // A thin wrapper over the real Wayland compositor.
 //
@@ -320,79 +321,19 @@ public:
         MutexLocker locker(m_mutex);
         m_layer_shell = shell;
     }
-    void set_serenity_window_manager(serenity_window_manager* manager);
-    // The window-server configuration the *desktop* owns: the workspace grid and
-    // the input-setting bounds. The compositor sends it over serenity-window (see
-    // the protocol and docs/24 in the serenity-desktop-environment repository), so
-    // the shim answers an application's WindowServer config requests from this
-    // rather than reading the desktop's config file.
-    struct HostConfig {
-        u32 workspace_rows { 1 };
-        u32 workspace_columns { 1 };
-        double accel_min { 0.5 };
-        double accel_max { 3.5 };
-        u32 scroll_step_min { 1 };
-        int double_click_min { 100 };
-        int double_click_max { 900 };
-    };
-    HostConfig host_config() const
-    {
-        MutexLocker locker(m_mutex);
-        return m_host_config;
-    }
-    // The desktop-owned settings, keyed semantically (see the protocol). The
-    // compositor sends them; the shim answers an application's WindowServer config
-    // requests from here and forwards changes back, so it never touches the
-    // desktop's configuration files.
-    ByteString host_setting(StringView key, StringView fallback = {}) const;
-    void set_host_setting(StringView key, StringView value);
+    // The SerenityDE integration (serenity-window protocol): desktop-owned
+    // settings, wallpaper, capture, and compositor-driven window chrome. Inert on
+    // other compositors.
+    SerenityShell& serenity_shell() { return *m_serenity_shell; }
 
-    // R5: the app's GUI::DisplayLink. SerenityOS drives it from the window
-    // server's frame loop; here it is paced by the window surface's frame
-    // callbacks. The Magnifier captures on every callback.
+    // GUI::DisplayLink. SerenityOS drives it from the window server's frame loop;
+    // here it is paced by a window surface's frame callbacks: the callback runs
+    // once per compositor frame while enabled. The callback belongs to `owner`:
+    // it is installed only if none is set, and only its owner can clear it.
+    void set_display_link_callback(void* owner, Function<void()> callback);
+    void clear_display_link_callback(void* owner);
     void enable_display_link();
     void disable_display_link();
-    Function<void()> on_display_link;
-    void* on_display_link_owner { nullptr };
-    Function<void()> on_host_settings_updated;
-    // Which WindowServerConnection owns that hook, so it can be cleared when that
-    // object dies instead of being called through a dangling capture.
-    void* on_host_settings_updated_owner { nullptr };
-    // The desktop's wallpaper, sent as raw pixels over serenity-window.
-    RefPtr<Gfx::Bitmap> host_wallpaper()
-    {
-        MutexLocker locker(m_mutex);
-        return m_host_wallpaper;
-    }
-
-    // R5 accessibility (docs/29): the Magnifier asks for a region of the screen.
-    // The compositor pushes it back as `captured`; this returns the most recent one,
-    // so a capture never blocks the caller. request_capture() asks for another.
-    RefPtr<Gfx::Bitmap> captured_bitmap()
-    {
-        MutexLocker locker(m_mutex);
-        return m_captured;
-    }
-    void request_capture(Gfx::IntRect const&);
-    void set_host_wallpaper(Gfx::Bitmap* bitmap);
-    // The compositor asks the client to show/hide a window's menu bar.
-    void set_menubar_visibility_callback(Function<void(i32 window_id, bool visible)> callback)
-    {
-        MutexLocker locker(m_mutex);
-        m_menubar_visibility_changed = move(callback);
-    }
-    // The compositor asks the client to close its open menus (see the protocol).
-    void set_dismiss_menus_callback(Function<void()> callback)
-    {
-        MutexLocker locker(m_mutex);
-        m_dismiss_menus = move(callback);
-    }
-    // The compositor tells the client where it placed a window.
-    void set_toplevel_position_callback(Function<void(i32 window_id, Gfx::IntPoint position)> callback)
-    {
-        MutexLocker locker(m_mutex);
-        m_toplevel_position_changed = move(callback);
-    }
     void set_data_device_manager(wl_data_device_manager* manager);
 
     // --- Text input / IME (zwp_text_input_v3) ---
@@ -450,13 +391,6 @@ public:
     void on_layer_closed(zwlr_layer_surface_v1*);
     void on_menu_layer_configure(zwlr_layer_surface_v1*, Gfx::IntSize size);
     void on_menu_layer_closed(zwlr_layer_surface_v1*);
-    void on_menubar_visibility(serenity_toplevel*, bool visible);
-    void on_toplevel_position(serenity_toplevel*, int32_t x, int32_t y);
-    void on_dismiss_menus();
-    void on_host_config(u32 workspace_rows, u32 workspace_columns, double accel_min, double accel_max, u32 scroll_step_min, int double_click_min, int double_click_max);
-    void on_host_settings(StringView blob);
-    void on_host_wallpaper(i32 width, i32 height, i32 pitch, u32 format, i32 fd);
-    void on_captured(u32 serial, i32 width, i32 height, i32 pitch, u32 format, i32 fd);
 
     void on_data_offer(wl_data_offer*);
     void on_data_offer_mime(wl_data_offer*, char const* mime_type);
@@ -499,6 +433,8 @@ public:
     }
 
 private:
+    friend class SerenityShell;
+
     WaylandClient();
     ~WaylandClient();
 
@@ -722,6 +658,8 @@ private:
 
     struct DisplayLinkState {
         bool enabled { false };
+        Function<void()> callback_function;
+        void* callback_owner { nullptr };
         wl_callback* callback { nullptr };
         wl_surface* surface { nullptr };
     };
@@ -758,7 +696,6 @@ private:
     wp_viewporter* m_viewporter { nullptr };
     wp_fractional_scale_manager_v1* m_fractional_scale_manager { nullptr };
     zwlr_layer_shell_v1* m_layer_shell { nullptr };
-    serenity_window_manager* m_serenity_window_manager { nullptr };
     RefPtr<Core::Notifier> m_notifier;
 
     OutputState m_output_state;
@@ -767,17 +704,10 @@ private:
     DataDeviceState m_data_device;
     DisplayLinkState m_display_link;
 
-    HostConfig m_host_config;
-    HashMap<ByteString, ByteString> m_host_settings;
-    RefPtr<Gfx::Bitmap> m_captured;
-    u32 m_capture_serial { 0 };
-    RefPtr<Gfx::Bitmap> m_host_wallpaper;
+    NonnullOwnPtr<SerenityShell> m_serenity_shell;
 
     InputCallbacks m_input;
     Function<void(ByteString const&)> m_connection_lost;
-    Function<void(i32 window_id, bool visible)> m_menubar_visibility_changed;
-    Function<void(i32 window_id, Gfx::IntPoint)> m_toplevel_position_changed;
-    Function<void()> m_dismiss_menus;
 
     HashMap<i32, NonnullOwnPtr<WindowSurface>> m_windows;
     HashMap<i32, NonnullOwnPtr<Popup>> m_popups;

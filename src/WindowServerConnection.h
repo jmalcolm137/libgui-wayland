@@ -23,6 +23,7 @@
 
 #include "MainThreadInvoker.h"
 #include "MenuController.h"
+#include "SerenityShell.h"
 #include "WaylandClient.h"
 #include "WindowServerDefaultStub.h"
 
@@ -68,40 +69,25 @@ private:
         // server-side connection is created later, on that thread, and used to take
         // the hook over -- which both aimed the recompute at an object belonging to
         // another thread and could leave this capture dangling once that object died.
-        auto& host = WaylandClient::the();
-        if (!host.on_host_settings_updated) {
-            host.on_host_settings_updated = [this] {
-                MainThreadInvoker::post_to_server([this] {
-                    apply_theme_from_broker();
-                });
-            };
-            host.on_host_settings_updated_owner = this;
-        }
+        WaylandClient::the().serenity_shell().set_host_settings_changed_callback(this, [this] {
+            MainThreadInvoker::post_to_server([this] {
+                apply_theme_from_broker();
+            });
+        });
         watch_theme();
         watch_fonts();
 
-        // R5: display links. Previewed like the host-settings hook: it captures
+        // R5: display links. Owned like the host-settings hook: it captures
         // `this`, so the first connection owns it and the destructor clears it.
-        auto& display = WaylandClient::the();
-        if (!display.on_display_link) {
-            display.on_display_link = [this] { async_display_link_notification(); };
-            display.on_display_link_owner = this;
-        }
+        WaylandClient::the().set_display_link_callback(this, [this] { async_display_link_notification(); });
     }
 
     ~WindowServerConnection()
     {
-        // Drop the host-settings hook if it is ours: it captures `this`, and settings
-        // keep arriving after a connection is torn down.
-        auto& host = WaylandClient::the();
-        if (host.on_host_settings_updated_owner == this) {
-            host.on_host_settings_updated = nullptr;
-            host.on_host_settings_updated_owner = nullptr;
-        }
-        if (host.on_display_link_owner == this) {
-            host.on_display_link = nullptr;
-            host.on_display_link_owner = nullptr;
-        }
+        // Drop the hooks if they are ours: they capture `this`, and settings and
+        // frames keep arriving after a connection is torn down.
+        WaylandClient::the().serenity_shell().clear_host_settings_changed_callback(this);
+        WaylandClient::the().clear_display_link_callback(this);
     }
 
     struct Window {

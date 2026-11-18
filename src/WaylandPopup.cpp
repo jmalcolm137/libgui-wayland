@@ -5,11 +5,11 @@
  */
 
 #include "WaylandClient.h"
+#include "SerenityShell.h"
 #include <LibGfx/Bitmap.h>
 #include <string.h>
 #include <wayland-client.h>
 
-#include "serenity-window-client-protocol.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
 
@@ -118,19 +118,6 @@ void WaylandClient::on_menu_layer_closed(zwlr_layer_surface_v1* layer_surface)
     }
 }
 
-void WaylandClient::on_menubar_visibility(serenity_toplevel* resource, bool visible)
-{
-    MutexLocker locker(m_mutex);
-    for (auto const& it : m_windows) {
-        if (it.value->chrome == resource) {
-            it.value->menubar_visible = visible;
-            if (m_menubar_visibility_changed)
-                m_menubar_visibility_changed(it.value->window_id, visible);
-            return;
-        }
-    }
-}
-
 bool WaylandClient::window_menubar_visible(i32 window_id) const
 {
     MutexLocker locker(m_mutex);
@@ -161,8 +148,8 @@ void WaylandClient::set_window_inset(i32 window_id, int inset, Function<void(Gfx
     window_surface->inset_dirty = true;
     window_surface->composed_valid = false;
 
-    bool const direct = m_subcompositor && window_surface->chrome && window_surface->csd_height() == 0
-        && wl_proxy_get_version(reinterpret_cast<wl_proxy*>(window_surface->chrome)) >= 2;
+    bool const direct = m_subcompositor && window_surface->csd_height() == 0
+        && SerenityShell::supports_menubar_inset(window_surface->chrome);
     // Drop the old composed buffer if we are switching to the direct path.
     if (direct && window_surface->menubar_surface == nullptr) {
         window_surface->composed_bitmap = nullptr;
@@ -177,7 +164,7 @@ void WaylandClient::set_window_inset(i32 window_id, int inset, Function<void(Gfx
             wl_subsurface_set_desync(window_surface->menubar_subsurface);
         }
         wl_subsurface_set_position(window_surface->menubar_subsurface, 0, -inset);
-        serenity_toplevel_set_menubar_inset(window_surface->chrome, inset);
+        m_serenity_shell->set_menubar_inset(window_surface->chrome, inset);
         wl_surface_commit(window_surface->surface);
         wl_display_flush(m_display);
     } else {
@@ -196,10 +183,7 @@ void WaylandClient::set_window_inset(i32 window_id, int inset, Function<void(Gfx
         }
         window_surface->menubar_bitmap = nullptr;
         window_surface->menubar_buffer = {};
-        if (window_surface->chrome && wl_proxy_get_version(reinterpret_cast<wl_proxy*>(window_surface->chrome)) >= 2) {
-            serenity_toplevel_set_menubar_inset(window_surface->chrome, 0);
-            wl_display_flush(m_display);
-        }
+        m_serenity_shell->set_menubar_inset(window_surface->chrome, 0);
     }
 
     // Non-resizable windows are pinned to their original size (plus inset);

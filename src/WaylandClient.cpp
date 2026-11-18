@@ -5,12 +5,12 @@
  */
 
 #include "WaylandClient.h"
+#include "SerenityShell.h"
 #include <LibCore/EventLoop.h>
 #include <LibCore/Notifier.h>
 #include <errno.h>
 #include <poll.h>
 #include <string.h>
-#include <sys/mman.h>
 #include <unistd.h>
 #include <wayland-client.h>
 
@@ -57,7 +57,7 @@ static void registry_global(void* data, wl_registry* registry, uint32_t name, ch
     } else if (!strcmp(interface, zwlr_layer_shell_v1_interface.name)) {
         self.set_layer_shell(reinterpret_cast<zwlr_layer_shell_v1*>(wl_registry_bind(registry, name, &zwlr_layer_shell_v1_interface, min(version, 4u))));
     } else if (!strcmp(interface, serenity_window_manager_interface.name)) {
-        self.set_serenity_window_manager(reinterpret_cast<serenity_window_manager*>(wl_registry_bind(registry, name, &serenity_window_manager_interface, min(version, 3u))));
+        self.serenity_shell().bind(reinterpret_cast<serenity_window_manager*>(wl_registry_bind(registry, name, &serenity_window_manager_interface, min(version, 3u))));
     } else if (!strcmp(interface, zwp_text_input_manager_v3_interface.name)) {
         self.set_text_input_manager(reinterpret_cast<zwp_text_input_manager_v3*>(wl_registry_bind(registry, name, &zwp_text_input_manager_v3_interface, 1)));
     }
@@ -136,210 +136,10 @@ static zxdg_output_v1_listener const s_xdg_output_listener = {
     .description = xdg_output_description,
 };
 
-// --- serenity_window_manager --------------------------------------------------
-
-static void serenity_window_manager_host_config(void* data, serenity_window_manager*,
-    uint32_t workspace_rows, uint32_t workspace_columns, wl_fixed_t accel_min, wl_fixed_t accel_max,
-    uint32_t scroll_step_min, int32_t double_click_min, int32_t double_click_max)
-{
-    static_cast<WaylandClient*>(data)->on_host_config(workspace_rows, workspace_columns,
-        wl_fixed_to_double(accel_min), wl_fixed_to_double(accel_max),
-        scroll_step_min, double_click_min, double_click_max);
-}
-
-static void serenity_window_manager_wallpaper(void* data, serenity_window_manager*, int32_t width, int32_t height, int32_t pitch, uint32_t format, int32_t fd)
-{
-    static_cast<WaylandClient*>(data)->on_host_wallpaper(width, height, pitch, format, fd);
-}
-
-static void serenity_window_manager_host_settings(void* data, serenity_window_manager*, char const* settings)
-{
-    static_cast<WaylandClient*>(data)->on_host_settings(StringView { settings, strlen(settings) });
-}
-
-static void serenity_window_manager_dismiss_menus(void* data, serenity_window_manager*)
-{
-    static_cast<WaylandClient*>(data)->on_dismiss_menus();
-}
-
-static void serenity_window_manager_captured(void* data, serenity_window_manager*, uint32_t serial, int32_t width, int32_t height, int32_t pitch, uint32_t format, int32_t fd)
-{
-    static_cast<WaylandClient*>(data)->on_captured(serial, width, height, pitch, format, fd);
-}
-
-static serenity_window_manager_listener const s_serenity_window_manager_listener = {
-    .host_settings = serenity_window_manager_host_settings,
-    .wallpaper = serenity_window_manager_wallpaper,
-    .dismiss_menus = serenity_window_manager_dismiss_menus,
-    .host_config = serenity_window_manager_host_config,
-    .captured = serenity_window_manager_captured,
-};
-
-void WaylandClient::set_serenity_window_manager(serenity_window_manager* manager)
-{
-    MutexLocker locker(m_mutex);
-    m_serenity_window_manager = manager;
-    if (manager)
-        serenity_window_manager_add_listener(manager, &s_serenity_window_manager_listener, this);
-}
-
-void WaylandClient::on_host_config(u32 workspace_rows, u32 workspace_columns, double accel_min, double accel_max, u32 scroll_step_min, int double_click_min, int double_click_max)
-{
-    MutexLocker locker(m_mutex);
-    m_host_config.workspace_rows = workspace_rows > 0 ? workspace_rows : 1;
-    m_host_config.workspace_columns = workspace_columns > 0 ? workspace_columns : 1;
-    m_host_config.accel_min = accel_min;
-    m_host_config.accel_max = accel_max;
-    m_host_config.scroll_step_min = scroll_step_min;
-    m_host_config.double_click_min = double_click_min;
-    m_host_config.double_click_max = double_click_max;
-    dbgln("LibWM: host config: workspaces {}x{}, accel {}-{}, scroll min {}, double-click {}-{}",
-        m_host_config.workspace_rows, m_host_config.workspace_columns, m_host_config.accel_min, m_host_config.accel_max,
-        m_host_config.scroll_step_min, m_host_config.double_click_min, m_host_config.double_click_max);
-}
-
-void WaylandClient::on_host_wallpaper(i32 width, i32 height, i32 pitch, u32 format, i32 fd)
-{
-    MutexLocker locker(m_mutex);
-    m_host_wallpaper = nullptr;
-    if (fd < 0 || width <= 0 || height <= 0 || pitch <= 0)
-        return;
-    auto size = static_cast<size_t>(pitch) * static_cast<size_t>(height);
-    auto* mapped = mmap(nullptr, size, PROT_READ, MAP_SHARED, fd, 0);
-    if (mapped != MAP_FAILED) {
-        if (auto bitmap = Gfx::Bitmap::create(static_cast<Gfx::BitmapFormat>(format), { width, height }); !bitmap.is_error()) {
-            auto& created = *bitmap.value();
-            auto const row_bytes = min(static_cast<size_t>(pitch), static_cast<size_t>(created.pitch()));
-            for (int y = 0; y < height; ++y)
-                memcpy(created.scanline(y), static_cast<u8 const*>(mapped) + static_cast<size_t>(y) * static_cast<size_t>(pitch), row_bytes);
-            m_host_wallpaper = bitmap.release_value();
-        }
-        munmap(mapped, size);
-    }
-    close(fd);
-    dbgln("LibWM: host wallpaper {}x{}", width, height);
-}
-
-void WaylandClient::on_captured(u32, i32 width, i32 height, i32 pitch, u32 format, i32 fd)
-{
-    MutexLocker locker(m_mutex);
-    if (fd >= 0 && width > 0 && height > 0 && pitch > 0) {
-        auto const size = static_cast<size_t>(pitch) * static_cast<size_t>(height);
-        auto* mapped = mmap(nullptr, size, PROT_READ, MAP_SHARED, fd, 0);
-        if (mapped != MAP_FAILED) {
-            if (auto bitmap = Gfx::Bitmap::create(static_cast<Gfx::BitmapFormat>(format), { width, height }); !bitmap.is_error()) {
-                auto& created = *bitmap.value();
-                auto const row_bytes = min(static_cast<size_t>(pitch), static_cast<size_t>(created.pitch()));
-                for (int y = 0; y < height; ++y)
-                    memcpy(created.scanline(y), static_cast<u8 const*>(mapped) + static_cast<size_t>(y) * static_cast<size_t>(pitch), row_bytes);
-                m_captured = bitmap.release_value();
-            }
-            munmap(mapped, size);
-        }
-    }
-    if (fd >= 0)
-        close(fd);
-}
-
-void WaylandClient::request_capture(Gfx::IntRect const& region)
-{
-    MutexLocker locker(m_mutex);
-    if (!m_serenity_window_manager || region.is_empty())
-        return;
-    serenity_window_manager_request_capture(m_serenity_window_manager, ++m_capture_serial,
-        region.x(), region.y(), region.width(), region.height());
-    wl_display_flush(m_display);
-}
-
-void WaylandClient::set_host_wallpaper(Gfx::Bitmap* bitmap)
-{
-    MutexLocker locker(m_mutex);
-    int fd = -1;
-    if (bitmap) {
-        auto name = ByteString::formatted("libwm-wallpaper-{}", getpid());
-        fd = memfd_create(name.characters(), 0);
-        if (fd >= 0) {
-            auto size = static_cast<size_t>(bitmap->pitch()) * static_cast<size_t>(bitmap->height());
-            auto* mapped = MAP_FAILED;
-            if (ftruncate(fd, static_cast<off_t>(size)) == 0)
-                mapped = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-            if (mapped != MAP_FAILED) {
-                memcpy(mapped, bitmap->scanline(0), size);
-                munmap(mapped, size);
-            } else {
-                close(fd);
-                fd = -1;
-            }
-        }
-    }
-    if (m_serenity_window_manager) {
-        // A `h` argument must be a real file descriptor: libwayland cannot dup a
-        // -1, and aborts the whole request (breaking this connection with it).
-        // "No wallpaper" is expressed by a zero width/height, so hand over a
-        // valid placeholder fd in that case.
-        if (fd < 0)
-            fd = memfd_create("libwm-wallpaper-none", MFD_CLOEXEC);
-        serenity_window_manager_set_wallpaper(m_serenity_window_manager,
-            bitmap ? bitmap->width() : 0, bitmap ? bitmap->height() : 0,
-            bitmap ? bitmap->pitch() : 0,
-            bitmap ? static_cast<uint32_t>(bitmap->format()) : 0, fd);
-        wl_display_flush(m_display);
-    }
-    if (fd >= 0)
-        close(fd);
-    // Keep our own answers current.
-    m_host_wallpaper = bitmap;
-}
-
-void WaylandClient::on_host_settings(StringView blob)
-{
-    MutexLocker locker(m_mutex);
-    m_host_settings.clear();
-    for (auto line : blob.split_view('\n')) {
-        if (line.is_empty())
-            continue;
-        auto separator = line.find('=');
-        if (!separator.has_value())
-            continue;
-        m_host_settings.set(line.substring_view(0, *separator).to_byte_string(), line.substring_view(*separator + 1).to_byte_string());
-    }
-    dbgln("LibWM: host settings: {} entries", m_host_settings.size());
-    if (on_host_settings_updated)
-        on_host_settings_updated();
-}
-
-ByteString WaylandClient::host_setting(StringView key, StringView fallback) const
-{
-    MutexLocker locker(m_mutex);
-    if (auto it = m_host_settings.find(ByteString { key }); it != m_host_settings.end())
-        return ByteString { it->value.view() };
-    return ByteString { fallback };
-}
-
-void WaylandClient::set_host_setting(StringView key, StringView value)
-{
-    MutexLocker locker(m_mutex);
-    // Keep our own answers current, and hand the change to the desktop, which
-    // applies and persists it.
-    m_host_settings.set(ByteString { key }, ByteString { value });
-    if (m_serenity_window_manager) {
-        auto k = key.to_byte_string();
-        auto v = value.to_byte_string();
-        serenity_window_manager_set_host_setting(m_serenity_window_manager, k.characters(), v.characters());
-        wl_display_flush(m_display);
-    }
-}
-
-void WaylandClient::on_dismiss_menus()
-{
-    MutexLocker locker(m_mutex);
-    if (m_dismiss_menus)
-        m_dismiss_menus();
-}
-
 // --- connection & output lifecycle --------------------------------------------
 
 WaylandClient::WaylandClient()
+    : m_serenity_shell(make<SerenityShell>(*this))
 {
     pthread_mutexattr_t attributes;
     pthread_mutexattr_init(&attributes);
@@ -526,6 +326,24 @@ static wl_callback_listener const s_display_link_listener = {
     .done = display_link_frame_done,
 };
 
+void WaylandClient::set_display_link_callback(void* owner, Function<void()> callback)
+{
+    MutexLocker locker(m_mutex);
+    if (m_display_link.callback_owner)
+        return;
+    m_display_link.callback_owner = owner;
+    m_display_link.callback_function = move(callback);
+}
+
+void WaylandClient::clear_display_link_callback(void* owner)
+{
+    MutexLocker locker(m_mutex);
+    if (m_display_link.callback_owner != owner)
+        return;
+    m_display_link.callback_owner = nullptr;
+    m_display_link.callback_function = nullptr;
+}
+
 void WaylandClient::enable_display_link()
 {
     MutexLocker locker(m_mutex);
@@ -580,8 +398,8 @@ void WaylandClient::on_display_link_frame_done(wl_callback* callback)
     wl_callback_destroy(callback);
     m_display_link.callback = nullptr;
     m_display_link.surface = nullptr;
-    if (on_display_link)
-        on_display_link();
+    if (m_display_link.callback_function)
+        m_display_link.callback_function();
     // Re-arm for the next refresh; the app's repaint in response is the damage
     // that makes the compositor render this surface again.
     request_display_link_frame();

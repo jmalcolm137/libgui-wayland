@@ -26,6 +26,7 @@ add_library(windowserver SHARED
     LaunchServerConnection.cpp
     LibWM.cpp
     MenuController.cpp
+    SerenityShell.cpp
     WaylandClient.cpp
     WaylandDataDevice.cpp
     WaylandInput.cpp
