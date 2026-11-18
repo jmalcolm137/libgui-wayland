@@ -54,11 +54,9 @@ struct zwlr_layer_shell_v1;
 struct zwlr_layer_surface_v1;
 struct serenity_toplevel;
 
-
 namespace Core {
 class Notifier;
 }
-
 
 namespace LibWM {
 
@@ -67,16 +65,24 @@ class WaylandDataDevice;
 class WaylandOutputs;
 class WaylandSeat;
 
-// A thin wrapper over the real Wayland compositor.
+// The connection to the real Wayland compositor.
 //
-// This is the source of truth for environmental state (principle P1): output
-// logical size and scale, seat capabilities, input, shm, and the xdg-shell
-// objects used to present LibGUI windows.
+// This is the source of truth for environmental state (principle P1). It owns
+// the wl_display, the registry and core globals, the windows and menu popups
+// (WaylandSurface.cpp, WaylandPopup.cpp), and one object per protocol area:
+//
+//   outputs()        WaylandOutputs     screen size, output and client scales
+//   seat()           WaylandSeat        pointer, keyboard, text input, cursor
+//   data_device()    WaylandDataDevice  clipboard and drag-and-drop
+//   serenity_shell() SerenityShell      the optional SerenityDE integration
+//
+// Those are friends: they share this object's mutex, globals and window table.
 //
 // Threading: Wayland events are dispatched on the main thread, while the
 // in-process portal servers (WindowServerConnection, ClipboardServerConnection)
 // invoke methods from the LibWM server thread. Access to shared state is
-// serialized by the recursive mutex `m_mutex` (and per-surface `WindowSurface::mutex`).
+// serialized by the recursive mutex `m_mutex` (and per-surface
+// `WindowSurface::mutex`, always taken after `m_mutex`).
 class WaylandClient {
 public:
     struct MutexLocker {
@@ -215,7 +221,7 @@ public:
     // Wayland event dispatch (registered on the owning event loop).
     void dispatch();
 
-    // --- called by the C protocol listeners ---
+    // --- registry globals and protocol events (called by the C listeners) ---
     struct BufferRecord {
         wl_buffer* buffer { nullptr };
         bool released { false };

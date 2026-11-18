@@ -995,11 +995,14 @@ src/                          LibWM (libwindowserver.so); src/CMakeLists.txt is 
   LibWM.{h,cpp}               portal registration, server thread, on-demand service spawning
   Environment.{h,cpp}         every environment variable LibWM reads, and the portal path table
   WindowServerConnection.{h,cpp}, WindowServerSettings.cpp   WindowServer protocol server
-  WaylandClient.{h,cpp}       registry, outputs, shared state; split by area into
+  WaylandClient.{h,cpp}       display, registry, core globals, window table, dispatch
     WaylandSurface.cpp        xdg_toplevel/layer windows, CSD, presentation, fractional scale
     WaylandPopup.cpp          menu popups, menubar subsurface
-    WaylandInput.cpp          seat, pointer, keyboard/XKB, text-input, cursors
-    WaylandDataDevice.cpp     clipboard and drag-and-drop
+  WaylandOutputs.{h,cpp}      wl_output/zxdg_output: screen size, output and client scales
+  WaylandSeat.{h,cpp}         seat, pointer, keyboard/XKB, text-input, cursors
+  WaylandDataDevice.{h,cpp}   clipboard and drag-and-drop
+  SerenityShell.{h,cpp}       optional serenity-window protocol (SerenityDE): host settings,
+                              wallpaper, capture, compositor-driven chrome
   MenuController.{h,cpp}      server-rendered menubar and menus
   {Clipboard,Config,Launch,FileSystemAccess}ServerConnection.{h,cpp}   in-process portals
   *DefaultStub.h              GENERATED per-endpoint stubs (tools/gen-default-stub.py)
