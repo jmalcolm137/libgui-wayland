@@ -43,11 +43,13 @@ check() {
 }
 
 # --- 1. Direct LibWM unit tests (MenuController, PNG transcoding, Config) ----
+UNIT_EXIT=0
 env XDG_RUNTIME_DIR="$RUNTIME" XDG_CONFIG_HOME="$RUNTIME/config" SDE_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY="" \
     SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
     LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-    "$BUILD_DIR/bin/libwm-unit-test" > "$RUNTIME/unit.log" 2>&1
-check "unit: MenuController, PNG, Config & concurrency" "grep -q '53 passed, 0 failed' '$RUNTIME/unit.log'"
+    "$BUILD_DIR/bin/libwm-unit-test" > "$RUNTIME/unit.log" 2>&1 || UNIT_EXIT=$?
+check "unit: MenuController, PNG, Config & concurrency" "[[ $UNIT_EXIT -eq 0 ]] && grep -qE '[1-9][0-9]* passed, 0 failed' '$RUNTIME/unit.log'"
+[[ $UNIT_EXIT -eq 0 ]] || grep -E 'FAIL|passed' "$RUNTIME/unit.log" || true
 
 # --- 2. Window state transitions (fullscreen, maximize, minimize, resize) ----
 cat > "$RUNTIME/fs.input" <<'EOF'

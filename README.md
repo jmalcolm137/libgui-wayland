@@ -147,12 +147,23 @@ still working where a backend exists.
 ```sh
 scripts/fetch-serenity.sh              # pinned, blobless, sparse checkout
 scripts/fetch-headless-compositor.sh   # pinned clone of xlib-wayland (pure-Wayland compositor)
-scripts/build-libgui.sh                # patches + LibGfx/LibGUI/LibWM/Calculator + all tests
+scripts/check.sh                       # patches + build + every LibWM test suite (what CI runs)
 ```
 
-`build-libgui.sh` runs the upstream LibGfx test suite and the headless integration tests
-(input, clipboard, menus, PDFViewer, 3DFileViewer GL, Piano) automatically; pass `--no-tests` to
-skip.
+The suites are registered with CTest (`src/test/CMakeLists.txt`), so after a build they can also
+be run selectively:
+
+```sh
+ctest --test-dir build/lagom -L '^libwm$' --output-on-failure   # everything
+ctest --test-dir build/lagom -L integration                      # by label: integration, apps, gl, tools, upstream
+ctest --test-dir build/lagom -R libwm.menu                       # one suite
+```
+
+`scripts/build-libgui.sh` builds without testing when passed `--no-tests`. Build prerequisites
+(Arch package names, as installed by `.github/workflows/ci.yml`): `base-devel git cmake ninja
+meson python wayland wayland-protocols libxkbcommon mesa libglvnd systemd-libs elfutils
+libunwind`, plus `cairo freetype2 fontconfig pixman libxrender` for the headless test compositor.
+Runtime environment variables are listed in DESIGN.md §8.2.
 
 To keep a log and get a Jev triage card when the build or a test fails:
 

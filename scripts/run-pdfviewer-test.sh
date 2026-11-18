@@ -22,7 +22,7 @@ ninja -C "$BUILD_DIR" PDFViewer >/dev/null
 
 RUNTIME="$(mktemp -d "${TMPDIR:-/tmp}/libwm-pdf.XXXXXX")"
 chmod 700 "$RUNTIME"
-trap 'rm -rf "$RUNTIME"' EXIT
+trap '[[ "${KEEP:-0}" == "1" ]] || rm -rf "$RUNTIME"' EXIT
 
 printf 'sleep 4000\n' > "$RUNTIME/input.txt"
 

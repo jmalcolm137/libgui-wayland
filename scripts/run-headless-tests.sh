@@ -25,7 +25,7 @@ ninja -C "$BUILD_DIR" libwm-test-window >/dev/null
 RUNTIME="$(mktemp -d "${TMPDIR:-/tmp}/libwm-headless.XXXXXX")"
 chmod 700 "$RUNTIME"
 mkdir -p "$RUNTIME/session/portal"
-trap 'rm -rf "$RUNTIME"' EXIT
+trap '[[ "${KEEP:-0}" == "1" ]] || rm -rf "$RUNTIME"' EXIT
 
 cat > "$RUNTIME/input.txt" <<'EOF'
 sleep 1200

@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    # Arch matches the development toolchain (a current GCC for -std=c++26 with
+    # -Werror, and current wayland-protocols for fractional-scale-v1).
+    container: archlinux:latest
+    timeout-minutes: 240
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 2G
+      ENABLE_LAGOM_CCACHE: "ON"
+      # Keep each suite's runtime directory (logs, captured frames) for upload.
+      KEEP: "1"
+      TMPDIR: ${{ github.workspace }}/test-runtime
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm --needed \
+            base-devel git cmake ninja meson python ccache \
+            wayland wayland-protocols libxkbcommon \
+            mesa libglvnd systemd-libs elfutils libunwind \
+            cairo freetype2 fontconfig pixman libxrender
+
+      - uses: actions/checkout@v4
+
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-${{ hashFiles('scripts/fetch-serenity.sh', 'patches/*.patch') }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ hashFiles('scripts/fetch-serenity.sh', 'patches/*.patch') }}-
+            ccache-
+
+      - name: Fetch SerenityOS and the headless compositor
+        run: |
+          ./scripts/fetch-serenity.sh
+          ./scripts/fetch-headless-compositor.sh
+
+      - name: Build and run the LibWM test suites
+        run: |
+          mkdir -p "$TMPDIR"
+          ./scripts/check.sh
+
+      - name: Compiler cache statistics
+        if: always()
+        run: ccache --show-stats || true
+
+      - name: Upload test logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-runtime
+          path: |
+            test-runtime/
+            build/lagom/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore

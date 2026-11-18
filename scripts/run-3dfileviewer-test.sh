@@ -28,7 +28,7 @@ ninja -C "$BUILD_DIR" 3DFileViewer >/dev/null
 
 RUNTIME="$(mktemp -d "${TMPDIR:-/tmp}/libwm-3d.XXXXXX")"
 chmod 700 "$RUNTIME"
-trap 'rm -rf "$RUNTIME"' EXIT
+trap '[[ "${KEEP:-0}" == "1" ]] || rm -rf "$RUNTIME"' EXIT
 
 # Let the render loop run for a few seconds so several frames are drawn, then
 # the compositor takes its screenshot.

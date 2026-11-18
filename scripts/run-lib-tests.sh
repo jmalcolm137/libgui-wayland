@@ -29,11 +29,11 @@ cd "$SERENITY_SRC/Tests/LibGfx"
 failures=0
 for test in "${TESTS[@]}"; do
     printf '%-18s ' "$test"
-    if "$BUILD_DIR/bin/$test" >/tmp/libwm-$test.log 2>&1; then
+    if "$BUILD_DIR/bin/$test" >"${TMPDIR:-/tmp}/libwm-$test.log" 2>&1; then
         echo PASS
     else
         echo FAIL
-        tail -5 "/tmp/libwm-$test.log"
+        tail -5 "${TMPDIR:-/tmp}/libwm-$test.log"
         failures=$((failures + 1))
     fi
 done

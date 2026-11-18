@@ -137,27 +137,16 @@ cmake -S "$SERENITY_SRC/Meta/Lagom" -B "$BUILD_DIR" -GNinja \
     -DENABLE_LAGOM_LIBWEB=ON \
     -DENABLE_LAGOM_LADYBIRD=OFF \
     -DENABLE_CLANG_PLUGINS=OFF \
-    -DENABLE_LAGOM_CCACHE=OFF \
+    -DENABLE_LAGOM_CCACHE="${ENABLE_LAGOM_CCACHE:-OFF}" \
     -DCMAKE_BUILD_TYPE=Release
 
 echo "==> Building: ${TARGETS[*]}"
 ninja -C "$BUILD_DIR" -j"$JOBS" "${TARGETS[@]}"
 
 if [[ "$RUN_TESTS" == "1" ]]; then
-    echo "==> Running upstream library test suites (set RUN_TESTS=0 or pass --no-tests to skip)"
-    SERENITY_SRC="$SERENITY_SRC" BUILD_DIR="$BUILD_DIR" "$PROJECT_ROOT/scripts/run-lib-tests.sh"
-    echo "==> Running headless integration test"
-    SERENITY_SRC="$SERENITY_SRC" BUILD_DIR="$BUILD_DIR" "$PROJECT_ROOT/scripts/run-headless-tests.sh"
-    echo "==> Running window-state, HiDPI, unit & portal integration tests"
-    SERENITY_SRC="$SERENITY_SRC" BUILD_DIR="$BUILD_DIR" "$PROJECT_ROOT/scripts/run-window-and-portal-tests.sh"
-    echo "==> Running clipboard integration test"
-    SERENITY_SRC="$SERENITY_SRC" BUILD_DIR="$BUILD_DIR" "$PROJECT_ROOT/scripts/run-clipboard-test.sh"
-    echo "==> Running menu integration test"
-    SERENITY_SRC="$SERENITY_SRC" BUILD_DIR="$BUILD_DIR" "$PROJECT_ROOT/scripts/run-menu-test.sh"
-    echo "==> Running PDFViewer integration test"
-    SERENITY_SRC="$SERENITY_SRC" BUILD_DIR="$BUILD_DIR" "$PROJECT_ROOT/scripts/run-pdfviewer-test.sh"
-    echo "==> Running 3DFileViewer GL integration test"
-    SERENITY_SRC="$SERENITY_SRC" BUILD_DIR="$BUILD_DIR" "$PROJECT_ROOT/scripts/run-3dfileviewer-test.sh"
+    # The suites are registered with CTest in src/test/CMakeLists.txt.
+    echo "==> Running the LibWM test suites (set RUN_TESTS=0 or pass --no-tests to skip)"
+    ctest --test-dir "$BUILD_DIR" -L '^libwm$' --output-on-failure
 fi
 
 echo "==> Done. Libraries in $BUILD_DIR/lib"

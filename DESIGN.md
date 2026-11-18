@@ -988,29 +988,36 @@ The general rule: **read** compositor state from standard Wayland (`wl_output`/`
 DESIGN.md                     this document
 README.md                     quick start, status, limitations
 LICENSE                       BSD-2-Clause (matches SerenityOS)
-patches/                      build-system and LibCore host seams applied to the checkout
-  0001-lagom-build-full-libgui.patch
-  0002-libcore-host-seams.patch
-scripts/fetch-serenity.sh     pinned, blobless, sparse checkout of SerenityOS
-scripts/build-libgui.sh       apply patches + build LibGfx/LibGUI/LibWM/apps + run tests
-scripts/run-lib-tests.sh      upstream LibGfx test suite
-scripts/fetch-headless-compositor.sh   pinned clone of xlib-wayland (pure-Wayland compositor)
-scripts/build-headless-compositor.sh   Meson-build just the headless-compositor target
-scripts/run-headless-tests.sh headless app + synthetic-input integration test
-scripts/run-clipboard-test.sh native clipboard integration test (read + write)
-src/                          LibWM
-  LibWM.{h,cpp}               portal registration + server threads
-  WindowServerConnection.{h,cpp}  WindowServer protocol server
-  WaylandClient.{h,cpp}       real compositor: registry, output, xdg_toplevel, wl_shm, seat/input
-  LaunchServerConnection.h    minimal LaunchServer (startup allowlist)
-  ClipboardServerConnection.h minimal ClipboardServer (empty data)
+.github/workflows/ci.yml      build + all LibWM suites on every push (Arch container)
+cmake/LibWMHelpers.cmake      libwm_wayland_protocol(), libwm_gui_executable()
+patches/                      build-system and host seams applied to the SerenityOS checkout
+src/                          LibWM (libwindowserver.so); src/CMakeLists.txt is the Lagom entry point
+  LibWM.{h,cpp}               portal registration, server thread, on-demand service spawning
+  Environment.{h,cpp}         every environment variable LibWM reads, and the portal path table
+  WindowServerConnection.{h,cpp}, WindowServerSettings.cpp   WindowServer protocol server
+  WaylandClient.{h,cpp}       registry, outputs, shared state; split by area into
+    WaylandSurface.cpp        xdg_toplevel/layer windows, CSD, presentation, fractional scale
+    WaylandPopup.cpp          menu popups, menubar subsurface
+    WaylandInput.cpp          seat, pointer, keyboard/XKB, text-input, cursors
+    WaylandDataDevice.cpp     clipboard and drag-and-drop
+  MenuController.{h,cpp}      server-rendered menubar and menus
+  {Clipboard,Config,Launch,FileSystemAccess}ServerConnection.{h,cpp}   in-process portals
   *DefaultStub.h              GENERATED per-endpoint stubs (tools/gen-default-stub.py)
-  test/TestWindow.cpp         minimal unmodified-style LibGUI test app
+  protocol/                   wlr-layer-shell and serenity-window protocol XML
+  test/                       LibWM test programs + CTest registration of the scripts below
+services/                     upstream WebContent, RequestServer, SQLServer (spawned on demand)
+apps/                         upstream Calculator, PDFViewer, Piano (driven by the integration tests)
+libeglgpu/                    Mesa/EGL GPU::Device backend for LibGL apps
+scripts/fetch-serenity.sh     pinned, blobless, sparse checkout of SerenityOS
+scripts/build-libgui.sh       apply patches + build the framework (+ run tests unless --no-tests)
+scripts/check.sh              build + `ctest -L libwm`; what CI runs
+scripts/run-*.sh              the integration suites (each registered with CTest)
+scripts/fetch-headless-compositor.sh, build-headless-compositor.sh   xlib-wayland test compositor
 serenity/                     pinned SerenityOS checkout (gitignored)
 third_party/xlib-wayland/     pinned checkout, used only for its headless compositor (gitignored)
 build/                        host build outputs (gitignored)
 tools/gen-default-stub.py     generate a default stub for any IPC endpoint
-tools/wl-clipboard-peer.c     native libwayland-client clipboard peer (tests)
+tools/wl-clipboard-peer.c     native libwayland-client clipboard/DnD peer (tests)
 ```
 
 Changes to files under `third_party/xlib-wayland/` (e.g. compositor improvements) are made in
@@ -1018,17 +1025,25 @@ that checkout and **pushed back to `github.com/jmalcolm137/xlib-wayland`**, not 
 
 ### 8.2 Environment variables
 
-| Variable | Default | Used by |
+Read at run time by LibWM (all lookups live in `src/Environment.cpp`):
+
+| Variable | Default | Effect |
 |---|---|---|
-| `LIBWM_PREFIX` | `~/.local/libgui-wayland` | build/run scripts |
-| `SERENITY_PREFIX` | `$LIBWM_PREFIX/serenity` | host-built LibGfx/LibGUI |
-| `SERENITY_SRC` | `serenity/` | pinned upstream source |
-| `SERENITY_RES_ROOT` | (unset → `/res`) | LibCore resource root; must point at `serenity/Base/res` |
-| `LIBWM_RES` | `$LIBWM_PREFIX/share/serenity/res` | bundled fonts/themes/icons |
-| `XLIB_WAYLAND_SRC` | `third_party/xlib-wayland` | headless-compositor checkout |
-| `XLIB_WAYLAND_BUILD` | `build/xlib-wayland` | headless-compositor build dir |
-| `LIBWM_TRACE` | unset | protocol/verbose logging |
-| `WAYLAND_DISPLAY` | session | target compositor |
+| `LIBWM_RES` | — | Resource tree (fonts, themes, icons, cursors); wins over `SERENITY_RES_ROOT` |
+| `SERENITY_RES_ROOT` | build tree's `serenity/Base/res` | Resource tree; LibWM sets it if unset so `/res/...` paths resolve |
+| `LIBWM_CONFIG_DIR` | `$XDG_CONFIG_HOME/libgui-wayland` or `~/.config/libgui-wayland` | Where the in-process ConfigServer persists `<domain>.ini` |
+| `LIBWM_APP_BIN_DIR` (`SDE_APP_BIN_DIR`) | directory of the running executable | Where service and application binaries are spawned from |
+| `SDE_CLIENT_SCALE` | follow the compositor | Force a HiDPI scale (`2`, `1.5`, ...); `0` forces 1x |
+| `LIBWM_FORCE_CSD` | off | Draw client-side titlebars even if server-side decorations are offered |
+| `LIBWM_DUMP` | — | Write each presented window to this PNG path (debugging) |
+| `LIBWM_AXIS_DEBUG` | off | Log raw scroll-axis events |
+| `SDE_STATE_DIR` | `$XDG_CONFIG_HOME/sde` | SerenityDE state (wallpaper) shared with the compositor |
+| `XDG_RUNTIME_DIR` | `/tmp` | Location of the SerenityDE theme/font broker files |
+| `WAYLAND_DISPLAY` | session | Target compositor |
+
+Read by the scripts: `SERENITY_SRC` (`serenity/`), `BUILD_DIR` (`build/lagom`), `HC` (headless
+compositor binary), `XLIB_WAYLAND_SRC`/`XLIB_WAYLAND_BUILD`, `ENABLE_LAGOM_CCACHE` (`OFF`),
+`KEEP=1` (keep each suite's runtime directory), `RUN_TESTS`.
 
 ### 8.3 WindowServer method disposition (client→server, as called by LibGUI)
 
