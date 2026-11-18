@@ -5,6 +5,7 @@
  */
 
 #include "WaylandClient.h"
+#include "Environment.h"
 #include <Kernel/API/KeyCode.h>
 #include <LibGUI/Event.h>
 #include <LibGfx/Bitmap.h>
@@ -718,7 +719,7 @@ void WaylandClient::on_pointer_axis_delta(double x, double y)
     m_input_state.axis_accum_y += y;
     auto step_x = static_cast<i32>(m_input_state.axis_accum_x);
     auto step_y = static_cast<i32>(m_input_state.axis_accum_y);
-    if (getenv("LIBWM_AXIS_DEBUG"))
+    if (Environment::is_enabled("LIBWM_AXIS_DEBUG"))
         dbgln("LibWM/Wayland: axis delta {}x{} -> step {}x{}", x, y, step_x, step_y);
     if (step_x == 0 && step_y == 0)
         return;
@@ -907,6 +908,39 @@ static StringView standard_cursor_filename(Gfx::StandardCursor cursor)
     }
 }
 
+Optional<WaylandClient::CachedCursor> WaylandClient::load_standard_cursor(Gfx::StandardCursor cursor)
+{
+    auto filename = standard_cursor_filename(cursor);
+    if (filename.is_empty())
+        return {};
+
+    auto theme = host_setting("cursor.theme"sv, "Default"sv);
+    auto cache_key = ByteString::formatted("{}/{}", theme, filename);
+    if (auto cached = m_input_state.cursor_cache.get(cache_key); cached.has_value())
+        return cached.value();
+
+    auto res_root = Environment::resource_root();
+    auto loaded = Gfx::Bitmap::load_from_file(ByteString::formatted("{}/cursor-themes/{}/{}", res_root, theme, filename));
+    if (loaded.is_error() && theme != "Default"sv)
+        loaded = Gfx::Bitmap::load_from_file(ByteString::formatted("{}/cursor-themes/Default/{}", res_root, filename));
+    if (loaded.is_error())
+        return {};
+
+    auto bitmap = loaded.release_value();
+    auto params = Gfx::CursorParams::parse_from_filename(filename, bitmap->rect().center()).constrained(*bitmap);
+    // Animated cursors are horizontal sprite sheets; present the first frame.
+    if (params.frames() > 1 && bitmap->width() >= static_cast<int>(params.frames())) {
+        int const frame_width = bitmap->width() / static_cast<int>(params.frames());
+        if (auto cropped = bitmap->cropped({ 0, 0, frame_width, bitmap->height() }); !cropped.is_error())
+            bitmap = cropped.release_value();
+        params = Gfx::CursorParams::parse_from_filename(filename, bitmap->rect().center()).constrained(*bitmap);
+    }
+
+    CachedCursor cursor_entry { move(bitmap), params.hotspot() };
+    m_input_state.cursor_cache.set(cache_key, cursor_entry);
+    return cursor_entry;
+}
+
 void WaylandClient::apply_window_cursor(WindowSurface const& window_surface)
 {
     MutexLocker locker(m_mutex);
@@ -914,47 +948,39 @@ void WaylandClient::apply_window_cursor(WindowSurface const& window_surface)
         return;
 
     auto const cursor_enum = static_cast<Gfx::StandardCursor>(window_surface.cursor_type);
+    bool const already_applied_for_this_enter = m_input_state.applied_cursor_serial == m_input_state.pointer_enter_serial;
+
     if (!window_surface.custom_cursor && cursor_enum == Gfx::StandardCursor::Hidden) {
+        if (already_applied_for_this_enter && m_input_state.applied_cursor_hidden)
+            return;
         wl_pointer_set_cursor(m_input_state.pointer, m_input_state.pointer_enter_serial, nullptr, 0, 0);
         wl_display_flush(m_display);
+        m_input_state.applied_cursor = nullptr;
+        m_input_state.applied_cursor_hidden = true;
+        m_input_state.applied_cursor_serial = m_input_state.pointer_enter_serial;
         dbgln("LibWM/Wayland: hid cursor on window {}", window_surface.window_id);
         return;
     }
 
-    RefPtr<Gfx::Bitmap> bitmap = window_surface.custom_cursor;
-    Gfx::IntPoint hotspot;
-    if (bitmap) {
-        hotspot = bitmap->rect().center();
+    CachedCursor cursor_entry;
+    if (window_surface.custom_cursor) {
+        cursor_entry = { window_surface.custom_cursor, window_surface.custom_cursor->rect().center() };
     } else if (cursor_enum != Gfx::StandardCursor::None) {
-        auto filename = standard_cursor_filename(cursor_enum);
-        if (filename.is_empty())
+        auto loaded = load_standard_cursor(cursor_enum);
+        if (!loaded.has_value())
             return;
-        ByteString res_root = getenv("SERENITY_RES_ROOT") ? ByteString(getenv("SERENITY_RES_ROOT")) : ByteString(LIBWM_DEFAULT_RES);
-        auto theme = host_setting("cursor.theme"sv, "Default"sv);
-        auto path = ByteString::formatted("{}/cursor-themes/{}/{}", res_root, theme, filename);
-        auto loaded = Gfx::Bitmap::load_from_file(path);
-        if (loaded.is_error() && theme != "Default"sv) {
-            path = ByteString::formatted("{}/cursor-themes/Default/{}", res_root, filename);
-            loaded = Gfx::Bitmap::load_from_file(path);
-        }
-        if (loaded.is_error())
-            return;
-        auto full_bmp = loaded.release_value();
-        auto params = Gfx::CursorParams::parse_from_filename(filename, full_bmp->rect().center()).constrained(*full_bmp);
-        if (params.frames() > 1 && full_bmp->width() >= static_cast<int>(params.frames())) {
-            int frame_w = full_bmp->width() / static_cast<int>(params.frames());
-            auto cropped = full_bmp->cropped({ 0, 0, frame_w, full_bmp->height() });
-            if (!cropped.is_error())
-                full_bmp = cropped.release_value();
-            params = Gfx::CursorParams::parse_from_filename(filename, full_bmp->rect().center()).constrained(*full_bmp);
-        }
-        bitmap = move(full_bmp);
-        hotspot = params.hotspot();
+        cursor_entry = loaded.release_value();
     } else {
         return;
     }
 
+    auto const& bitmap = cursor_entry.bitmap;
     if (!bitmap || bitmap->size().is_empty())
+        return;
+
+    // LibGUI re-sends the cursor as the pointer crosses widgets; don't re-upload
+    // the one that is already showing.
+    if (already_applied_for_this_enter && !m_input_state.applied_cursor_hidden && m_input_state.applied_cursor == bitmap)
         return;
 
     if (!m_input_state.cursor_surface)
@@ -962,35 +988,31 @@ void WaylandClient::apply_window_cursor(WindowSurface const& window_surface)
     if (!m_input_state.cursor_surface)
         return;
 
-    // Purge any released cursor buffers.
-    Vector<NonnullOwnPtr<BufferRecord>> kept;
-    for (auto& record : m_input_state.cursor_buffers) {
-        if (record->released)
-            wl_buffer_destroy(record->buffer);
-        else
-            kept.append(move(record));
-    }
-    m_input_state.cursor_buffers = move(kept);
+    purge_released_buffers(m_input_state.cursor_buffers);
 
-    size_t const bytes = static_cast<size_t>(bitmap->pitch()) * static_cast<size_t>(bitmap->height());
-    if (!m_input_state.cursor_bitmap || m_input_state.cursor_bitmap->size() != bitmap->size()) {
-        auto buffer = Core::AnonymousBuffer::create_with_size(bytes);
-        if (buffer.is_error())
-            return;
-        m_input_state.cursor_buffer = buffer.release_value();
-        auto wrapped = Gfx::Bitmap::create_with_anonymous_buffer(Gfx::BitmapFormat::BGRA8888, m_input_state.cursor_buffer, bitmap->size(), 1);
-        if (wrapped.is_error())
-            return;
-        m_input_state.cursor_bitmap = wrapped.release_value();
-    }
-    memcpy(m_input_state.cursor_bitmap->scanline(0), bitmap->scanline(0), bytes);
+    // A fresh buffer per change: the compositor may still be reading the previous
+    // one, and cursor changes are rare enough that reuse is not worth tracking.
+    auto buffer = Core::AnonymousBuffer::create_with_size(Gfx::Bitmap::minimum_pitch(bitmap->width(), Gfx::BitmapFormat::BGRA8888) * static_cast<size_t>(bitmap->height()));
+    if (buffer.is_error())
+        return;
+    auto wrapped = Gfx::Bitmap::create_with_anonymous_buffer(Gfx::BitmapFormat::BGRA8888, buffer.value(), bitmap->size(), 1);
+    if (wrapped.is_error())
+        return;
+    auto& upload = *wrapped.value();
+    size_t const row_bytes = static_cast<size_t>(bitmap->width()) * sizeof(u32);
+    for (int y = 0; y < bitmap->height(); ++y)
+        memcpy(upload.scanline(y), bitmap->scanline(y), row_bytes);
 
-    bind_bitmap(m_input_state.cursor_surface, m_input_state.cursor_buffer, *m_input_state.cursor_bitmap, m_input_state.cursor_buffers);
+    bind_bitmap(m_input_state.cursor_surface, buffer.value(), upload, m_input_state.cursor_buffers);
     wl_surface_commit(m_input_state.cursor_surface);
-    wl_pointer_set_cursor(m_input_state.pointer, m_input_state.pointer_enter_serial, m_input_state.cursor_surface, hotspot.x(), hotspot.y());
+    wl_pointer_set_cursor(m_input_state.pointer, m_input_state.pointer_enter_serial, m_input_state.cursor_surface, cursor_entry.hotspot.x(), cursor_entry.hotspot.y());
     wl_display_flush(m_display);
+
+    m_input_state.applied_cursor = bitmap;
+    m_input_state.applied_cursor_hidden = false;
+    m_input_state.applied_cursor_serial = m_input_state.pointer_enter_serial;
     dbgln("LibWM/Wayland: set cursor on window {} ({}x{}, hotspot {},{})",
-        window_surface.window_id, bitmap->width(), bitmap->height(), hotspot.x(), hotspot.y());
+        window_surface.window_id, bitmap->width(), bitmap->height(), cursor_entry.hotspot.x(), cursor_entry.hotspot.y());
 }
 
 void WaylandClient::set_window_cursor(i32 window_id, i32 cursor_type)

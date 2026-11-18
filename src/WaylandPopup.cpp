@@ -85,14 +85,7 @@ i32 WaylandClient::popup_id_for_surface(wl_surface* surface) const
 
 void WaylandClient::purge_released_buffers(Popup& popup)
 {
-    Vector<NonnullOwnPtr<BufferRecord>> kept;
-    for (auto& record : popup.buffers) {
-        if (record->released)
-            wl_buffer_destroy(record->buffer);
-        else
-            kept.append(move(record));
-    }
-    popup.buffers = move(kept);
+    purge_released_buffers(popup.buffers);
 }
 
 void WaylandClient::on_menu_layer_configure(zwlr_layer_surface_v1* layer_surface, Gfx::IntSize)

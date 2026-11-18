@@ -7,6 +7,7 @@
 #include "LibWM.h"
 #include "ClipboardServerConnection.h"
 #include "ConfigServerConnection.h"
+#include "Environment.h"
 #include "FileSystemAccessServerConnection.h"
 #include "LaunchServerConnection.h"
 #include "MainThreadInvoker.h"
@@ -19,13 +20,13 @@
 #include <LibCore/PortalServer.h>
 #include <LibCore/Process.h>
 #include <LibCore/ResourceImplementationFile.h>
-#include <LibCore/SessionManagement.h>
 #include <LibCore/Socket.h>
 #include <LibCore/System.h>
 #include <LibGfx/Font/FontDatabase.h>
 #include <LibGfx/SystemTheme.h>
 #include <LibThreading/Thread.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -68,28 +69,17 @@ static RefPtr<ImageDecoder::ConnectionFromClient>& image_decoder_server_slot()
     return *slot;
 }
 
-// Client ends of the portal socketpairs, handed out on connect.
+// Client ends of the portal socketpairs, handed out on connect. A portal may be
+// requested from any thread (the main thread, the LibWM server thread, or an
+// application's own worker), so both are guarded by s_portal_mutex. It is
+// recursive because starting the server thread may itself resolve a portal.
+static pthread_mutex_t s_portal_mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 static HashMap<ByteString, int> s_client_fds;
 static bool s_server_started { false };
 
-// Absolute path to the bundled SerenityOS resource tree (fonts, themes, icons).
-static ByteString resource_root()
+static void install_theme()
 {
-    if (auto const* env = getenv("LIBWM_RES"); env && *env)
-        return ByteString(env);
-    if (auto const* env = getenv("SERENITY_RES_ROOT"); env && *env)
-        return ByteString(env);
-    return ByteString(LIBWM_DEFAULT_RES);
-}
-
-static void ensure_theme_installed()
-{
-    static bool s_initialized = false;
-    if (s_initialized)
-        return;
-    s_initialized = true;
-
-    auto root = resource_root();
+    auto root = Environment::resource_root();
     Core::ResourceImplementation::install(make<Core::ResourceImplementationFile>(MUST(String::from_byte_string(root))));
 
     auto theme_path = ByteString::formatted("{}/themes/Default.ini", root);
@@ -106,26 +96,11 @@ static void ensure_theme_installed()
     Gfx::FontDatabase::set_window_title_font_query("Katica 10 700 0"sv);
 }
 
-static ByteString expanded_portal_path(StringView template_path)
-{
-    return MUST(Core::SessionManagement::parse_path_with_sid(template_path));
-}
-
 // A single-client service binary lives next to the running application, or in
-// the session's application directory when a session owns one. LIBWM_APP_BIN_DIR
-// is the generic contract; SDE_APP_BIN_DIR is honoured as its historical name.
-static ByteString session_app_bin_dir()
-{
-    for (auto const* name : { "LIBWM_APP_BIN_DIR", "SDE_APP_BIN_DIR" }) {
-        if (auto const* dir = getenv(name); dir && *dir)
-            return ByteString { dir };
-    }
-    return {};
-}
-
+// the session's application directory when a session owns one.
 static ByteString service_binary_path(StringView name)
 {
-    if (auto app_bin_dir = session_app_bin_dir(); !app_bin_dir.is_empty())
+    if (auto app_bin_dir = Environment::app_bin_dir(); !app_bin_dir.is_empty())
         return ByteString::formatted("{}/{}", app_bin_dir, name);
     return Core::Process::resolve_executable_path(ByteString::formatted("/bin/{}", name));
 }
@@ -257,8 +232,8 @@ static void spawn_audio_server()
         return;
     }
 
-    auto audio_path = expanded_portal_path("/tmp/session/%sid/portal/audio"sv);
-    auto manager_path = expanded_portal_path("/tmp/session/%sid/portal/audiomanager"sv);
+    auto audio_path = PortalPaths::expand(PortalPaths::audio);
+    auto manager_path = PortalPaths::expand(PortalPaths::audio_manager);
     auto audio_fd = bind_listening_socket(audio_path);
     if (audio_fd < 0)
         return; // someone else is already listening (or the bind failed)
@@ -289,6 +264,7 @@ static void spawn_audio_server()
 // outside its own event loop (so the servers cannot live on the client thread),
 // and the clipboard must use the same Wayland connection as input, because
 // wl_data_device.set_selection requires a serial from a recent input event.
+// Must be called with s_portal_mutex held.
 static void start_server_thread()
 {
     // Establish the Wayland connection *here*, on the main thread, before the server
@@ -333,12 +309,12 @@ static void start_server_thread()
         return;
     }
 
-    s_client_fds.set("/tmp/portal/window"sv, window_client);
-    s_client_fds.set(expanded_portal_path("/tmp/session/%sid/portal/clipboard"sv), clipboard_client);
-    s_client_fds.set(expanded_portal_path("/tmp/session/%sid/portal/launch"sv), launch_client);
-    s_client_fds.set(expanded_portal_path("/tmp/session/%sid/portal/config"sv), config_client);
-    s_client_fds.set(expanded_portal_path("/tmp/session/%sid/portal/filesystemaccess"sv), file_system_access_client);
-    s_client_fds.set(expanded_portal_path("/tmp/session/%sid/portal/image"sv), image_decoder_client);
+    s_client_fds.set(PortalPaths::window, window_client);
+    s_client_fds.set(PortalPaths::expand(PortalPaths::clipboard), clipboard_client);
+    s_client_fds.set(PortalPaths::expand(PortalPaths::launch), launch_client);
+    s_client_fds.set(PortalPaths::expand(PortalPaths::config), config_client);
+    s_client_fds.set(PortalPaths::expand(PortalPaths::file_system_access), file_system_access_client);
+    s_client_fds.set(PortalPaths::expand(PortalPaths::image_decoder), image_decoder_client);
 
     auto thread = Threading::Thread::try_create([window_server, clipboard_server, launch_server, config_server, file_system_access_server, image_decoder_server]() -> intptr_t {
         Core::EventLoop loop;
@@ -428,23 +404,23 @@ static Optional<NonnullOwnPtr<Core::LocalSocket>> make_portal(ByteString const& 
 
     // These portals are spawned per connection rather than served in-process:
     // LibWeb and the HTTP/TLS stack must not be linked into every application.
-    if (path == expanded_portal_path("/tmp/session/%sid/portal/webcontent"sv))
+    if (path == PortalPaths::expand(PortalPaths::web_content))
         return spawn_single_client_service(service_binary_path("WebContent"sv), "webcontent"sv);
-    if (path == expanded_portal_path("/tmp/session/%sid/portal/request"sv))
+    if (path == PortalPaths::expand(PortalPaths::request))
         return spawn_single_client_service(service_binary_path("RequestServer"sv), "requestserver"sv);
-    if (path == expanded_portal_path("/tmp/session/%sid/portal/sql"sv)) {
+    if (path == PortalPaths::expand(PortalPaths::sql)) {
         // Bind the listener, hand it to SQLServer, then defer: the real connect
         // below reaches the listener we just set up.
         spawn_multi_client_service(service_binary_path("SQLServer"sv), path, "sql"sv);
         return {};
     }
-    if (path == expanded_portal_path("/tmp/session/%sid/portal/notify"sv)) {
+    if (path == PortalPaths::expand(PortalPaths::notify)) {
         // NotificationServer is also a multi-client (IPC::MultiServer) service.
         spawn_multi_client_service(service_binary_path("NotificationServer"sv), path, "notification"sv);
         return {};
     }
-    if (path == expanded_portal_path("/tmp/session/%sid/portal/audio"sv)
-        || path == expanded_portal_path("/tmp/session/%sid/portal/audiomanager"sv)) {
+    if (path == PortalPaths::expand(PortalPaths::audio)
+        || path == PortalPaths::expand(PortalPaths::audio_manager)) {
         // The AudioServer serves the audio and audiomanager portals from one
         // process; bind both (whichever portal the client asks for first), then
         // defer so the caller's connect reaches them.
@@ -452,6 +428,7 @@ static Optional<NonnullOwnPtr<Core::LocalSocket>> make_portal(ByteString const& 
         return {};
     }
 
+    WaylandClient::MutexLocker locker(s_portal_mutex);
     if (!s_server_started) {
         s_server_started = true;
         start_server_thread();
@@ -467,20 +444,26 @@ static Optional<NonnullOwnPtr<Core::LocalSocket>> make_portal(ByteString const& 
     return socket.release_value();
 }
 
-void initialize()
+static void initialize_once()
 {
-    ensure_theme_installed();
+    install_theme();
 
     // Make SerenityOS's absolute "/res/..." paths resolve to our bundled tree
     // for code that opens them directly (LibCore::System::openat redirects).
     if (!getenv("SERENITY_RES_ROOT")) {
-        auto root = resource_root();
+        auto root = Environment::resource_root();
         setenv("SERENITY_RES_ROOT", root.characters(), 0);
     }
 
     Core::PortalServer::add_connector([](ByteString const& path) {
         return make_portal(path);
     });
+}
+
+void initialize()
+{
+    static pthread_once_t s_once = PTHREAD_ONCE_INIT;
+    pthread_once(&s_once, initialize_once);
 }
 
 namespace {

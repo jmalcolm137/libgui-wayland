@@ -124,6 +124,7 @@ check "window modified state round-tripped"      "grep -q 'TestWindow: modified=
 check "standard Hand cursor set with hotspot"    "grep -q 'set cursor on window .* (.*, hotspot 8,4)' '$RUNTIME/app.log'"
 check "custom 12x12 bitmap cursor applied"       "grep -q 'set cursor on window .* (12x12, hotspot 6,6)' '$RUNTIME/app.log'"
 check "alpha hit-threshold input region applied" "grep -q 'applied alpha input region on window .* (threshold=0.50' '$RUNTIME/app.log'"
+check "opaque region sent once, not per frame"   "[ \"\$(grep -c 'set opaque region on window' '$RUNTIME/app.log')\" -eq 1 ] && [ \"\$(grep -c 'presented window' '$RUNTIME/app.log')\" -gt 1 ]"
 check "pointer entered the window"               "grep -q 'pointer entered window' '$RUNTIME/app.log'"
 check "synthetic click reached widget"           "grep -q 'TestWindow: mouse down at 160,120 button 1' '$RUNTIME/app.log'"
 check "double-click synthesized and delivered"   "grep -q 'TestWindow: mouse double click at 160,120 button 1' '$RUNTIME/app.log'"

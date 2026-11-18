@@ -67,6 +67,10 @@ namespace Core {
 class Notifier;
 }
 
+namespace Gfx {
+enum class StandardCursor;
+}
+
 namespace LibWM {
 
 // A thin wrapper over the real Wayland compositor.
@@ -559,6 +563,8 @@ private:
         bool has_alpha { false };
         float alpha_hit_threshold { 0.0f };
         bool input_region_active { false };
+        // The opaque region last sent to the compositor (empty = none).
+        Gfx::IntSize opaque_region_size;
         bool resizable { true };
         bool frameless { false };
         bool fullscreen { false };
@@ -643,6 +649,11 @@ private:
         bool have_logical_size { false };
     };
 
+    struct CachedCursor {
+        RefPtr<Gfx::Bitmap> bitmap;
+        Gfx::IntPoint hotspot;
+    };
+
     struct InputState {
         wl_seat* seat { nullptr };
         wl_pointer* pointer { nullptr };
@@ -657,9 +668,13 @@ private:
         i32 pointer_popup { -1 };
         wl_surface* pointer_surface { nullptr };
         wl_surface* cursor_surface { nullptr };
-        Core::AnonymousBuffer cursor_buffer;
-        RefPtr<Gfx::Bitmap> cursor_bitmap;
         Vector<NonnullOwnPtr<BufferRecord>> cursor_buffers;
+        // Decoded theme cursors, keyed by "<theme>/<file>", and what is showing
+        // now (so repeated set_cursor calls for the same image are skipped).
+        HashMap<ByteString, CachedCursor> cursor_cache;
+        RefPtr<Gfx::Bitmap> applied_cursor;
+        bool applied_cursor_hidden { false };
+        u32 applied_cursor_serial { 0 };
         i32 focused_window { -1 };
         Gfx::IntPoint pointer_position;
         u32 pointer_buttons { 0 };
@@ -713,14 +728,18 @@ private:
 
     WindowSurface* find(i32 window_id);
     void commit_window_content(WindowSurface&, int client_fd, Gfx::IntSize size, Gfx::IntSize visible_size, i32 pitch, bool has_alpha);
-    void update_surface_regions(WindowSurface&, u8 const* client_pixels, size_t pitch, Gfx::IntSize visible_size, int scale, int total_inset);
+    void update_opaque_region(WindowSurface&, Gfx::IntSize logical_size);
+    static bool needs_input_region_pixels(WindowSurface const&);
+    void update_input_region(WindowSurface&, u8 const* client_pixels, size_t pitch, Gfx::IntSize visible_size, int scale, int total_inset);
     void present_menubar(WindowSurface&, Gfx::IntSize visible_size);
     void render_csd_titlebar(WindowSurface const&, Gfx::Bitmap&, int width);
     void apply_window_cursor(WindowSurface const&);
+    Optional<CachedCursor> load_standard_cursor(Gfx::StandardCursor);
     Popup* find_popup(i32 popup_id);
     i32 popup_id_for_surface(wl_surface*) const;
     void purge_released_buffers(WindowSurface&);
     void purge_released_buffers(Popup&);
+    static void purge_released_buffers(Vector<NonnullOwnPtr<BufferRecord>>&);
     void bind_bitmap(wl_surface*, Core::AnonymousBuffer const&, Gfx::Bitmap const&, Vector<NonnullOwnPtr<BufferRecord>>&, Vector<Gfx::IntRect> const* damage = nullptr);
     u32 current_modifiers() const;
     void maybe_create_data_device();

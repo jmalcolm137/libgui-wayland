@@ -5,6 +5,7 @@
  */
 
 #include "WindowServerConnection.h"
+#include "Environment.h"
 #include "WaylandClient.h"
 #include <AK/LexicalPath.h>
 #include <AK/QuickSort.h>
@@ -76,16 +77,12 @@ RefPtr<Gfx::Bitmap> read_wallpaper_state()
 
 ByteString theme_broker_path()
 {
-    if (auto const* runtime = getenv("XDG_RUNTIME_DIR"); runtime && *runtime)
-        return ByteString::formatted("{}/sde-theme", runtime);
-    return ByteString { "/tmp/sde-theme" };
+    return LibWM::Environment::runtime_path("sde-theme"sv);
 }
 
 ByteString fonts_broker_path()
 {
-    if (auto const* runtime = getenv("XDG_RUNTIME_DIR"); runtime && *runtime)
-        return ByteString::formatted("{}/sde-fonts", runtime);
-    return ByteString { "/tmp/sde-fonts" };
+    return LibWM::Environment::runtime_path("sde-fonts"sv);
 }
 
 void write_fonts_broker(ByteString const& default_query, ByteString const& fixed_width_query, ByteString const& window_title_query)
@@ -94,21 +91,9 @@ void write_fonts_broker(ByteString const& default_query, ByteString const& fixed
         (void)file.value()->write_until_depleted(ByteString::formatted("{}\n{}\n{}\n", default_query, fixed_width_query, window_title_query));
 }
 
-ByteString resource_root_path()
-{
-    if (auto const* res = getenv("SERENITY_RES_ROOT"); res && *res)
-        return ByteString(res);
-    return {};
-}
-
 ByteString host_path_for_resource(ByteString const& path)
 {
-    if (!path.starts_with("/res/"sv))
-        return path;
-    auto root = resource_root_path();
-    if (root.is_empty())
-        return path;
-    return ByteString::formatted("{}/{}", root, path.substring_view(5));
+    return LibWM::Environment::host_resource_path(path);
 }
 
 }

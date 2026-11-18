@@ -105,6 +105,11 @@ add_custom_command(
 )
 
 add_library(windowserver SHARED
+    ClipboardServerConnection.cpp
+    ConfigServerConnection.cpp
+    Environment.cpp
+    FileSystemAccessServerConnection.cpp
+    LaunchServerConnection.cpp
     LibWM.cpp
     MenuController.cpp
     WaylandClient.cpp

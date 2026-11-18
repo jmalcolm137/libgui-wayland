@@ -5,6 +5,7 @@
  */
 
 #include "WindowServerConnection.h"
+#include "Environment.h"
 #include "WaylandClient.h"
 #include <LibCore/AnonymousBuffer.h>
 #include <LibGfx/Font/FontDatabase.h>
@@ -71,12 +72,7 @@ void WindowServerConnection::send_fast_greet()
     // like 1.25x, 1.5x, 1.75x) so windows are drawn at native resolution on any
     // compositor. Set SDE_CLIENT_SCALE=0 to force 1x, or a positive integer or
     // fractional value (e.g. 1.5, 1.75, 2) to select that scale explicitly.
-    int client_scale_v120 = wayland.output_scale_v120();
-    if (auto const* env = getenv("SDE_CLIENT_SCALE"); env && *env) {
-        double requested = strtod(env, nullptr);
-        client_scale_v120 = requested > 0.0 ? static_cast<int>(__builtin_lround(requested * 120.0)) : 120;
-    }
-    wayland.set_client_scale_v120(client_scale_v120);
+    wayland.set_client_scale_v120(Environment::client_scale_override_v120().value_or(wayland.output_scale_v120()));
     GUI::Window::set_backing_store_scale(wayland.client_scale());
 
     // R4.7: the session font. Prefer the font broker (else the Katica/Csilla
@@ -305,7 +301,8 @@ void WindowServerConnection::present(Window& window)
     if (!window.bitmap)
         return;
 
-    if (auto const* path = getenv("LIBWM_DUMP")) {
+    if (auto dump_path = Environment::get("LIBWM_DUMP"); dump_path.has_value()) {
+        auto const* path = dump_path->characters();
         if (auto encoded = Gfx::PNGWriter::encode(*window.bitmap); !encoded.is_error()) {
             auto bytes = encoded.release_value();
             int fd = ::open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);

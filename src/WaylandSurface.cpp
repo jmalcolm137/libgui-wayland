@@ -5,6 +5,7 @@
  */
 
 #include "WaylandClient.h"
+#include "Environment.h"
 #include <AK/Assertions.h>
 #include <LibCore/Process.h>
 #include <LibGfx/Font/Font.h>
@@ -179,7 +180,7 @@ void WaylandClient::on_preferred_scale(wp_fractional_scale_v1* fractional, u32 s
     dbgln("LibWM/Wayland: preferred fractional scale {}/120 ({:.2f}x, backing {}x)",
         scale_v120, static_cast<double>(scale_v120) / 120.0, m_output_state.scale);
 
-    if (auto const* env = getenv("SDE_CLIENT_SCALE"); env && *env)
+    if (Environment::client_scale_override_v120().has_value())
         return;
 
     int const previous_backing_scale = m_output_state.client_scale;
@@ -260,7 +261,7 @@ WaylandClient::WindowSurface* WaylandClient::find(i32 window_id)
 void WaylandClient::on_decoration_configure(zxdg_toplevel_decoration_v1* decoration, u32 mode)
 {
     MutexLocker locker(m_mutex);
-    bool const force_csd = getenv("LIBWM_FORCE_CSD") && *getenv("LIBWM_FORCE_CSD") != '0';
+    bool const force_csd = Environment::force_csd();
     for (auto const& it : m_windows) {
         auto& w = *it.value;
         if (w.decoration != decoration)
@@ -471,20 +472,22 @@ void WaylandClient::on_surface_configured(xdg_surface* surface)
 
 // --- buffer management & damage -----------------------------------------------
 
+void WaylandClient::purge_released_buffers(Vector<NonnullOwnPtr<BufferRecord>>& buffers)
+{
+    Vector<NonnullOwnPtr<BufferRecord>> kept;
+    for (auto& record : buffers) {
+        if (record->released)
+            wl_buffer_destroy(record->buffer);
+        else
+            kept.append(move(record));
+    }
+    buffers = move(kept);
+}
+
 void WaylandClient::purge_released_buffers(WindowSurface& window_surface)
 {
-    auto purge = [](Vector<NonnullOwnPtr<BufferRecord>>& buffers) {
-        Vector<NonnullOwnPtr<BufferRecord>> kept;
-        for (auto& record : buffers) {
-            if (record->released)
-                wl_buffer_destroy(record->buffer);
-            else
-                kept.append(move(record));
-        }
-        buffers = move(kept);
-    };
-    purge(window_surface.buffers);
-    purge(window_surface.menubar_buffers);
+    purge_released_buffers(window_surface.buffers);
+    purge_released_buffers(window_surface.menubar_buffers);
 }
 
 void WaylandClient::bind_bitmap(wl_surface* surface, Core::AnonymousBuffer const& buffer, Gfx::Bitmap const& bitmap, Vector<NonnullOwnPtr<BufferRecord>>& buffers, Vector<Gfx::IntRect> const* damage)
@@ -729,7 +732,7 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::In
     window_surface->resizable = resizable;
     window_surface->frameless = frameless;
     window_surface->fixed_size = size;
-    bool const force_csd = getenv("LIBWM_FORCE_CSD") && *getenv("LIBWM_FORCE_CSD") != '0';
+    bool const force_csd = Environment::force_csd();
     window_surface->use_csd = !frameless && (!m_decoration_manager || force_csd);
     if (window_surface->use_csd)
         dbgln("LibWM/Wayland: using client-side decorations for window {}", window_id);
@@ -936,7 +939,7 @@ void WaylandClient::set_frameless(i32 window_id, bool frameless)
         if (window_surface->frameless == frameless)
             return;
         window_surface->frameless = frameless;
-        bool const force_csd = getenv("LIBWM_FORCE_CSD") && *getenv("LIBWM_FORCE_CSD") != '0';
+        bool const force_csd = Environment::force_csd();
         window_surface->use_csd = !frameless && (!m_decoration_manager || force_csd);
         window_surface->csd_dirty = true;
         window_surface->composed_valid = false;
@@ -1144,26 +1147,44 @@ static void resample_to_fractional(u8 const* src_base, size_t src_pitch, int src
     }
 }
 
-void WaylandClient::update_surface_regions(WindowSurface& window_surface, u8 const* client_pixels, size_t pitch, Gfx::IntSize visible_size, int scale, int total_inset)
+// Opaque region hint: lets the compositor skip blending for opaque windows. The
+// region only depends on the logical size and alpha flag, so it is sent only when
+// one of those changes (it is double-buffered state that persists across commits).
+void WaylandClient::update_opaque_region(WindowSurface& window_surface, Gfx::IntSize logical_size)
+{
+    if (!m_compositor || !window_surface.surface)
+        return;
+
+    Gfx::IntSize const wanted = window_surface.has_alpha ? Gfx::IntSize {} : logical_size;
+    if (window_surface.opaque_region_size == wanted)
+        return;
+    window_surface.opaque_region_size = wanted;
+
+    if (wanted.is_empty()) {
+        wl_surface_set_opaque_region(window_surface.surface, nullptr);
+        return;
+    }
+    if (auto* opaque = wl_compositor_create_region(m_compositor)) {
+        wl_region_add(opaque, 0, 0, wanted.width(), wanted.height());
+        wl_surface_set_opaque_region(window_surface.surface, opaque);
+        wl_region_destroy(opaque);
+        dbgln("LibWM/Wayland: set opaque region on window {} ({}x{})", window_surface.window_id, wanted.width(), wanted.height());
+    }
+}
+
+bool WaylandClient::needs_input_region_pixels(WindowSurface const& window_surface)
+{
+    return (window_surface.has_alpha && window_surface.alpha_hit_threshold > 0.0f) || window_surface.input_region_active;
+}
+
+// Alpha click-through input region: mask out pixels with alpha < threshold.
+void WaylandClient::update_input_region(WindowSurface& window_surface, u8 const* client_pixels, size_t pitch, Gfx::IntSize visible_size, int scale, int total_inset)
 {
     if (!m_compositor || !window_surface.surface)
         return;
 
     int const logical_w = visible_size.width();
-    int const logical_h = visible_size.height() + total_inset;
 
-    // 1. Opaque region hint: lets the compositor skip blending for opaque windows.
-    if (!window_surface.has_alpha) {
-        if (auto* opaque = wl_compositor_create_region(m_compositor)) {
-            wl_region_add(opaque, 0, 0, logical_w, logical_h);
-            wl_surface_set_opaque_region(window_surface.surface, opaque);
-            wl_region_destroy(opaque);
-        }
-    } else {
-        wl_surface_set_opaque_region(window_surface.surface, nullptr);
-    }
-
-    // 2. Alpha click-through input region: mask out pixels with alpha < threshold.
     if (window_surface.has_alpha && window_surface.alpha_hit_threshold > 0.0f && client_pixels != nullptr) {
         auto* input_region = wl_compositor_create_region(m_compositor);
         if (!input_region)
@@ -1316,8 +1337,10 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
             for (auto const& rect : damage)
                 copy_rect(rect);
         }
-        update_surface_regions(window_surface, source, static_cast<size_t>(pitch), visible_size, scale, total_inset);
+        if (needs_input_region_pixels(window_surface))
+            update_input_region(window_surface, source, static_cast<size_t>(pitch), visible_size, scale, total_inset);
         munmap(const_cast<u8*>(source), client_bytes);
+        update_opaque_region(window_surface, { visible_size.width(), logical_height });
 
         bool const redraw_csd = csd_h > 0 && (recreate || window_surface.csd_dirty);
         if (redraw_csd) {
@@ -1362,11 +1385,14 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
     int const display_width = visible_size.width() * scale;
     int const display_height = visible_size.height() * scale;
 
-    if (is_fractional || !window_surface.has_alpha || window_surface.alpha_hit_threshold > 0.0f || window_surface.input_region_active) {
+    update_opaque_region(window_surface, visible_size);
+
+    if (is_fractional || needs_input_region_pixels(window_surface)) {
         size_t const client_bytes = static_cast<size_t>(pitch) * static_cast<size_t>(size.height());
         auto const* source = static_cast<u8 const*>(mmap(nullptr, client_bytes, PROT_READ, MAP_SHARED, client_fd, 0));
         if (source != MAP_FAILED) {
-            update_surface_regions(window_surface, source, static_cast<size_t>(pitch), visible_size, scale, 0);
+            if (needs_input_region_pixels(window_surface))
+                update_input_region(window_surface, source, static_cast<size_t>(pitch), visible_size, scale, 0);
             if (is_fractional) {
                 bool const ok = present_fractional(source, static_cast<size_t>(pitch), display_width, display_height);
                 munmap(const_cast<u8*>(source), client_bytes);

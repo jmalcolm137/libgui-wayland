@@ -8,6 +8,7 @@
 #include "ConfigServerConnection.h"
 #include "LibWM.h"
 #include "MenuController.h"
+#include "WaylandClient.h"
 #include <AK/Format.h>
 #include <Kernel/API/KeyCode.h>
 #include <LibConfig/Client.h>
