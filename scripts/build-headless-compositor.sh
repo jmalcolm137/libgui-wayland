@@ -13,9 +13,9 @@ if [[ ! -d "$XLIB_WAYLAND_SRC/.git" ]]; then
 fi
 
 if [[ -f "$XLIB_WAYLAND_BUILD/build.ninja" ]]; then
-    meson setup --reconfigure "$XLIB_WAYLAND_BUILD" "$XLIB_WAYLAND_SRC" --buildtype=release
+    meson setup --reconfigure "$XLIB_WAYLAND_BUILD" "$XLIB_WAYLAND_SRC" --buildtype=release -Dtests=false
 else
-    meson setup "$XLIB_WAYLAND_BUILD" "$XLIB_WAYLAND_SRC" --buildtype=release
+    meson setup "$XLIB_WAYLAND_BUILD" "$XLIB_WAYLAND_SRC" --buildtype=release -Dtests=false
 fi
 
 meson compile -C "$XLIB_WAYLAND_BUILD" headless-compositor

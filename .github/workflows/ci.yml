@@ -27,6 +27,8 @@ jobs:
     steps:
       - name: Install dependencies
         run: |
+          # The image's keyring can predate the current packagers' keys.
+          pacman -Sy --noconfirm archlinux-keyring
           pacman -Syu --noconfirm --needed \
             base-devel git cmake ninja meson python ccache \
             wayland wayland-protocols libxkbcommon \
