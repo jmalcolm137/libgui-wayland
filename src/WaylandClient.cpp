@@ -8,6 +8,7 @@
 #include "SerenityShell.h"
 #include "WaylandDataDevice.h"
 #include "WaylandOutputs.h"
+#include "WaylandSeat.h"
 #include <LibCore/EventLoop.h>
 #include <LibCore/Notifier.h>
 #include <errno.h>
@@ -40,7 +41,7 @@ static void registry_global(void* data, wl_registry* registry, uint32_t name, ch
     else if (!strcmp(interface, wl_shm_interface.name))
         self.set_shm(reinterpret_cast<wl_shm*>(wl_registry_bind(registry, name, &wl_shm_interface, 1)));
     else if (!strcmp(interface, wl_seat_interface.name))
-        self.add_seat(reinterpret_cast<wl_seat*>(wl_registry_bind(registry, name, &wl_seat_interface, 1)));
+        self.seat().bind(reinterpret_cast<wl_seat*>(wl_registry_bind(registry, name, &wl_seat_interface, 1)));
     else if (!strcmp(interface, wl_output_interface.name))
         self.outputs().add_output(reinterpret_cast<wl_output*>(wl_registry_bind(registry, name, &wl_output_interface, min(version, 2u))));
     else if (!strcmp(interface, xdg_wm_base_interface.name))
@@ -61,7 +62,7 @@ static void registry_global(void* data, wl_registry* registry, uint32_t name, ch
     } else if (!strcmp(interface, serenity_window_manager_interface.name)) {
         self.serenity_shell().bind(reinterpret_cast<serenity_window_manager*>(wl_registry_bind(registry, name, &serenity_window_manager_interface, min(version, 3u))));
     } else if (!strcmp(interface, zwp_text_input_manager_v3_interface.name)) {
-        self.set_text_input_manager(reinterpret_cast<zwp_text_input_manager_v3*>(wl_registry_bind(registry, name, &zwp_text_input_manager_v3_interface, 1)));
+        self.seat().set_text_input_manager(reinterpret_cast<zwp_text_input_manager_v3*>(wl_registry_bind(registry, name, &zwp_text_input_manager_v3_interface, 1)));
     }
 }
 
@@ -90,6 +91,7 @@ WaylandClient::WaylandClient()
     : m_serenity_shell(make<SerenityShell>(*this))
     , m_outputs(make<WaylandOutputs>(*this))
     , m_data_device(make<WaylandDataDevice>(*this))
+    , m_seat(make<WaylandSeat>(*this))
 {
     pthread_mutexattr_t attributes;
     pthread_mutexattr_init(&attributes);

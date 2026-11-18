@@ -10,6 +10,7 @@
 #include "MenuController.h"
 #include "SerenityShell.h"
 #include "WaylandClient.h"
+#include "WaylandSeat.h"
 #include "WaylandDataDevice.h"
 #include "WaylandOutputs.h"
 #include <AK/Format.h>
@@ -334,7 +335,7 @@ void test_wayland_client_thread_safety()
                     (void)c.serenity_shell().captured_bitmap();
                     (void)c.data_device().clipboard_mime_types();
                     (void)c.window_menubar_visible(1);
-                    (void)c.global_pointer_position();
+                    (void)c.seat().global_pointer_position();
                     c.outputs().set_client_scale((i % 2) + 1);
                     (void)c.outputs().client_scale();
                 }

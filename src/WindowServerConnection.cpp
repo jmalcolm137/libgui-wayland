@@ -8,6 +8,7 @@
 #include "Environment.h"
 #include "SerenityShell.h"
 #include "WaylandClient.h"
+#include "WaylandSeat.h"
 #include "WaylandDataDevice.h"
 #include "WaylandOutputs.h"
 #include <LibCore/AnonymousBuffer.h>
@@ -620,7 +621,7 @@ Messages::WindowServer::GetGlobalCursorPositionResponse WindowServerConnection::
     // The compositor owns window placement, so the client reconstructs the
     // cursor's output position from the surface under the pointer and that
     // surface's known origin (see WaylandClient::global_pointer_position).
-    return Messages::WindowServer::GetGlobalCursorPositionResponse { WaylandClient::the().global_pointer_position() };
+    return Messages::WindowServer::GetGlobalCursorPositionResponse { WaylandClient::the().seat().global_pointer_position() };
 }
 
 Messages::WindowServer::GetColorUnderCursorResponse WindowServerConnection::get_color_under_cursor()
@@ -645,7 +646,7 @@ Gfx::ShareableBitmap capture_around(Gfx::IntSize size, Gfx::IntPoint location)
 
 Messages::WindowServer::GetScreenBitmapAroundCursorResponse WindowServerConnection::get_screen_bitmap_around_cursor(Gfx::IntSize size)
 {
-    return capture_around(size, WaylandClient::the().global_pointer_position());
+    return capture_around(size, WaylandClient::the().seat().global_pointer_position());
 }
 
 Messages::WindowServer::GetScreenBitmapAroundLocationResponse WindowServerConnection::get_screen_bitmap_around_location(Gfx::IntSize size, Gfx::IntPoint location)

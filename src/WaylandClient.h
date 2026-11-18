@@ -31,13 +31,9 @@ struct wl_data_device_manager;
 struct wl_data_offer;
 struct wl_data_source;
 struct wl_display;
-struct wl_keyboard;
 struct wl_output;
-struct wl_pointer;
 struct wl_registry;
 struct wl_seat;
-struct zwp_text_input_manager_v3;
-struct zwp_text_input_v3;
 struct wl_shm;
 struct wl_subcompositor;
 struct wl_subsurface;
@@ -58,23 +54,18 @@ struct zwlr_layer_shell_v1;
 struct zwlr_layer_surface_v1;
 struct serenity_toplevel;
 
-struct xkb_context;
-struct xkb_keymap;
-struct xkb_state;
 
 namespace Core {
 class Notifier;
 }
 
-namespace Gfx {
-enum class StandardCursor;
-}
 
 namespace LibWM {
 
 class SerenityShell;
 class WaylandDataDevice;
 class WaylandOutputs;
+class WaylandSeat;
 
 // A thin wrapper over the real Wayland compositor.
 //
@@ -141,11 +132,8 @@ public:
     WaylandOutputs& outputs() { return *m_outputs; }
     WaylandOutputs const& outputs() const { return *m_outputs; }
 
-    // The pointer's position in output coordinates, reconstructed from the
-    // surface under the pointer and that surface's known origin. The compositor
-    // owns window placement (and never reports the cursor directly), so this is
-    // how the client places tooltips near the cursor.
-    Gfx::IntPoint global_pointer_position();
+    // Pointer, keyboard, text input and the cursor (wl_seat).
+    WaylandSeat& seat() { return *m_seat; }
 
     void set_input_callbacks(InputCallbacks callbacks)
     {
@@ -240,8 +228,6 @@ public:
         MutexLocker locker(m_mutex);
         m_shm = shm;
     }
-    void add_seat(wl_seat* seat);
-    void ensure_text_input();
     void add_wm_base(xdg_wm_base* wm_base);
     void set_decoration_manager(zxdg_decoration_manager_v1* manager)
     {
@@ -278,38 +264,7 @@ public:
     void enable_display_link();
     void disable_display_link();
 
-    // --- Text input / IME (zwp_text_input_v3) ---
-    // The compositor relays preedit and committed text from the input method to the focused client. The app enables
-    // text input only while a text field has focus, and supplies the caret rectangle so candidate windows can follow it.
-    using TextInputCommit = Function<void(String const&)>;
-    using TextInputPreedit = Function<void(String const&, i32 cursor_begin, i32 cursor_end)>;
-    using TextInputDeleteSurrounding = Function<void(i32 before_length, i32 after_length)>;
-    void set_text_input_callbacks(TextInputCommit, TextInputPreedit, TextInputDeleteSurrounding);
-    void set_text_input_enabled(bool);
-    bool text_input_enabled() const
-    {
-        MutexLocker locker(m_mutex);
-        return m_text_input.enabled;
-    }
-    void set_text_input_cursor_rect(Gfx::IntRect const& rect);
-    void set_text_input_manager(zwp_text_input_manager_v3*);
-    void on_text_input_enter();
-    void on_text_input_commit(String);
-    void on_text_input_preedit(String, i32 cursor_begin, i32 cursor_end);
-    void on_text_input_delete_surrounding(i32 before_length, i32 after_length);
-
-    void on_seat_capabilities(u32 capabilities);
     i32 window_id_for_surface(wl_surface*) const;
-    void on_pointer_enter(wl_surface*, Gfx::IntPoint);
-    void on_pointer_leave();
-    void on_pointer_motion(Gfx::IntPoint);
-    void on_pointer_button(u32 button, bool pressed);
-    void on_pointer_axis(i32 x, i32 y);
-    void on_pointer_axis_delta(double x, double y);
-    void on_keyboard_keymap(int fd, u32 size);
-    void on_keyboard_modifiers(u32 depressed, u32 latched, u32 locked, u32 group, u32 serial);
-    void on_keyboard_key(u32 key, bool pressed);
-    void on_keyboard_focus(wl_surface*, bool entered);
     void on_toplevel_configure(xdg_toplevel*, Gfx::IntSize size, bool activated, bool fullscreen, bool maximized, bool resizing);
     void on_decoration_configure(zxdg_toplevel_decoration_v1*, u32 mode);
     void on_toplevel_close(xdg_toplevel*);
@@ -322,22 +277,12 @@ public:
     void on_surface_configured(xdg_surface*);
     void on_frame_done(wl_callback*);
     void on_display_link_frame_done(wl_callback*);
-    void note_input_serial(u32 serial)
-    {
-        MutexLocker locker(m_mutex);
-        m_input_state.last_serial = serial;
-    }
-    void note_pointer_enter_serial(u32 serial)
-    {
-        MutexLocker locker(m_mutex);
-        m_input_state.last_serial = serial;
-        m_input_state.pointer_enter_serial = serial;
-    }
 
 private:
     friend class SerenityShell;
     friend class WaylandDataDevice;
     friend class WaylandOutputs;
+    friend class WaylandSeat;
 
     WaylandClient();
     ~WaylandClient();
@@ -476,51 +421,6 @@ private:
         Vector<NonnullOwnPtr<BufferRecord>> buffers;
     };
 
-    struct CachedCursor {
-        RefPtr<Gfx::Bitmap> bitmap;
-        Gfx::IntPoint hotspot;
-    };
-
-    struct InputState {
-        wl_seat* seat { nullptr };
-        wl_pointer* pointer { nullptr };
-        wl_keyboard* keyboard { nullptr };
-        ::xkb_context* xkb_context { nullptr };
-        ::xkb_keymap* xkb_keymap { nullptr };
-        ::xkb_state* xkb_state { nullptr };
-        u32 last_serial { 0 };
-        u32 pointer_enter_serial { 0 };
-        u32 modifiers { 0 };
-        i32 pointer_window { -1 };
-        i32 pointer_popup { -1 };
-        wl_surface* pointer_surface { nullptr };
-        wl_surface* cursor_surface { nullptr };
-        Vector<NonnullOwnPtr<BufferRecord>> cursor_buffers;
-        // Decoded theme cursors, keyed by "<theme>/<file>", and what is showing
-        // now (so repeated set_cursor calls for the same image are skipped).
-        HashMap<ByteString, CachedCursor> cursor_cache;
-        RefPtr<Gfx::Bitmap> applied_cursor;
-        bool applied_cursor_hidden { false };
-        u32 applied_cursor_serial { 0 };
-        i32 focused_window { -1 };
-        Gfx::IntPoint pointer_position;
-        u32 pointer_buttons { 0 };
-        // Wayland axis deltas are often fractional (trackpads, high-resolution
-        // wheels); accumulate them so whole scroll steps reach the GUI.
-        double axis_accum_x { 0 };
-        double axis_accum_y { 0 };
-    };
-
-    struct TextInputState {
-        zwp_text_input_manager_v3* manager { nullptr };
-        zwp_text_input_v3* device { nullptr };
-        bool enabled { false };
-        Gfx::IntRect cursor_rect;
-        TextInputCommit on_commit;
-        TextInputPreedit on_preedit;
-        TextInputDeleteSurrounding on_delete_surrounding;
-    };
-
     struct DisplayLinkState {
         bool enabled { false };
         Function<void()> callback_function;
@@ -536,15 +436,12 @@ private:
     void update_input_region(WindowSurface&, u8 const* client_pixels, size_t pitch, Gfx::IntSize visible_size, int scale, int total_inset);
     void present_menubar(WindowSurface&, Gfx::IntSize visible_size);
     void render_csd_titlebar(WindowSurface const&, Gfx::Bitmap&, int width);
-    void apply_window_cursor(WindowSurface const&);
-    Optional<CachedCursor> load_standard_cursor(Gfx::StandardCursor);
     Popup* find_popup(i32 popup_id);
     i32 popup_id_for_surface(wl_surface*) const;
     void purge_released_buffers(WindowSurface&);
     void purge_released_buffers(Popup&);
     static void purge_released_buffers(Vector<NonnullOwnPtr<BufferRecord>>&);
     void bind_bitmap(wl_surface*, Core::AnonymousBuffer const&, Gfx::Bitmap const&, Vector<NonnullOwnPtr<BufferRecord>>&, Vector<Gfx::IntRect> const* damage = nullptr);
-    u32 current_modifiers() const;
     void request_display_link_frame();
 
     wl_display* m_display { nullptr };
@@ -559,13 +456,12 @@ private:
     zwlr_layer_shell_v1* m_layer_shell { nullptr };
     RefPtr<Core::Notifier> m_notifier;
 
-    InputState m_input_state;
-    TextInputState m_text_input;
     DisplayLinkState m_display_link;
 
     NonnullOwnPtr<SerenityShell> m_serenity_shell;
     NonnullOwnPtr<WaylandOutputs> m_outputs;
     NonnullOwnPtr<WaylandDataDevice> m_data_device;
+    NonnullOwnPtr<WaylandSeat> m_seat;
 
     InputCallbacks m_input;
     Function<void(ByteString const&)> m_connection_lost;

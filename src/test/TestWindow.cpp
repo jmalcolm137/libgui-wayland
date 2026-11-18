@@ -6,6 +6,7 @@
 
 #include "LibWM.h"
 #include "WaylandClient.h"
+#include "WaylandSeat.h"
 #include <AK/StringBuilder.h>
 #include <LibCore/MimeData.h>
 #include <LibCore/Timer.h>
@@ -129,7 +130,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     });
 
     // Exercise zwp_text_input_v3 IME preedit and commit forwarding.
-    LibWM::WaylandClient::the().set_text_input_callbacks(
+    LibWM::WaylandClient::the().seat().set_text_input_callbacks(
         [](String const& committed) {
             dbgln("TestWindow: IME commit='{}'", committed);
         },
@@ -150,8 +151,8 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         window->set_title("LibWM Test Window");
         dbgln("TestWindow: oversized UTF-8 title clamped and sent");
 
-        LibWM::WaylandClient::the().set_text_input_cursor_rect({ 10, 10, 2, 16 });
-        LibWM::WaylandClient::the().set_text_input_enabled(true);
+        LibWM::WaylandClient::the().seat().set_text_input_cursor_rect({ 10, 10, 2, 16 });
+        LibWM::WaylandClient::the().seat().set_text_input_enabled(true);
 
         if (auto custom_cursor = Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, { 12, 12 }); !custom_cursor.is_error())
             window->set_cursor(*custom_cursor.value());

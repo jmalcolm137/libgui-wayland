@@ -7,6 +7,7 @@
 #include "WaylandClient.h"
 #include "SerenityShell.h"
 #include "WaylandOutputs.h"
+#include "WaylandSeat.h"
 #include "Environment.h"
 #include <AK/Assertions.h>
 #include <LibCore/Process.h>
@@ -767,12 +768,7 @@ void WaylandClient::destroy_window(i32 window_id)
             m_display_link.callback = nullptr;
             m_display_link.surface = nullptr;
         }
-        if (m_input_state.pointer_surface == window_surface.surface || m_input_state.pointer_surface == window_surface.menubar_surface)
-            m_input_state.pointer_surface = nullptr;
-        if (m_input_state.pointer_window == window_id)
-            m_input_state.pointer_window = -1;
-        if (m_input_state.focused_window == window_id)
-            m_input_state.focused_window = -1;
+        m_seat->forget_window(window_id, window_surface.surface, window_surface.menubar_surface);
         for (auto& record : window_surface.menubar_buffers) {
             if (record->buffer)
                 wl_buffer_destroy(record->buffer);
@@ -946,6 +942,29 @@ void WaylandClient::set_window_icon_bitmap(i32 window_id, Gfx::ShareableBitmap c
         window_surface->csd_dirty = true;
     }
     m_serenity_shell->set_icon(window_surface->chrome, window_surface->icon_bitmap.ptr());
+}
+
+void WaylandClient::set_window_cursor(i32 window_id, i32 cursor_type)
+{
+    MutexLocker locker(m_mutex);
+    auto* window_surface = find(window_id);
+    if (!window_surface)
+        return;
+    window_surface->cursor_type = cursor_type;
+    window_surface->custom_cursor = nullptr;
+    if (m_seat->pointer_window() == window_id)
+        m_seat->apply_window_cursor(*window_surface);
+}
+
+void WaylandClient::set_window_custom_cursor(i32 window_id, Gfx::ShareableBitmap const& cursor)
+{
+    MutexLocker locker(m_mutex);
+    auto* window_surface = find(window_id);
+    if (!window_surface)
+        return;
+    window_surface->custom_cursor = cursor.is_valid() ? cursor.bitmap() : nullptr;
+    if (m_seat->pointer_window() == window_id)
+        m_seat->apply_window_cursor(*window_surface);
 }
 
 void WaylandClient::attach_and_commit(i32 window_id, int client_fd, Gfx::IntSize size, Gfx::IntSize visible_size, i32 pitch, bool has_alpha)

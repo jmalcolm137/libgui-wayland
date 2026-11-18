@@ -6,6 +6,7 @@
 
 #include "WaylandDataDevice.h"
 #include "WaylandClient.h"
+#include "WaylandSeat.h"
 #include <AK/ByteBuffer.h>
 #include <errno.h>
 #include <poll.h>
@@ -158,9 +159,9 @@ void WaylandDataDevice::bind(wl_data_device_manager* manager)
 void WaylandDataDevice::maybe_create_data_device()
 {
     MutexLocker locker(m_client.m_mutex);
-    if (m_state.device || !m_client.m_input_state.seat || !m_state.manager)
+    if (m_state.device || !m_client.m_seat->wayland_seat() || !m_state.manager)
         return;
-    m_state.device = wl_data_device_manager_get_data_device(m_state.manager, m_client.m_input_state.seat);
+    m_state.device = wl_data_device_manager_get_data_device(m_state.manager, m_client.m_seat->wayland_seat());
     dbgln("LibWM/Wayland: data device created: {}", m_state.device != nullptr);
     if (m_state.device)
         wl_data_device_add_listener(m_state.device, &s_data_device_listener, this);
@@ -278,7 +279,7 @@ bool WaylandDataDevice::start_drag(ByteString const&, HashMap<String, ByteBuffer
     MutexLocker locker(m_client.m_mutex);
     if (!m_state.device || !m_state.manager || !m_client.m_compositor || !m_client.m_shm)
         return false;
-    auto* origin = m_client.find(m_client.m_input_state.pointer_window);
+    auto* origin = m_client.find(m_client.m_seat->pointer_window());
     if (!origin || !origin->surface)
         return false;
 
@@ -323,9 +324,9 @@ bool WaylandDataDevice::start_drag(ByteString const&, HashMap<String, ByteBuffer
         }
     }
 
-    wl_data_device_start_drag(m_state.device, m_state.drag_source, origin->surface, m_state.drag_icon, m_client.m_input_state.last_serial);
+    wl_data_device_start_drag(m_state.device, m_state.drag_source, origin->surface, m_state.drag_icon, m_client.m_seat->last_serial());
     wl_display_flush(m_client.m_display);
-    dbgln("LibWM/Wayland: started drag ({} representation(s), serial {})", mime_data.size(), m_client.m_input_state.last_serial);
+    dbgln("LibWM/Wayland: started drag ({} representation(s), serial {})", mime_data.size(), m_client.m_seat->last_serial());
     return true;
 }
 
@@ -432,7 +433,7 @@ void WaylandDataDevice::on_drag_enter(u32 serial, wl_data_offer* offer, wl_surfa
     if (m_state.accepts_drag && offer && !m_state.drag_mime.is_empty())
         wl_data_offer_accept(offer, serial, m_state.drag_mime.characters());
     if (m_state.drag_window >= 0 && m_client.m_input.drag_moved)
-        m_client.m_input.drag_moved(m_state.drag_window, adjusted_drag_position(), m_client.m_input_state.pointer_buttons, m_client.current_modifiers(), m_state.drag_received);
+        m_client.m_input.drag_moved(m_state.drag_window, adjusted_drag_position(), m_client.m_seat->pointer_buttons(), m_client.m_seat->current_modifiers(), m_state.drag_received);
 }
 
 void WaylandDataDevice::on_drag_motion(Gfx::IntPoint position)
@@ -442,7 +443,7 @@ void WaylandDataDevice::on_drag_motion(Gfx::IntPoint position)
     if (m_state.drag_offer && m_state.accepts_drag && !m_state.drag_mime.is_empty())
         wl_data_offer_accept(m_state.drag_offer, m_state.drag_serial, m_state.drag_mime.characters());
     if (m_state.drag_window >= 0 && m_client.m_input.drag_moved)
-        m_client.m_input.drag_moved(m_state.drag_window, adjusted_drag_position(), m_client.m_input_state.pointer_buttons, m_client.current_modifiers(), m_state.drag_received);
+        m_client.m_input.drag_moved(m_state.drag_window, adjusted_drag_position(), m_client.m_seat->pointer_buttons(), m_client.m_seat->current_modifiers(), m_state.drag_received);
 }
 
 void WaylandDataDevice::set_accepts_drag(bool accepts)
@@ -457,7 +458,7 @@ void WaylandDataDevice::on_drag_drop()
 {
     MutexLocker locker(m_client.m_mutex);
     if (m_state.drag_window >= 0 && m_client.m_input.drag_dropped)
-        m_client.m_input.drag_dropped(m_state.drag_window, adjusted_drag_position(), m_client.m_input_state.pointer_buttons, m_client.current_modifiers(), m_state.drag_received);
+        m_client.m_input.drag_dropped(m_state.drag_window, adjusted_drag_position(), m_client.m_seat->pointer_buttons(), m_client.m_seat->current_modifiers(), m_state.drag_received);
     if (m_state.drag_offer) {
         wl_data_offer_finish(m_state.drag_offer);
         forget_offer(m_state.drag_offer);
@@ -636,7 +637,7 @@ void WaylandDataDevice::write_clipboard(HashMap<ByteString, ByteBuffer> offers)
     }
 
     if (m_state.clipboard_offers.is_empty()) {
-        wl_data_device_set_selection(m_state.device, nullptr, m_client.m_input_state.last_serial);
+        wl_data_device_set_selection(m_state.device, nullptr, m_client.m_seat->last_serial());
         wl_display_flush(m_client.m_display);
         return;
     }
@@ -645,9 +646,9 @@ void WaylandDataDevice::write_clipboard(HashMap<ByteString, ByteBuffer> offers)
     wl_data_source_add_listener(m_state.selection_source, &s_data_source_listener, this);
     for (auto const& it : m_state.clipboard_offers)
         wl_data_source_offer(m_state.selection_source, it.key.characters());
-    wl_data_device_set_selection(m_state.device, m_state.selection_source, m_client.m_input_state.last_serial);
+    wl_data_device_set_selection(m_state.device, m_state.selection_source, m_client.m_seat->last_serial());
     wl_display_flush(m_client.m_display);
-    dbgln("LibWM/Wayland: set clipboard ({} representation(s), serial {})", m_state.clipboard_offers.size(), m_client.m_input_state.last_serial);
+    dbgln("LibWM/Wayland: set clipboard ({} representation(s), serial {})", m_state.clipboard_offers.size(), m_client.m_seat->last_serial());
 }
 
 }

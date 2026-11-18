@@ -7,6 +7,7 @@
 #include "WaylandClient.h"
 #include "SerenityShell.h"
 #include "WaylandOutputs.h"
+#include "WaylandSeat.h"
 #include <LibGfx/Bitmap.h>
 #include <string.h>
 #include <wayland-client.h>
@@ -328,8 +329,8 @@ void WaylandClient::create_popup(i32 popup_id, i32 parent_window_id, i32 parent_
     xdg_positioner_destroy(positioner);
     xdg_popup_add_listener(popup, &s_popup_listener, this);
     // Only the root popup grabs; nested popups inherit the grab.
-    if (!is_submenu && m_input_state.seat)
-        xdg_popup_grab(popup, m_input_state.seat, m_input_state.last_serial);
+    if (auto* seat = m_seat->wayland_seat(); !is_submenu && seat)
+        xdg_popup_grab(popup, seat, m_seat->last_serial());
     wl_surface_commit(surface);
 
     auto p = make<Popup>();
@@ -397,8 +398,7 @@ void WaylandClient::destroy_popup(i32 popup_id)
         xdg_surface_destroy(popup.xdg_surface_object);
     if (popup.surface)
         wl_surface_destroy(popup.surface);
-    if (m_input_state.pointer_popup == popup_id)
-        m_input_state.pointer_popup = -1;
+    m_seat->forget_popup(popup_id);
     m_popups.remove(it);
     wl_display_flush(m_display);
 }

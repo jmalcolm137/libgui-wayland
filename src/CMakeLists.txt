@@ -29,9 +29,9 @@ add_library(windowserver SHARED
     SerenityShell.cpp
     WaylandClient.cpp
     WaylandDataDevice.cpp
-    WaylandInput.cpp
     WaylandOutputs.cpp
     WaylandPopup.cpp
+    WaylandSeat.cpp
     WaylandSurface.cpp
     WindowServerConnection.cpp
     WindowServerSettings.cpp
