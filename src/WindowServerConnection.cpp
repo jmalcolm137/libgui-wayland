@@ -8,6 +8,7 @@
 #include "Environment.h"
 #include "SerenityShell.h"
 #include "WaylandClient.h"
+#include "WaylandDataDevice.h"
 #include "WaylandOutputs.h"
 #include <LibCore/AnonymousBuffer.h>
 #include <LibGfx/Font/FontDatabase.h>
@@ -658,13 +659,13 @@ Messages::WindowServer::StartDragResponse WindowServerConnection::start_drag(Byt
     // outcome arrives later, via callbacks.drag_finished (async_drag_accepted /
     // async_drag_cancelled), so a Serenity app's DragOperation resolves when the
     // drag ends — against any Wayland target, SDE or otherwise.
-    bool started = WaylandClient::the().start_drag(text, mime_data, drag_bitmap);
+    bool started = WaylandClient::the().data_device().start_drag(text, mime_data, drag_bitmap);
     return Messages::WindowServer::StartDragResponse { started };
 }
 
 void WindowServerConnection::set_accepts_drag(bool accepts)
 {
-    WaylandClient::the().set_accepts_drag(accepts);
+    WaylandClient::the().data_device().set_accepts_drag(accepts);
 }
 
 void WindowServerConnection::create_menu(i32 menu_id, String const& name, i32 minimum_width)

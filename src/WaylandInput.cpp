@@ -6,6 +6,7 @@
 
 #include "WaylandClient.h"
 #include "SerenityShell.h"
+#include "WaylandDataDevice.h"
 #include "Environment.h"
 #include <Kernel/API/KeyCode.h>
 #include <LibGUI/Event.h>
@@ -398,7 +399,7 @@ void WaylandClient::add_seat(wl_seat* seat)
     MutexLocker locker(m_mutex);
     m_input_state.seat = seat;
     wl_seat_add_listener(seat, &s_seat_listener, this);
-    maybe_create_data_device();
+    m_data_device->maybe_create_data_device();
     ensure_text_input();
 }
 

@@ -6,6 +6,7 @@
 
 #include "ClipboardServerConnection.h"
 #include "WaylandClient.h"
+#include "WaylandDataDevice.h"
 #include <AK/Optional.h>
 #include <LibGfx/Bitmap.h>
 #include <LibGfx/ImageFormats/ImageDecoder.h>
@@ -64,7 +65,7 @@ ClipboardServerConnection::ClipboardServerConnection(NonnullOwnPtr<Core::LocalSo
     : IPC::Connection<ClipboardServerEndpoint, ClipboardClientEndpoint>(*this, move(socket))
     , ClipboardClientEndpoint::Proxy<ClipboardServerEndpoint>(*this, {})
 {
-    WaylandClient::the().set_clipboard_changed_callback([this](ByteString const& mime_type) {
+    WaylandClient::the().data_device().set_clipboard_changed_callback([this](ByteString const& mime_type) {
         async_clipboard_data_changed(mime_type);
     });
 }
@@ -82,10 +83,10 @@ bool ClipboardServerConnection::is_html(StringView mime_type)
 Vector<GUI::ClipboardEntry> ClipboardServerConnection::current_entries() const
 {
     auto& client = WaylandClient::the();
-    if (client.owns_clipboard() && !m_entries.is_empty())
+    if (client.data_device().owns_clipboard() && !m_entries.is_empty())
         return m_entries;
 
-    auto mimes = client.clipboard_mime_types();
+    auto mimes = client.data_device().clipboard_mime_types();
     Vector<GUI::ClipboardEntry> entries;
     if (mimes.is_empty())
         return entries;
@@ -100,7 +101,7 @@ Vector<GUI::ClipboardEntry> ClipboardServerConnection::current_entries() const
 
     auto fetch = [&](ByteString const& mime, ByteString canonical_mime) {
         ByteString actual_mime;
-        auto data = client.read_clipboard_for_mime(mime, actual_mime);
+        auto data = client.data_device().read_clipboard_for_mime(mime, actual_mime);
         if (data.is_error())
             return;
         entries.append({ data.release_value(), move(canonical_mime), {} });
@@ -117,7 +118,7 @@ Vector<GUI::ClipboardEntry> ClipboardServerConnection::current_entries() const
     // metadata, so decoding the PNG is the only way to restore it.
     if (auto mime = find([](auto const& candidate) { return candidate == "image/png"sv; }); mime.has_value()) {
         ByteString actual_mime;
-        auto png = client.read_clipboard_for_mime(*mime, actual_mime);
+        auto png = client.data_device().read_clipboard_for_mime(*mime, actual_mime);
         if (!png.is_error()) {
             HashMap<ByteString, ByteString> metadata;
             auto raw = png_to_serenity_image(png.value().bytes(), metadata);
@@ -245,7 +246,7 @@ void ClipboardServerConnection::set_clipboard_entries(Vector<GUI::ClipboardEntry
         }
     }
 
-    WaylandClient::the().write_clipboard(move(offers));
+    WaylandClient::the().data_device().write_clipboard(move(offers));
 }
 
 }
