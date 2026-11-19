@@ -22,8 +22,11 @@ tracking) is unsynchronised. Wayland events arrive on the main thread, so
 `WindowServerConnection` wraps every callback it hands to `WaylandClient` in
 `on_server_thread()`, which runs it inline if already on the server thread and
 otherwise posts it there (`MainThreadInvoker::post_to_server`). The posted task
-holds a reference to the connection. Event order is preserved, since it is one
-queue. Paths that change connection state `VERIFY` they are on the server
+captures the connection as a raw pointer: the connection lives for the whole
+process (LibWM leaks its slot), and taking a reference on the main thread would
+race the server thread's own reference counting (rule 5). Event order is
+preserved, since it is one queue. The clipboard connection's selection-changed
+callback is posted the same way. Paths that change connection state `VERIFY` they are on the server
 thread.
 
 **2. GUI work goes to the main thread, asynchronously.** A portal request that
@@ -44,9 +47,16 @@ thread's calls into `WaylandClient` and the main thread's event loop. Anything
 that waits on another client (reading a drag offer) is bounded by a timeout;
 clipboard reads release the lock and read outside it.
 
-**5. Strings crossing threads are deep-copied.** `ByteString` reference counts
-are not atomic. Getters that hand state from one thread to another return
-`ByteString { value.view() }`, not a shared copy.
+**5. Nothing refcounted is shared between the threads.** AK reference counts
+(`RefCounted`, `String`, `ByteString`, `Gfx::Bitmap`) are not atomic: if both
+threads ref and unref the same object, updates are lost and the object is freed
+while still in use. So nothing that crosses threads is shared:
+
+* posted tasks capture long-lived objects as raw pointers, never `RefPtr`s;
+* strings are deep-copied (`ByteString { value.view() }`);
+* bitmaps and MIME-data maps go through `copy_for_other_thread()` (`WaylandClient.h`):
+  cursor and icon bitmaps from IPC messages, the wallpaper and screen captures,
+  and the drag-and-drop data handed to the server thread.
 
 **6. Callbacks that capture an object belong to it.** The display-link and
 host-settings callbacks are installed with an owner (`set_*_callback(owner,

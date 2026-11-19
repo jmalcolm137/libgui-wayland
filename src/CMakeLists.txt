@@ -49,14 +49,22 @@ add_library(LibWM SHARED
     "${SERENITY_PROJECT_ROOT}/Userland/Services/ImageDecoder/ConnectionFromClient.cpp"
 )
 
-# The library is libwm.so. It used to be built as libwindowserver.so, and the
-# SerenityDE build still refers to the `windowserver` and `wm` targets, so both
-# stay as aliases, and a libwindowserver.so symlink keeps binaries linked
-# against the old name (or with -lwindowserver) working. Through the symlink the
-# loader sees one file, so the library is never loaded twice.
+# The library is libwm.so. It used to be built as libwindowserver.so and its
+# target was `windowserver` (short form `wm`). Consumers may still link against
+# or build those names (`target_link_libraries(... windowserver)`, `ninja
+# windowserver`), so they are real INTERFACE targets that link and build LibWM:
+# an ALIAS would link but is not a buildable target for Ninja. A
+# libwindowserver.so symlink keeps binaries linked against the old file name
+# working; through the symlink the loader sees one file, so the library is never
+# loaded twice.
 set_target_properties(LibWM PROPERTIES OUTPUT_NAME wm)
-add_library(windowserver ALIAS LibWM)
-add_library(wm ALIAS LibWM)
+foreach(compat_name windowserver wm)
+    # The header source is what makes CMake give an INTERFACE library a build
+    # target (it compiles nothing).
+    add_library(${compat_name} INTERFACE LibWM.h)
+    target_link_libraries(${compat_name} INTERFACE LibWM)
+    add_dependencies(${compat_name} LibWM)
+endforeach()
 add_custom_command(TARGET LibWM POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E create_symlink "$<TARGET_FILE_NAME:LibWM>" "$<TARGET_FILE_DIR:LibWM>/libwindowserver.so"
     VERBATIM
@@ -88,7 +96,10 @@ target_include_directories(LibWM PRIVATE
 target_compile_definitions(LibWM PRIVATE "LIBWM_DEFAULT_RES=\"${SERENITY_PROJECT_ROOT}/Base/res\"")
 # The generated Wayland protocol code drops const in its listener trampolines.
 target_compile_options(LibWM PRIVATE -Wno-cast-qual)
-target_link_libraries(LibWM PRIVATE LibCore LibGfx LibIPC LibGUI LibLaunch LibThreading LibURL ${WAYLAND_CLIENT_LIBRARIES} ${XKBCOMMON_LIBRARIES})
+# A shared library may otherwise link with undefined symbols, which then only
+# fail when an application loads it.
+target_link_options(LibWM PRIVATE "-Wl,--no-undefined")
+target_link_libraries(LibWM PRIVATE AK LibCore LibGfx LibIPC LibGUI LibLaunch LibThreading LibURL ${WAYLAND_CLIENT_LIBRARIES} ${XKBCOMMON_LIBRARIES})
 add_dependencies(LibWM
     libwm_default_stubs
     generate_WindowServerEndpoint.h

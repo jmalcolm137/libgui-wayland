@@ -5,6 +5,7 @@
  */
 
 #include "ClipboardServerConnection.h"
+#include "MainThreadInvoker.h"
 #include "WaylandClient.h"
 #include "WaylandDataDevice.h"
 #include <AK/Optional.h>
@@ -65,8 +66,17 @@ ClipboardServerConnection::ClipboardServerConnection(NonnullOwnPtr<Core::LocalSo
     : IPC::Connection<ClipboardServerEndpoint, ClipboardClientEndpoint>(*this, move(socket))
     , ClipboardClientEndpoint::Proxy<ClipboardServerEndpoint>(*this, {})
 {
+    // The selection changes on the main thread (Wayland dispatch), but this
+    // connection and its socket belong to the LibWM server thread. The connection
+    // lives for the whole process (LibWM leaks its slot), so `this` stays valid.
     WaylandClient::the().data_device().set_clipboard_changed_callback([this](ByteString const& mime_type) {
-        async_clipboard_data_changed(mime_type);
+        if (MainThreadInvoker::on_server_thread()) {
+            async_clipboard_data_changed(mime_type);
+            return;
+        }
+        MainThreadInvoker::post_to_server([this, mime_type = ByteString { mime_type.view() }] {
+            async_clipboard_data_changed(mime_type);
+        });
     });
 }
 

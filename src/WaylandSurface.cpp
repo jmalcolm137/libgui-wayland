@@ -989,7 +989,7 @@ void WaylandClient::set_window_icon_bitmap(i32 window_id, Gfx::ShareableBitmap c
         return;
     {
         SurfaceLocker surface_locker(window_surface->mutex);
-        window_surface->icon_bitmap = icon.is_valid() ? icon.bitmap() : nullptr;
+        window_surface->icon_bitmap = icon.is_valid() ? copy_for_other_thread(icon.bitmap()) : nullptr;
         window_surface->csd_dirty = true;
     }
     m_serenity_shell->set_icon(window_surface->chrome, window_surface->icon_bitmap.ptr());
@@ -1013,7 +1013,7 @@ void WaylandClient::set_window_custom_cursor(i32 window_id, Gfx::ShareableBitmap
     auto* window_surface = find(window_id);
     if (!window_surface)
         return;
-    window_surface->custom_cursor = cursor.is_valid() ? cursor.bitmap() : nullptr;
+    window_surface->custom_cursor = cursor.is_valid() ? copy_for_other_thread(cursor.bitmap()) : nullptr;
     if (m_seat->pointer_window() == window_id)
         m_seat->apply_window_cursor(*window_surface);
 }

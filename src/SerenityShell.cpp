@@ -224,7 +224,7 @@ void SerenityShell::set_host_setting(StringView key, StringView value)
 RefPtr<Gfx::Bitmap> SerenityShell::host_wallpaper() const
 {
     MutexLocker locker(m_client.m_mutex);
-    return m_host_wallpaper;
+    return copy_for_other_thread(m_host_wallpaper.ptr());
 }
 
 void SerenityShell::on_host_wallpaper(i32 width, i32 height, i32 pitch, u32 format, i32 fd)
@@ -255,13 +255,13 @@ void SerenityShell::set_host_wallpaper(Gfx::Bitmap* bitmap)
             close(fd);
     }
     // Keep our own answers current.
-    m_host_wallpaper = bitmap;
+    m_host_wallpaper = copy_for_other_thread(bitmap);
 }
 
 RefPtr<Gfx::Bitmap> SerenityShell::captured_bitmap() const
 {
     MutexLocker locker(m_client.m_mutex);
-    return m_captured;
+    return copy_for_other_thread(m_captured.ptr());
 }
 
 void SerenityShell::request_capture(Gfx::IntRect const& region)
@@ -294,7 +294,7 @@ RefPtr<Gfx::Bitmap> SerenityShell::capture_now(Gfx::IntRect const& region, int t
     request_capture(region);
     bool const arrived = m_client.dispatch_until([&] { return m_captured_serial >= serial; }, timeout_ms);
     MutexLocker locker(m_client.m_mutex);
-    return arrived ? m_captured : nullptr;
+    return arrived ? copy_for_other_thread(m_captured.ptr()) : nullptr;
 }
 
 void SerenityShell::set_dismiss_menus_callback(Function<void()> callback)

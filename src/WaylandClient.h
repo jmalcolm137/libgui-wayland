@@ -61,6 +61,13 @@ class Notifier;
 namespace LibWM {
 
 class SerenityShell;
+
+// AK reference counts are not atomic, so a refcounted object (a long String, a
+// Gfx::Bitmap) must never be reachable from both the main thread and the LibWM
+// server thread. Values crossing between them go through these, which return an
+// independent copy sharing nothing with the original.
+RefPtr<Gfx::Bitmap> copy_for_other_thread(Gfx::Bitmap const*);
+HashMap<String, ByteBuffer> copy_for_other_thread(HashMap<String, ByteBuffer> const&);
 class WaylandDataDevice;
 class WaylandOutputs;
 class WaylandSeat;

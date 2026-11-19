@@ -43,7 +43,8 @@ class WindowServerConnection final
     // windows and its menus belong to the LibWM server thread, and LibIPC has no
     // send lock. Every callback handed to WaylandClient goes through here, so IPC
     // sends and state changes only ever happen on the server thread. Arguments
-    // are copied into the posted task; the task keeps the connection alive.
+    // are moved into the posted task; they must not share refcounted data with
+    // the caller (see copy_for_other_thread in WaylandClient.h).
     template<typename Callback>
     auto on_server_thread(Callback callback)
     {

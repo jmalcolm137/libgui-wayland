@@ -6,6 +6,7 @@
 
 #include "WaylandClient.h"
 #include <AK/Time.h>
+#include <LibGfx/Bitmap.h>
 #include "Environment.h"
 #include "SerenityShell.h"
 #include "WaylandDataDevice.h"
@@ -105,6 +106,26 @@ WaylandClient::WaylandClient()
 WaylandClient::~WaylandClient()
 {
     pthread_mutex_destroy(&m_mutex);
+}
+
+RefPtr<Gfx::Bitmap> copy_for_other_thread(Gfx::Bitmap const* bitmap)
+{
+    if (!bitmap)
+        return nullptr;
+    auto copy = bitmap->clone();
+    return copy.is_error() ? nullptr : copy.release_value();
+}
+
+HashMap<String, ByteBuffer> copy_for_other_thread(HashMap<String, ByteBuffer> const& map)
+{
+    HashMap<String, ByteBuffer> copy;
+    for (auto const& it : map) {
+        auto bytes = ByteBuffer::copy(it.value.bytes());
+        if (bytes.is_error())
+            continue;
+        copy.set(String::from_utf8_with_replacement_character(it.key.bytes_as_string_view()), bytes.release_value());
+    }
+    return copy;
 }
 
 WaylandClient& WaylandClient::the()

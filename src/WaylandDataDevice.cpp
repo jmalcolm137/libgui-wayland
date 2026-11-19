@@ -481,7 +481,7 @@ void WaylandDataDevice::on_drag_enter(u32 serial, wl_data_offer* offer, wl_surfa
     if (m_state.accepts_drag && offer && !m_state.drag_mime.is_empty())
         wl_data_offer_accept(offer, serial, m_state.drag_mime.characters());
     if (m_state.drag_window >= 0 && m_client.m_input.drag_moved)
-        m_client.m_input.drag_moved(m_state.drag_window, adjusted_drag_position(), m_client.m_seat->pointer_buttons(), m_client.m_seat->current_modifiers(), m_state.drag_received);
+        m_client.m_input.drag_moved(m_state.drag_window, adjusted_drag_position(), m_client.m_seat->pointer_buttons(), m_client.m_seat->current_modifiers(), copy_for_other_thread(m_state.drag_received));
 }
 
 void WaylandDataDevice::on_drag_motion(Gfx::IntPoint position)
@@ -491,7 +491,7 @@ void WaylandDataDevice::on_drag_motion(Gfx::IntPoint position)
     if (m_state.drag_offer && m_state.accepts_drag && !m_state.drag_mime.is_empty())
         wl_data_offer_accept(m_state.drag_offer, m_state.drag_serial, m_state.drag_mime.characters());
     if (m_state.drag_window >= 0 && m_client.m_input.drag_moved)
-        m_client.m_input.drag_moved(m_state.drag_window, adjusted_drag_position(), m_client.m_seat->pointer_buttons(), m_client.m_seat->current_modifiers(), m_state.drag_received);
+        m_client.m_input.drag_moved(m_state.drag_window, adjusted_drag_position(), m_client.m_seat->pointer_buttons(), m_client.m_seat->current_modifiers(), copy_for_other_thread(m_state.drag_received));
 }
 
 void WaylandDataDevice::set_accepts_drag(bool accepts)
@@ -506,7 +506,7 @@ void WaylandDataDevice::on_drag_drop()
 {
     MutexLocker locker(m_client.m_mutex);
     if (m_state.drag_window >= 0 && m_client.m_input.drag_dropped)
-        m_client.m_input.drag_dropped(m_state.drag_window, adjusted_drag_position(), m_client.m_seat->pointer_buttons(), m_client.m_seat->current_modifiers(), m_state.drag_received);
+        m_client.m_input.drag_dropped(m_state.drag_window, adjusted_drag_position(), m_client.m_seat->pointer_buttons(), m_client.m_seat->current_modifiers(), copy_for_other_thread(m_state.drag_received));
     if (m_state.drag_offer) {
         wl_data_offer_finish(m_state.drag_offer);
         forget_offer(m_state.drag_offer);
