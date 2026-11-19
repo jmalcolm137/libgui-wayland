@@ -126,6 +126,8 @@ private:
         i32 id { 0 };
         Gfx::IntRect rect;
         bool modified { false };
+        // The backing scale the menubar image was last rendered at.
+        int menubar_image_scale { 0 };
         // SerenityOS WindowMode (0 modeless .. 3 blocking) and the parent window
         // id (for a transient/modal dialog), from create_window.
         i32 window_mode { 0 };
@@ -153,6 +155,7 @@ private:
     void install_input_callbacks();
     void install_menu_callbacks();
     void update_window_menubar(i32 window_id);
+    void present_window_menubar(i32 window_id);
     void present_menu_popup(i32 menu_id);
 
     // WindowServerEndpoint overrides (the commands LibGUI actually issues).

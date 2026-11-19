@@ -114,7 +114,9 @@ input region built from their alpha channel, so transparent pixels click through
 
 **Menubar.** With SerenityDE (`serenity_toplevel` v2) and a subcompositor, the
 menubar is a subsurface above the content and the compositor offsets the window;
-otherwise it is composed into the window buffer. `MenuController` renders it.
+otherwise it is composed into the window buffer. `MenuController` renders it into
+an image on the server thread whenever the menubar changes or the window is
+resized; the Wayland side only copies that image when it presents a frame.
 
 **Client-side decorations** (22 px titlebar with close/maximize/minimize) are
 drawn when the compositor offers no `xdg-decoration`, asks for client-side mode,

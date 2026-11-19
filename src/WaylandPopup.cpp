@@ -5,6 +5,7 @@
  */
 
 #include "WaylandClient.h"
+#include <LibGfx/Painter.h>
 #include "Environment.h"
 #include "SerenityShell.h"
 #include "WaylandOutputs.h"
@@ -137,7 +138,17 @@ bool WaylandClient::window_uses_menubar_subsurface(i32 window_id) const
     return it != m_windows.end() && it->value->menubar_surface != nullptr;
 }
 
-void WaylandClient::set_window_inset(i32 window_id, int inset, Function<void(Gfx::Bitmap&, Gfx::IntRect)> draw)
+void WaylandClient::draw_inset_image(WindowSurface const& window_surface, Gfx::Bitmap& destination, Gfx::IntRect rect)
+{
+    Gfx::Painter painter(destination);
+    painter.clear_rect(rect, Gfx::Color::Transparent);
+    // During a resize the image can lag the window's width by a frame; the
+    // server thread re-renders it as soon as it sees the new size.
+    if (window_surface.inset_image)
+        painter.blit(rect.location(), *window_surface.inset_image, window_surface.inset_image->rect().intersected(Gfx::IntRect { {}, rect.size() }));
+}
+
+void WaylandClient::set_window_inset(i32 window_id, int inset, RefPtr<Gfx::Bitmap> image)
 {
     MutexLocker locker(m_mutex);
     auto* window_surface = find(window_id);
@@ -146,7 +157,7 @@ void WaylandClient::set_window_inset(i32 window_id, int inset, Function<void(Gfx
     SurfaceLocker surface_locker(window_surface->mutex);
     inset = max(0, inset);
     window_surface->inset = inset;
-    window_surface->draw_inset = move(draw);
+    window_surface->inset_image = inset > 0 ? move(image) : nullptr;
     // The menubar strip must be redrawn (and re-damaged) on the next present.
     window_surface->inset_dirty = true;
     window_surface->composed_valid = false;
@@ -202,7 +213,7 @@ void WaylandClient::set_window_inset(i32 window_id, int inset, Function<void(Gfx
 
 void WaylandClient::present_menubar(WindowSurface& window_surface, Gfx::IntSize visible_size)
 {
-    if (!window_surface.menubar_surface || !window_surface.draw_inset || window_surface.inset <= 0)
+    if (!window_surface.menubar_surface || window_surface.inset <= 0)
         return;
 
     int const scale = m_outputs->client_scale();
@@ -226,7 +237,7 @@ void WaylandClient::present_menubar(WindowSurface& window_surface, Gfx::IntSize 
     }
 
     if (window_surface.inset_dirty) {
-        window_surface.draw_inset(*window_surface.menubar_bitmap, { 0, 0, logical.width(), logical.height() });
+        draw_inset_image(window_surface, *window_surface.menubar_bitmap, { 0, 0, logical.width(), logical.height() });
         window_surface.inset_dirty = false;
     }
 

@@ -1246,7 +1246,7 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
     }
 
     int const csd_h = window_surface.csd_height();
-    int const menubar_h = (window_surface.inset > 0 && window_surface.draw_inset && !window_surface.menubar_surface) ? window_surface.inset : 0;
+    int const menubar_h = (window_surface.inset > 0 && !window_surface.menubar_surface) ? window_surface.inset : 0;
     int const total_inset = csd_h + menubar_h;
     int const logical_height = visible_size.height() + total_inset;
 
@@ -1336,7 +1336,7 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
 
         bool const redraw_inset = menubar_h > 0 && (recreate || window_surface.inset_dirty);
         if (redraw_inset) {
-            window_surface.draw_inset(destination, { 0, csd_h, visible_size.width(), menubar_h });
+            draw_inset_image(window_surface, destination, { 0, csd_h, visible_size.width(), menubar_h });
             window_surface.inset_dirty = false;
         }
 

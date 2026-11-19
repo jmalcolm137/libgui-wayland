@@ -29,6 +29,12 @@ preserved, since it is one queue. The clipboard connection's selection-changed
 callback is posted the same way. Paths that change connection state `VERIFY` they are on the server
 thread.
 
+**1a. Nothing calls from Wayland code into the server thread's objects.** The
+menus are the case to remember: the menubar is drawn by `MenuController`, which
+belongs to the server thread, so the server thread renders it into an image and
+hands that over (`WaylandClient::set_window_inset`). Presentation, which also
+runs from frame callbacks on the main thread, only copies the image.
+
 **2. GUI work goes to the main thread, asynchronously.** A portal request that
 needs a GUI (the file picker) posts it with `MainThreadInvoker::post_to_main` and
 posts the reply back with `post_to_server`. The server thread never blocks

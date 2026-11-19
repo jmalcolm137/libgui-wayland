@@ -124,7 +124,12 @@ void WindowServerConnection::request_window_resize(i32 window_id, Gfx::IntSize s
     }
 
     w->resize_in_flight = true;
+    bool const width_changed = w->rect.width() != size.width();
     w->rect.set_size(size);
+    // The menubar image is rendered at the window's width and backing scale; a
+    // scale change arrives here as a resize to the same size.
+    if (width_changed || w->menubar_image_scale != WaylandClient::the().outputs().client_scale())
+        present_window_menubar(window_id);
     trace("LibWM: window_resized {} -> {}x{}", window_id, size.width(), size.height());
     async_window_resized(window_id, w->rect);
     Vector<Gfx::IntRect> rects;
@@ -279,23 +284,41 @@ void WindowServerConnection::present_menu_popup(i32 menu_id)
     WaylandClient::the().present_popup(menu_id, *bitmap.value());
 }
 
+// Render the menubar here, on the server thread that owns the menus, and hand
+// the finished image to WaylandClient, which presents it from whichever thread
+// commits the next frame. The image is moved, so this thread keeps no reference.
+void WindowServerConnection::present_window_menubar(i32 window_id)
+{
+    verify_on_server_thread();
+    auto& wayland = WaylandClient::the();
+    bool const present = m_menu.window_has_menubar(window_id);
+    bool const visible = wayland.window_menubar_visible(window_id);
+    int const inset = (present && visible) ? m_menu.menubar_height() : 0;
+    auto* w = window(window_id);
+    if (inset <= 0 || !w || w->rect.width() <= 0) {
+        wayland.set_window_inset(window_id, inset, nullptr);
+        return;
+    }
+    Gfx::IntSize const size { w->rect.width(), inset };
+    auto image = Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, size, wayland.outputs().client_scale());
+    if (image.is_error()) {
+        wayland.set_window_inset(window_id, inset, nullptr);
+        return;
+    }
+    {
+        Gfx::Painter painter(*image.value());
+        m_menu.render_menubar(window_id, painter, { {}, size });
+    }
+    w->menubar_image_scale = image.value()->scale();
+    wayland.set_window_inset(window_id, inset, image.release_value());
+}
+
 void WindowServerConnection::update_window_menubar(i32 window_id)
 {
     verify_on_server_thread();
     // The compositor's window menu can hide the menu bar; the client still
     // decides whether it has one at all.
-    bool present = m_menu.window_has_menubar(window_id);
-    bool visible = WaylandClient::the().window_menubar_visible(window_id);
-    int inset = (present && visible) ? m_menu.menubar_height() : 0;
-    auto& wayland = WaylandClient::the();
-    if (inset > 0) {
-        wayland.set_window_inset(window_id, inset, [this, window_id](Gfx::Bitmap& bitmap, Gfx::IntRect rect) {
-            Gfx::Painter painter(bitmap);
-            m_menu.render_menubar(window_id, painter, rect);
-        });
-    } else {
-        wayland.set_window_inset(window_id, 0, {});
-    }
+    present_window_menubar(window_id);
     if (auto* w = window(window_id)) {
         Vector<Gfx::IntRect> rects;
         rects.append({ 0, 0, w->rect.width(), w->rect.height() });

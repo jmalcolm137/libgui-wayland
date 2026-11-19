@@ -215,9 +215,13 @@ public:
     // during interactive resize, when LibGUI over-allocates by a margin).
     void attach_and_commit(i32 window_id, int client_fd, Gfx::IntSize size, Gfx::IntSize visible_size, i32 pitch, bool has_alpha);
 
-    // Reserve a strip at the top of the window (a menubar) drawn by `draw`,
-    // with the client's content shifted down by `inset` pixels.
-    void set_window_inset(i32 window_id, int inset, Function<void(Gfx::Bitmap&, Gfx::IntRect)> draw);
+    // Reserve a strip of `inset` pixels at the top of the window (the menubar)
+    // and show `image` in it; the client's content is shifted down below it.
+    // The image is rendered by the caller on its own thread and handed over:
+    // nothing here calls back into the menus, which belong to the LibWM server
+    // thread. Call again with a new image whenever the menubar changes or the
+    // window is resized; an inset of 0 removes the strip.
+    void set_window_inset(i32 window_id, int inset, RefPtr<Gfx::Bitmap> image);
     bool window_uses_menubar_subsurface(i32 window_id) const;
 
     // Record the regions an incoming paint will change, so the present can copy
@@ -399,7 +403,9 @@ private:
         // compatibility fallback for compositors without a subcompositor or a
         // version-2 serenity_toplevel.
         int inset { 0 };
-        Function<void(Gfx::Bitmap&, Gfx::IntRect)> draw_inset;
+        // The menubar as rendered by the server thread (logical size: window
+        // width x inset). Only ever touched under the surface lock.
+        RefPtr<Gfx::Bitmap> inset_image;
         wl_surface* menubar_surface { nullptr };
         wl_subsurface* menubar_subsurface { nullptr };
         Core::AnonymousBuffer menubar_buffer;
@@ -467,6 +473,7 @@ private:
     void update_input_region(WindowSurface&, u8 const* client_pixels, size_t pitch, Gfx::IntSize visible_size, int scale, int total_inset);
     void present_menubar(WindowSurface&, Gfx::IntSize visible_size);
     void render_csd_titlebar(WindowSurface const&, Gfx::Bitmap&, int width);
+    static void draw_inset_image(WindowSurface const&, Gfx::Bitmap& destination, Gfx::IntRect rect);
     Popup* find_popup(i32 popup_id);
     i32 popup_id_for_surface(wl_surface*) const;
     void purge_released_buffers(WindowSurface&);

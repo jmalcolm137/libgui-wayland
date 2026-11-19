@@ -165,6 +165,50 @@ check "About: widget built (/res redirect works)" "grep -q 'AboutDialogWidget::t
 check "About: dialog window created"              "[[ \$(grep -c 'create_window' '$RUNTIME/aboutdlg.app.log') -ge 2 ]]"
 check "About: did not crash"                      "[[ $ABOUT_EXIT -ne 132 && $ABOUT_EXIT -ne 134 ]]"
 
+# --- Menubar pixels --------------------------------------------------------
+# The menubar is rendered on the LibWM server thread and handed to the Wayland
+# side as an image; check it is actually drawn (text in the top strip, its
+# background across the full width), at 1x, at 2x, and after a resize, which
+# must re-render it at the new width.
+menubar_frame() {
+    local name="$1" scale="$2" input="$3" app="${4:-$APP}"
+    printf '%b' "$input" > "$RUNTIME/$name.input"
+    "$HC" --socket "menu-$name" --size 640x480 --timeout 3 \
+        --output "$RUNTIME/$name.png" --input "$RUNTIME/$name.input" > "$RUNTIME/$name.hc.log" 2>&1 &
+    HC_PID=$!
+    for _ in $(seq 1 100); do [[ -e "$RUNTIME/menu-$name" ]] && break; sleep 0.1; done
+    env XDG_RUNTIME_DIR="$RUNTIME" WAYLAND_DISPLAY="menu-$name" SDE_CLIENT_SCALE="$scale" \
+        SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
+        LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        timeout 4 "$app" > "$RUNTIME/$name.app.log" 2>&1 || true
+    wait "$HC_PID" 2>/dev/null || true
+    HC_PID=""
+}
+menubar_pixels_ok() {
+    # menubar_pixels_ok NAME SCALE [MIN_WIDTH] [MIN_DARK_PER_SCALE2]
+    PROJECT_ROOT="$PROJECT_ROOT" python3 - "$RUNTIME/$1.png" "$2" "${3:-0}" "${4:-200}" <<'PY'
+import os, sys
+sys.path.insert(0, os.path.join(os.environ["PROJECT_ROOT"], "scripts", "lib"))
+from png import read_png_rgba, pixel_rgb
+w, h, rows = read_png_rgba(sys.argv[1])
+scale, min_width, min_dark = int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
+strip = 20 * scale
+dark = sum(1 for y in range(strip) for x in range(w) if max(pixel_rgb(rows, x, y)) < 80)
+right_bg = pixel_rgb(rows, w - 3 * scale, 2 * scale)
+ok = w >= min_width and dark >= min_dark * scale * scale and min(right_bg) > 150
+print(f"{sys.argv[1]}: {w}x{h} dark={dark} right_bg={right_bg} -> {'ok' if ok else 'BAD'}")
+sys.exit(0 if ok else 1)
+PY
+}
+menubar_frame mb1x 1 'sleep 1500\n'
+menubar_frame mb2x 2 'sleep 1500\n'
+# Calculator is not resizable; the submenu test window (300x200) is.
+ninja -C "$BUILD_DIR" libwm-submenu-test >/dev/null
+menubar_frame mbresize 2 'sleep 1000\nresize 600 400\nsleep 1200\n' "$BUILD_DIR/bin/libwm-submenu-test"
+check "menubar drawn at 1x"                         "menubar_pixels_ok mb1x 1 >> '$RUNTIME/menubar-pixels.log'"
+check "menubar drawn at 2x"                         "menubar_pixels_ok mb2x 2 >> '$RUNTIME/menubar-pixels.log'"
+check "menubar re-rendered at new width on resize"  "menubar_pixels_ok mbresize 2 1100 40 >> '$RUNTIME/menubar-pixels.log'"
+
 if [[ $failures -ne 0 ]]; then
     KEEP=1
     echo "==> $failures check(s) failed; logs in $RUNTIME"
