@@ -17,3 +17,6 @@ compile_commands.json
 
 # Guide example binaries
 /examples/bin/
+
+# Python bytecode (scripts/lib/png.py)
+__pycache__/
