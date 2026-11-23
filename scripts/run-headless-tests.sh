@@ -73,7 +73,7 @@ HC_PID=$!
 
 for _ in $(seq 1 100); do [[ -e "$RUNTIME/libwm-test" ]] && break; sleep 0.1; done
 
-env XDG_RUNTIME_DIR="$RUNTIME" SDE_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY=libwm-test \
+env XDG_RUNTIME_DIR="$RUNTIME" LIBWM_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY=libwm-test \
     SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
     LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
     timeout 7 "$APP" > "$RUNTIME/app.log" 2>&1 || true
@@ -96,7 +96,7 @@ EOF
 HC_PID=$!
 for _ in $(seq 1 100); do [[ -e "$RUNTIME/libwm-dnd" ]] && break; sleep 0.1; done
 
-env XDG_RUNTIME_DIR="$RUNTIME" SDE_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY=libwm-dnd \
+env XDG_RUNTIME_DIR="$RUNTIME" LIBWM_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY=libwm-dnd \
     SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
     LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
     timeout 6 "$APP" > "$RUNTIME/dnd-app.log" 2>&1 &

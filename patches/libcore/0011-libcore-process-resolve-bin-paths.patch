@@ -52,21 +52,21 @@ index 2860cbb1..73234994 100644
 +    auto as_byte_string = path.to_byte_string();
 +    auto basename = LexicalPath(path).basename();
 +
-+    // A session may shadow /bin with its own helpers: SDE provides sde-power
-+    // wrappers for /bin/shutdown, /bin/reboot and /bin/logout in
-+    // SDE_SESSION_BIN_DIR (see scripts/sde-session.sh).
-+    if (auto const* session_bin = getenv("SDE_SESSION_BIN_DIR"); session_bin && *session_bin) {
++    // A session may shadow /bin with its own helpers, such as a desktop's
++    // wrappers for /bin/shutdown, /bin/reboot and /bin/logout, in
++    // LIBWM_SESSION_BIN_DIR.
++    if (auto const* session_bin = getenv("LIBWM_SESSION_BIN_DIR"); session_bin && *session_bin) {
 +        auto candidate = ByteString::formatted("{}/{}", session_bin, basename);
 +        if (::access(candidate.characters(), X_OK) == 0)
 +            return candidate;
 +    }
 +
-+    // The session's applications live in SDE_APP_BIN_DIR: the port builds most
-+    // apps into one directory, but SDE builds some elsewhere (e.g. the taskbar
-+    // applets in build/Applets). Consult it before the caller-directory fallback,
-+    // so the ResourceGraph applet spawning /bin/SystemMonitor reaches the session's
-+    // SystemMonitor rather than a non-existent <applet-dir>/SystemMonitor.
-+    if (auto const* app_bin = getenv("SDE_APP_BIN_DIR"); app_bin && *app_bin) {
++    // The session's applications live in LIBWM_APP_BIN_DIR, which need not be
++    // the caller's directory (a desktop may build helpers such as its taskbar
++    // applets elsewhere). Consult it before the caller-directory fallback, so an
++    // applet spawning /bin/SystemMonitor reaches the session's SystemMonitor
++    // rather than a non-existent <applet-dir>/SystemMonitor.
++    if (auto const* app_bin = getenv("LIBWM_APP_BIN_DIR"); app_bin && *app_bin) {
 +        auto candidate = ByteString::formatted("{}/{}", app_bin, basename);
 +        if (::access(candidate.characters(), X_OK) == 0)
 +            return candidate;
@@ -97,7 +97,7 @@ index 21f09928..a8fd1b89 100644
  
      static ErrorOr<Process> spawn(ProcessSpawnOptions const& options);
  
-+    // Maps a SerenityOS "/bin/X" path to a host binary: first SDE_SESSION_BIN_DIR
++    // Maps a SerenityOS "/bin/X" path to a host binary: first LIBWM_SESSION_BIN_DIR
 +    // (a session-provided /bin shadow), then /bin/X itself, then the binary next
 +    // to this executable. Returns the path unchanged otherwise.
 +    static ByteString resolve_executable_path(StringView path);

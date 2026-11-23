@@ -74,14 +74,14 @@ void WindowServerConnection::send_fast_greet()
     // Client-side HiDPI: rasterise at the compositor's output scale (or
     // ceil(fractional_scale) with wp_viewport downsampling for fractional scales
     // like 1.25x, 1.5x, 1.75x) so windows are drawn at native resolution on any
-    // compositor. Set SDE_CLIENT_SCALE=0 to force 1x, or a positive integer or
+    // compositor. Set LIBWM_CLIENT_SCALE=0 to force 1x, or a positive integer or
     // fractional value (e.g. 1.5, 1.75, 2) to select that scale explicitly.
     wayland.outputs().set_client_scale_v120(Environment::client_scale_override_v120().value_or(wayland.outputs().output_scale_v120()));
     GUI::Window::set_backing_store_scale(wayland.outputs().client_scale());
 
-    // The session font. Prefer the font broker (else the Katica/Csilla
-    // bitmap defaults), so a client's first FontDatabase update already uses it.
-    auto font_queries = read_fonts_broker();
+    // The session fonts. Prefer the desktop's (else the Katica/Csilla bitmap
+    // defaults), so a client's first FontDatabase update already uses them.
+    auto font_queries = host_fonts();
     ByteString default_query = font_queries.default_query.is_empty() ? ByteString { "Katica 10 400 0" } : font_queries.default_query;
     ByteString fixed_query = font_queries.fixed_width_query.is_empty() ? ByteString { "Csilla 10 400 0" } : font_queries.fixed_width_query;
     ByteString title_query = font_queries.window_title_query.is_empty() ? ByteString { "Katica 10 700 0" } : font_queries.window_title_query;
@@ -678,8 +678,9 @@ Messages::WindowServer::GetScreenBitmapAroundLocationResponse WindowServerConnec
 
 Messages::WindowServer::GetScreenBitmapResponse WindowServerConnection::get_screen_bitmap(Optional<Gfx::IntRect> const& rect, Optional<u32> const&)
 {
-    // A screenshot (the `shot` utility). Only SerenityDE can capture the screen;
-    // elsewhere the bitmap is empty, which callers report as a failed capture.
+    // A screenshot (the `shot` utility). Only a compositor offering serenity-window
+    // can capture the screen; elsewhere the bitmap is empty, which callers report
+    // as a failed capture.
     // Unlike the Magnifier's capture this one waits for the compositor's reply.
     auto& wayland = WaylandClient::the();
     Gfx::IntRect const region = rect.value_or(Gfx::IntRect { {}, wayland.outputs().screen_size() });
@@ -694,7 +695,7 @@ Messages::WindowServer::StartDragResponse WindowServerConnection::start_drag(Byt
     // Bridge LibGUI's drag source onto the standard Wayland data-device DnD. The
     // outcome arrives later, via callbacks.drag_finished (async_drag_accepted /
     // async_drag_cancelled), so a Serenity app's DragOperation resolves when the
-    // drag ends — against any Wayland target, SDE or otherwise.
+    // drag ends — against any Wayland target.
     bool started = WaylandClient::the().data_device().start_drag(text, mime_data, drag_bitmap);
     return Messages::WindowServer::StartDragResponse { started };
 }

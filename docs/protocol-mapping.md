@@ -23,7 +23,7 @@ required; without the others LibWM falls back as noted.
 | `wl_data_device_manager` | ≤ 3 | clipboard and drag-and-drop | no clipboard or DnD |
 | `zwp_text_input_manager_v3` | 1 | input methods (preedit, commit) | no IME |
 | `zwlr_layer_shell_v1` | ≤ 4 | Taskbar, Desktop, applets, popup-style windows, menus of layer surfaces | those become ordinary toplevels |
-| `serenity_window_manager` (`src/protocol/serenity-window.xml`) | ≤ 3 | SerenityDE: host settings, wallpaper, capture, menubar control, placement, icons | defaults; no compositor-driven chrome |
+| `serenity_window_manager` (`src/protocol/serenity-window.xml`) | ≤ 4 | a desktop's compositor: host settings, wallpaper, capture, menubar control, placement, icons | defaults; no compositor-driven chrome |
 
 ## WindowServer requests (client → LibWM)
 
@@ -43,10 +43,10 @@ then sends no reply, and the client's `send_sync()` blocks forever.
 | Cursor | `set_window_cursor`, `set_window_custom_cursor`, `get_global_cursor_position` | position reconstructed from the surface under the pointer |
 | Menus | `create_menu`, `destroy_menu`, `set_menu_name`, `set_menu_minimum_width`, `add_menu`, `add_menu_item`, `add_menu_separator`, `update_menu_item`, `remove_menu_item`, `flash_menubar_menu`, `popup_menu`, `dismiss_menu` | rendered by `MenuController` |
 | Drag and drop | `start_drag`, `set_accepts_drag` | `wl_data_device` |
-| Screen and capture | `get_screen_layout`, `set_screen_layout`, `save_screen_layout`, `get_desktop_display_scale`, `set_output_scale`, `get_screen_bitmap`, `get_screen_bitmap_around_cursor`, `get_screen_bitmap_around_location`, `get_color_under_cursor`, `get_applet_rect_on_screen` | layout and capture come from SerenityDE where available; `get_screen_bitmap` waits up to 2 s for the capture, the Magnifier's calls return the latest one |
+| Screen and capture | `get_screen_layout`, `set_screen_layout`, `save_screen_layout`, `get_desktop_display_scale`, `set_output_scale`, `get_screen_bitmap`, `get_screen_bitmap_around_cursor`, `get_screen_bitmap_around_location`, `get_color_under_cursor`, `get_applet_rect_on_screen` | layout and capture come from the desktop where available; `get_screen_bitmap` waits up to 2 s for the capture, the Magnifier's calls return the latest one |
 | Theme, fonts, effects | `set_system_theme`, `get_system_theme`, `get_system_theme_override`, `is_system_theme_overridden`, `get_preferred_color_scheme`, `set_system_theme_override`, `clear_system_theme_override`, `set_system_fonts`, `set_system_effects` | the override (ThemeEditor's preview) restyles this application only |
-| Wallpaper and desktop | `set_wallpaper`, `get_wallpaper`, `set_wallpaper_mode`, `set_background_color`, `apply_workspace_settings`, `get_workspace_settings` | stored by SerenityDE |
-| Input settings | `get/set_mouse_acceleration` (+ min/max), `get/set_scroll_step_size` (+ min), `get/set_double_click_speed` (+ min/max), `are/set_mouse_buttons_switched`, `is/set_natural_scroll`, `get/set_keyboard_layout`, `get_keyboard_layout_names`, `get/apply_cursor_theme`, `get/set_cursor_highlight_color`, `get/set_cursor_highlight_radius` | applied by the compositor in a SerenityDE session |
+| Wallpaper and desktop | `set_wallpaper`, `get_wallpaper`, `set_wallpaper_mode`, `set_background_color`, `apply_workspace_settings`, `get_workspace_settings` | stored by the desktop; `get_wallpaper` reads the `wallpaper.file` it names |
+| Input settings | `get/set_mouse_acceleration` (+ min/max), `get/set_scroll_step_size` (+ min), `get/set_double_click_speed` (+ min/max), `are/set_mouse_buttons_switched`, `is/set_natural_scroll`, `get/set_keyboard_layout`, `get_keyboard_layout_names`, `get/apply_cursor_theme`, `get/set_cursor_highlight_color`, `get/set_cursor_highlight_radius` | applied by the desktop's compositor where available |
 
 **Not implemented** (default stub): `start_window_resize`,
 `set_window_base_size_and_size_increment`, `set_window_resize_aspect_ratio`,

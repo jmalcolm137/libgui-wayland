@@ -24,7 +24,7 @@ class WaylandClient;
 // wp_fractional_scale preferred scale). The *client* scale is what LibGUI
 // backing stores are rendered at: ceil(client_scale_v120 / 120), with the
 // fractional remainder resampled at presentation. They differ when
-// SDE_CLIENT_SCALE overrides the compositor.
+// LIBWM_CLIENT_SCALE overrides the compositor.
 //
 // Scales are in 1/120ths ("v120"), as in wp_fractional_scale_v1. Shares
 // WaylandClient's mutex.

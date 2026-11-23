@@ -22,10 +22,11 @@ namespace LibWM {
 
 class WaylandClient;
 
-// The SerenityDE integration: the optional `serenity-window` protocol, offered
-// only by the SerenityDE compositor. Everything here degrades gracefully on any
-// other compositor: settings fall back to defaults, there is no wallpaper or
-// capture, and windows simply get no compositor-driven chrome.
+// The optional `serenity-window` protocol (src/protocol/serenity-window.xml),
+// which a compositor offers to integrate with these applications as SerenityOS's
+// own WindowServer would. Everything here degrades gracefully on a compositor
+// without it: settings fall back to defaults, there is no wallpaper or capture,
+// and windows simply get no compositor-driven chrome.
 //
 // It carries two kinds of state:
 //  - desktop-owned configuration (host config, key/value host settings, the
@@ -59,8 +60,9 @@ public:
     ByteString host_setting(StringView key, StringView fallback = {}) const;
     void set_host_setting(StringView key, StringView value);
 
-    RefPtr<Gfx::Bitmap> host_wallpaper() const;
-    void set_host_wallpaper(Gfx::Bitmap*);
+    // Hands a wallpaper the application chose to the desktop, which stores and
+    // shows it; clients read it back from the `wallpaper.file` host setting.
+    void set_host_wallpaper(Gfx::Bitmap const*);
 
     // The Magnifier asks for a region of the screen; the compositor pushes it
     // back asynchronously, and captured_bitmap() returns the most recent one so
@@ -93,7 +95,6 @@ public:
     // --- protocol events (called from the listeners in SerenityShell.cpp) ---
     void on_host_config(u32 workspace_rows, u32 workspace_columns, double accel_min, double accel_max, u32 scroll_step_min, int double_click_min, int double_click_max);
     void on_host_settings(StringView blob);
-    void on_host_wallpaper(i32 width, i32 height, i32 pitch, u32 format, i32 fd);
     void on_captured(u32 serial, i32 width, i32 height, i32 pitch, u32 format, i32 fd);
     void on_dismiss_menus();
     void on_menubar_visibility(serenity_toplevel*, bool visible);
@@ -105,7 +106,6 @@ private:
 
     HostConfig m_host_config;
     HashMap<ByteString, ByteString> m_host_settings;
-    RefPtr<Gfx::Bitmap> m_host_wallpaper;
     RefPtr<Gfx::Bitmap> m_captured;
     u32 m_capture_serial { 0 };
     u32 m_captured_serial { 0 };

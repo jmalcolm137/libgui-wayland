@@ -90,7 +90,7 @@ libwm_add_script_test(clipboard run-clipboard-test.sh "integration")
 libwm_add_script_test(menu run-menu-test.sh "integration")
 libwm_add_script_test(pdfviewer run-pdfviewer-test.sh "integration;apps")
 libwm_add_script_test(3dfileviewer run-3dfileviewer-test.sh "integration;apps;gl")
-# 3DFileViewer comes from the SerenityDE application set; without it the suite
+# 3DFileViewer comes from a desktop's application set; without it the suite
 # exits 77 and is reported as skipped.
 set_tests_properties(libwm.3dfileviewer PROPERTIES SKIP_RETURN_CODE 77)
 libwm_add_script_test(triage test-triage-failure.sh "tools")

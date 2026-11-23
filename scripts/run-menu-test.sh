@@ -177,7 +177,7 @@ menubar_frame() {
         --output "$RUNTIME/$name.png" --input "$RUNTIME/$name.input" > "$RUNTIME/$name.hc.log" 2>&1 &
     HC_PID=$!
     for _ in $(seq 1 100); do [[ -e "$RUNTIME/menu-$name" ]] && break; sleep 0.1; done
-    env XDG_RUNTIME_DIR="$RUNTIME" WAYLAND_DISPLAY="menu-$name" SDE_CLIENT_SCALE="$scale" \
+    env XDG_RUNTIME_DIR="$RUNTIME" WAYLAND_DISPLAY="menu-$name" LIBWM_CLIENT_SCALE="$scale" \
         SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
         LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
         timeout 4 "$app" > "$RUNTIME/$name.app.log" 2>&1 || true

@@ -59,16 +59,12 @@ ByteString runtime_path(StringView name)
 
 ByteString app_bin_dir()
 {
-    if (auto dir = get("LIBWM_APP_BIN_DIR"); dir.has_value())
-        return dir.release_value();
-    if (auto dir = get("SDE_APP_BIN_DIR"); dir.has_value())
-        return dir.release_value();
-    return {};
+    return get("LIBWM_APP_BIN_DIR").value_or(ByteString {});
 }
 
 Optional<int> client_scale_override_v120()
 {
-    auto value = get("SDE_CLIENT_SCALE");
+    auto value = get("LIBWM_CLIENT_SCALE");
     if (!value.has_value())
         return {};
     double const requested = strtod(value->characters(), nullptr);

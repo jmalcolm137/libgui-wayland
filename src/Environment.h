@@ -39,10 +39,10 @@ ByteString config_directory();
 ByteString runtime_path(StringView name);
 
 // The directory holding the session's application and service binaries:
-// $LIBWM_APP_BIN_DIR (or its historical name $SDE_APP_BIN_DIR). Empty if unset.
+// $LIBWM_APP_BIN_DIR. Empty if unset.
 ByteString app_bin_dir();
 
-// $SDE_CLIENT_SCALE as a v120 scale (0 or invalid selects 1x). Empty if unset,
+// $LIBWM_CLIENT_SCALE as a v120 scale (0 or invalid selects 1x). Empty if unset,
 // meaning "follow the compositor".
 Optional<int> client_scale_override_v120();
 

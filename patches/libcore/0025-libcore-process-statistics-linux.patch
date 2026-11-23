@@ -1,0 +1,320 @@
+diff --git a/Userland/Libraries/LibCore/ProcessStatisticsReader.cpp b/Userland/Libraries/LibCore/ProcessStatisticsReader.cpp
+index 8a4503f1..d0392f85 100644
+--- a/Userland/Libraries/LibCore/ProcessStatisticsReader.cpp
++++ b/Userland/Libraries/LibCore/ProcessStatisticsReader.cpp
+@@ -12,6 +12,15 @@
+ #include <LibCore/ProcessStatisticsReader.h>
+ #include <pwd.h>
+ 
++#if !defined(AK_OS_SERENITY)
++#    include <AK/ScopeGuard.h>
++#    include <AK/StringView.h>
++#    include <dirent.h>
++#    include <limits.h>
++#    include <stdlib.h>
++#    include <unistd.h>
++#endif
++
+ namespace Core {
+ 
+ HashMap<uid_t, ByteString> ProcessStatisticsReader::s_usernames;
+@@ -89,10 +98,299 @@ ErrorOr<AllProcessesStatistics> ProcessStatisticsReader::get_all(SeekableStream&
+     return all_processes_statistics;
+ }
+ 
++#if !defined(AK_OS_SERENITY)
++
++static ByteString read_link_contents(ByteString const& path)
++{
++    char buffer[PATH_MAX + 1] = {};
++    auto length = ::readlink(path.characters(), buffer, PATH_MAX);
++    if (length < 0)
++        return {};
++    return ByteString { StringView { buffer, static_cast<size_t>(length) } };
++}
++
++static ByteString linux_thread_state_name(char state)
++{
++    switch (state) {
++    case 'R':
++        return "Running";
++    case 'S':
++        return "Sleeping";
++    case 'D':
++        return "Uninterruptible";
++    case 'T':
++        return "Stopped";
++    case 't':
++        return "Tracing";
++    case 'Z':
++        return "Zombie";
++    case 'X':
++        return "Dead";
++    case 'I':
++        return "Idle";
++    default:
++        return ByteString::number(static_cast<int>(state));
++    }
++}
++
++struct LinuxProcStat {
++    char state { '?' };
++    pid_t ppid { 0 };
++    pid_t pgrp { 0 };
++    pid_t session { 0 };
++    unsigned long minflt { 0 };
++    unsigned long majflt { 0 };
++    unsigned long utime { 0 };
++    unsigned long stime { 0 };
++    long priority { 0 };
++    long nice { 0 };
++    long num_threads { 0 };
++    unsigned long starttime { 0 };
++    unsigned long vsize { 0 };
++    long rss { 0 };
++    long processor { 0 };
++    ByteString comm;
++};
++
++// Parse a /proc/<pid>/stat line. The comm field is parenthesised and may itself
++// contain spaces and parentheses, so split on the last ')' and index the tokens
++// that follow (field 3 onwards).
++static Optional<LinuxProcStat> parse_linux_stat(ByteString const& line)
++{
++    auto const* data = line.characters();
++    auto const* open = strchr(data, '(');
++    auto const* close = strrchr(data, ')');
++    if (!open || !close || close < open)
++        return {};
++
++    LinuxProcStat stat;
++    stat.comm = ByteString { StringView { open + 1, static_cast<size_t>(close - open - 1) } };
++
++    Vector<StringView> tokens;
++    for (auto token : StringView { close + 1, strlen(close + 1) }.split_view(' '))
++        tokens.append(token);
++
++    auto field = [&](size_t number) -> Optional<StringView> {
++        // `number` is the 1-based /proc/<pid>/stat field; field 3 is tokens[0].
++        if (number < 3 || number - 3 >= tokens.size())
++            return {};
++        return tokens[number - 3];
++    };
++    auto number = [&](size_t field_number) -> unsigned long {
++        auto token = field(field_number);
++        return token.has_value() ? token->to_number<unsigned long>().value_or(0) : 0;
++    };
++
++    if (tokens.is_empty())
++        return {};
++    stat.state = tokens[0][0];
++    stat.ppid = static_cast<pid_t>(number(4));
++    stat.pgrp = static_cast<pid_t>(number(5));
++    stat.session = static_cast<pid_t>(number(6));
++    stat.minflt = number(10);
++    stat.majflt = number(12);
++    stat.utime = number(14);
++    stat.stime = number(15);
++    stat.priority = static_cast<long>(number(18));
++    stat.nice = static_cast<long>(number(19));
++    stat.num_threads = static_cast<long>(number(20));
++    stat.starttime = number(22);
++    stat.vsize = number(23);
++    stat.rss = static_cast<long>(number(24));
++    stat.processor = static_cast<long>(number(39));
++    return stat;
++}
++
++static ErrorOr<ByteString> read_proc_file(ByteString const& path)
++{
++    auto file = TRY(Core::File::open(path, Core::File::OpenMode::Read));
++    auto contents = TRY(file->read_until_eof());
++    return ByteString { contents.bytes() };
++}
++
++static void parse_status_uid_gid(ByteString const& status, uid_t& uid, gid_t& gid)
++{
++    for (auto line : status.view().split_view('\n')) {
++        StringView prefix;
++        uid_t* target = nullptr;
++        if (line.starts_with("Uid:"sv)) {
++            prefix = "Uid:"sv;
++            target = &uid;
++        } else if (line.starts_with("Gid:"sv)) {
++            prefix = "Gid:"sv;
++            target = &gid;
++        } else {
++            continue;
++        }
++        for (auto token : line.substring_view(prefix.length()).split_view(' ')) {
++            *target = static_cast<uid_t>(token.to_number<unsigned>().value_or(0));
++            break;
++        }
++    }
++}
++
++static unsigned long read_statm_shared(pid_t pid)
++{
++    auto contents = read_proc_file(ByteString::formatted("/proc/{}/statm", pid));
++    if (contents.is_error())
++        return 0;
++    unsigned long size = 0;
++    unsigned long resident = 0;
++    unsigned long shared = 0;
++    sscanf(contents.value().characters(), "%lu %lu %lu", &size, &resident, &shared);
++    return shared;
++}
++
++static void append_linux_threads(ProcessStatistics& process, pid_t pid, u64 ns_per_tick)
++{
++    auto task_dir_path = ByteString::formatted("/proc/{}/task", pid);
++    auto* task_dir = opendir(task_dir_path.characters());
++    if (!task_dir)
++        return;
++    ScopeGuard close_task_dir = [task_dir] { closedir(task_dir); };
++
++    while (auto* entry = readdir(task_dir)) {
++        if (entry->d_name[0] < '0' || entry->d_name[0] > '9')
++            continue;
++        auto tid = static_cast<pid_t>(atoi(entry->d_name));
++        if (tid <= 0)
++            continue;
++        auto stat_contents = read_proc_file(ByteString::formatted("/proc/{}/task/{}/stat", pid, tid));
++        if (stat_contents.is_error())
++            continue;
++        auto parsed = parse_linux_stat(stat_contents.value());
++        if (!parsed.has_value())
++            continue;
++        auto const& stat = parsed.value();
++
++        ThreadStatistics thread {};
++        thread.tid = static_cast<pid_t>(tid);
++        thread.name = stat.comm;
++        thread.state = linux_thread_state_name(stat.state);
++        thread.time_user = stat.utime * ns_per_tick;
++        thread.time_kernel = stat.stime * ns_per_tick;
++        thread.cpu = static_cast<u32>(max(0l, stat.processor));
++        thread.priority = static_cast<u32>(max(0l, stat.priority));
++        thread.inode_faults = static_cast<unsigned>(stat.majflt);
++        thread.zero_faults = static_cast<unsigned>(stat.minflt);
++        process.threads.append(move(thread));
++    }
++}
++
++static ErrorOr<AllProcessesStatistics> get_all_from_linux_proc()
++{
++    AllProcessesStatistics result;
++
++    long ticks_per_second = sysconf(_SC_CLK_TCK);
++    if (ticks_per_second <= 0)
++        ticks_per_second = 100;
++    long page_size = sysconf(_SC_PAGESIZE);
++    if (page_size <= 0)
++        page_size = 4096;
++    long cpu_count = sysconf(_SC_NPROCESSORS_ONLN);
++    if (cpu_count < 1)
++        cpu_count = 1;
++    u64 const ns_per_tick = 1'000'000'000ull / static_cast<u64>(ticks_per_second);
++
++    unsigned long long boot_time = 0;
++    unsigned long long total_ticks = 0;
++    unsigned long long kernel_ticks = 0;
++    if (auto stat_file = Core::File::open("/proc/stat"sv, Core::File::OpenMode::Read); !stat_file.is_error()) {
++        if (auto contents = stat_file.value()->read_until_eof(); !contents.is_error()) {
++            for (auto line : StringView { contents.value() }.split_view('\n')) {
++                if (line.starts_with("cpu "sv)) {
++                    unsigned long long values[8] = {};
++                    size_t index = 0;
++                    for (auto token : line.substring_view(4).split_view(' ')) {
++                        if (index >= 8)
++                            break;
++                        values[index++] = token.to_number<unsigned long long>().value_or(0);
++                    }
++                    for (size_t i = 0; i < 8; ++i)
++                        total_ticks += values[i];
++                    kernel_ticks = values[2] + values[5] + values[6]; // system, irq, softirq
++                } else if (line.starts_with("btime "sv)) {
++                    boot_time = line.substring_view(6).to_number<unsigned long long>().value_or(0);
++                }
++            }
++        }
++    }
++    // ProcessModel derives a thread's CPU% as
++    //   (thread_time_delta / total_time_scheduled_delta) * 100
++    // and sums it per CPU, so total_time_scheduled must be the *per-CPU* share of
++    // the interval, not the sum over every CPU (that would divide every thread by
++    // ncpu). /proc/stat's "cpu" line sums all CPUs, so divide it back out.
++    result.total_time_scheduled = total_ticks * ns_per_tick / static_cast<u64>(cpu_count);
++    result.total_time_scheduled_kernel = kernel_ticks * ns_per_tick / static_cast<u64>(cpu_count);
++
++    auto* dir = opendir("/proc");
++    if (!dir)
++        return Error::from_errno(errno);
++    ScopeGuard close_dir = [dir] { closedir(dir); };
++
++    while (auto* entry = readdir(dir)) {
++        if (entry->d_name[0] < '0' || entry->d_name[0] > '9')
++            continue;
++        auto pid = static_cast<pid_t>(atoi(entry->d_name));
++        if (pid <= 0)
++            continue;
++
++        auto stat_contents = read_proc_file(ByteString::formatted("/proc/{}/stat", pid));
++        if (stat_contents.is_error())
++            continue;
++        auto parsed = parse_linux_stat(stat_contents.value());
++        if (!parsed.has_value())
++            continue;
++        auto const& stat = parsed.value();
++
++        ProcessStatistics process {};
++        process.pid = pid;
++        process.ppid = stat.ppid;
++        process.pgid = stat.pgrp;
++        process.pgp = stat.pgrp;
++        process.sid = stat.session;
++        process.kernel = false;
++        process.name = stat.comm;
++        process.executable = read_link_contents(ByteString::formatted("/proc/{}/exe", pid));
++        process.amount_virtual = stat.vsize;
++        process.amount_resident = static_cast<size_t>(max(0l, stat.rss)) * static_cast<size_t>(page_size);
++        process.amount_shared = read_statm_shared(pid) * static_cast<size_t>(page_size);
++        process.amount_dirty_private = 0;
++        process.amount_clean_inode = 0;
++        process.amount_purgeable_volatile = 0;
++        process.amount_purgeable_nonvolatile = 0;
++        process.creation_time = UnixDateTime::from_nanoseconds_since_epoch(
++            static_cast<i64>((boot_time + stat.starttime / static_cast<unsigned long>(ticks_per_second)) * 1'000'000'000ull));
++
++        if (auto status = read_proc_file(ByteString::formatted("/proc/{}/status", pid)); !status.is_error())
++            parse_status_uid_gid(status.value(), process.uid, process.gid);
++
++        append_linux_threads(process, pid, ns_per_tick);
++
++        result.processes.append(move(process));
++    }
++
++    return result;
++}
++
++#endif
++
+ ErrorOr<AllProcessesStatistics> ProcessStatisticsReader::get_all(bool include_usernames)
+ {
++#if defined(AK_OS_SERENITY)
+     auto proc_all_file = TRY(Core::File::open("/sys/kernel/processes"sv, Core::File::OpenMode::Read));
+     return get_all(*proc_all_file, include_usernames);
++#else
++    // Linux-native reader: fill the same Core::ProcessStatistics model from
++    // /proc, so SystemMonitor (and anything else) has the same end-user
++    // behaviour without a Serenity /sys/kernel shim.
++    auto result = TRY(get_all_from_linux_proc());
++    if (include_usernames) {
++        for (auto& process : result.processes)
++            process.username = username_from_uid(process.uid);
++    }
++    return result;
++#endif
+ }
+ 
+ ByteString ProcessStatisticsReader::username_from_uid(uid_t uid)

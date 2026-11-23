@@ -30,7 +30,7 @@ invoke ninja on the build tree, so CTest runs them one at a time.
 | `libwm.clipboard` | `run-clipboard-test.sh` | integration | clipboard in both directions with a native peer: text aliases, HTML, URI lists, PNG ↔ Serenity images |
 | `libwm.menu` | `run-menu-test.sh` | integration | menubar, popups, submenus, keyboard navigation, item activation, the About dialog; menubar pixels at 1x, 2x and after a resize |
 | `libwm.pdfviewer` | `run-pdfviewer-test.sh` | integration, apps | the unmodified PDFViewer: rendering, toolbar, Config and FileSystemAccess portals, opening a file |
-| `libwm.3dfileviewer` | `run-3dfileviewer-test.sh` | integration, apps, gl | LibGL through EGLGPU/LibSoftGPU; **skipped** (exit 77) when the build has no `3DFileViewer` target, which only the SerenityDE app set adds |
+| `libwm.3dfileviewer` | `run-3dfileviewer-test.sh` | integration, apps, gl | LibGL through EGLGPU/LibSoftGPU; **skipped** (exit 77) when the build has no `3DFileViewer` target, which only a desktop's app set adds |
 | `libwm.triage` | `test-triage-failure.sh` | tools | the build-failure triage script, offline |
 | `libwm.patches` | `check-patches.sh` | tools | the patch series applies, in order, to the pinned SerenityOS revision |
 | `libwm.upstream-libgfx` | `run-lib-tests.sh` | upstream | upstream LibGfx host test suites the rendering stack rests on |
@@ -48,7 +48,7 @@ It gives the tests:
 * deterministic configures.
 
 It offers no `xdg-decoration` (so LibWM draws client-side decorations) and no
-fractional scale; HiDPI is tested with `SDE_CLIENT_SCALE`. Native peers for
+fractional scale; HiDPI is tested with `LIBWM_CLIENT_SCALE`. Native peers for
 clipboard and drag-and-drop tests are `tools/wl-clipboard-peer.c`.
 
 ## How checks work

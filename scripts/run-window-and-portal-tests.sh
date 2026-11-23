@@ -47,7 +47,7 @@ check() {
 
 # --- 1. Direct LibWM unit tests (MenuController, PNG transcoding, Config) ----
 UNIT_EXIT=0
-env XDG_RUNTIME_DIR="$RUNTIME" XDG_CONFIG_HOME="$RUNTIME/config" SDE_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY="" \
+env XDG_RUNTIME_DIR="$RUNTIME" XDG_CONFIG_HOME="$RUNTIME/config" LIBWM_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY="" \
     SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
     LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
     "$BUILD_DIR/bin/libwm-unit-test" > "$RUNTIME/unit.log" 2>&1 || UNIT_EXIT=$?
@@ -65,7 +65,7 @@ EOF
 HC_PID=$!
 for _ in $(seq 1 100); do [[ -e "$RUNTIME/libwm-fs" ]] && break; sleep 0.1; done
 
-env XDG_RUNTIME_DIR="$RUNTIME" SDE_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY=libwm-fs \
+env XDG_RUNTIME_DIR="$RUNTIME" LIBWM_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY=libwm-fs \
     SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
     LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
     timeout 5 "$BUILD_DIR/bin/libwm-fullscreen-test" > "$RUNTIME/fs.app.log" 2>&1 || true
@@ -108,7 +108,7 @@ EOF
 HC_PID=$!
 for _ in $(seq 1 100); do [[ -e "$RUNTIME/libwm-csd" ]] && break; sleep 0.1; done
 
-env XDG_RUNTIME_DIR="$RUNTIME" SDE_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY=libwm-csd \
+env XDG_RUNTIME_DIR="$RUNTIME" LIBWM_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY=libwm-csd \
     LIBWM_FORCE_CSD=1 \
     SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
     LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
@@ -129,7 +129,7 @@ check "csd: close button closed the window"            "grep -q 'CSD close butto
 HC_PID=$!
 for _ in $(seq 1 100); do [[ -e "$RUNTIME/libwm-hidpi-1x" ]] && break; sleep 0.1; done
 
-env XDG_RUNTIME_DIR="$RUNTIME" SDE_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY=libwm-hidpi-1x \
+env XDG_RUNTIME_DIR="$RUNTIME" LIBWM_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY=libwm-hidpi-1x \
     SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
     LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
     LIBWM_DUMP="$RUNTIME/dump-1x.png" \
@@ -142,7 +142,7 @@ HC_PID=""
 HC_PID=$!
 for _ in $(seq 1 100); do [[ -e "$RUNTIME/libwm-hidpi-2x" ]] && break; sleep 0.1; done
 
-env XDG_RUNTIME_DIR="$RUNTIME" SDE_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY=libwm-hidpi-2x \
+env XDG_RUNTIME_DIR="$RUNTIME" LIBWM_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY=libwm-hidpi-2x \
     SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
     LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
     LIBWM_DUMP="$RUNTIME/dump-2x.png" \
@@ -163,8 +163,8 @@ check "hidpi: compositor captured 400x192 @2x buffer"  "grep -q 'captured 400x19
 HC_PID=$!
 for _ in $(seq 1 100); do [[ -e "$RUNTIME/libwm-hidpi-15x" ]] && break; sleep 0.1; done
 
-env XDG_RUNTIME_DIR="$RUNTIME" SDE_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY=libwm-hidpi-15x \
-    SDE_CLIENT_SCALE=1.5 \
+env XDG_RUNTIME_DIR="$RUNTIME" LIBWM_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY=libwm-hidpi-15x \
+    LIBWM_CLIENT_SCALE=1.5 \
     SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
     LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
     LIBWM_DUMP="$RUNTIME/dump-15x.png" \
@@ -233,14 +233,14 @@ for _ in $(seq 1 100); do [[ -e "$RUNTIME/libwm-portal" ]] && break; sleep 0.1; 
 
 # Run libwm-appfile-test Calculator --launcher: exercises stale socket recovery on
 # the launch portal AND LaunchServerConnection::open_url spawning /bin/Calculator.
-env XDG_RUNTIME_DIR="$RUNTIME" SDE_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY=libwm-portal \
+env XDG_RUNTIME_DIR="$RUNTIME" LIBWM_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY=libwm-portal \
     SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
     LIBWM_APP_BIN_DIR="$BUILD_DIR/bin" \
     LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
     timeout 5 "$BUILD_DIR/bin/libwm-appfile-test" Calculator --launcher > "$RUNTIME/launcher.log" 2>&1 || true
 
 # Also run direct AppFile::spawn_with_escalation path.
-env XDG_RUNTIME_DIR="$RUNTIME" SDE_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY=libwm-portal \
+env XDG_RUNTIME_DIR="$RUNTIME" LIBWM_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY=libwm-portal \
     SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
     LIBWM_APP_BIN_DIR="$BUILD_DIR/bin" \
     LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
@@ -267,7 +267,7 @@ open("$RUNTIME/sql-takeover.out", "w").write(f"{name}:{stat.S_ISSOCK(st.st_mode)
 EOF
 chmod +x "$RUNTIME/fake-bin/RequestServer" "$RUNTIME/fake-bin/SQLServer"
 
-env XDG_RUNTIME_DIR="$RUNTIME" SDE_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY="" \
+env XDG_RUNTIME_DIR="$RUNTIME" LIBWM_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY="" \
     SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
     LIBWM_APP_BIN_DIR="$RUNTIME/fake-bin" \
     LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \

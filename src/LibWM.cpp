@@ -372,8 +372,8 @@ static Optional<NonnullOwnPtr<Core::LocalSocket>> make_portal(ByteString const& 
 {
     trace("LibWM: portal connect request '{}'", path);
 
-    // Prefer a real session service listening on the portal path (e.g. SDE's
-    // LaunchServer): if a socket exists there and is actually accepting
+    // Prefer a real session service listening on the portal path (e.g. a
+    // desktop's LaunchServer): if a socket exists there and is actually accepting
     // connections, decline so LocalSocket::connect() reaches it. Otherwise serve
     // the portal in-process below. This is what lets a session service take over
     // without changing the client API.

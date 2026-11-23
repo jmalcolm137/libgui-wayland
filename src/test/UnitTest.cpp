@@ -319,7 +319,7 @@ void test_wayland_client_thread_safety()
     auto& client = LibWM::WaylandClient::the();
 
     // Hammer WaylandClient state concurrently from 4 worker threads while the
-    // main thread updates host settings, host config, scale, and wallpaper.
+    // main thread updates host settings, host config and scale.
     constexpr int iterations = 500;
     Vector<pthread_t, 4> threads;
     for (int t = 0; t < 4; ++t) {
@@ -331,7 +331,6 @@ void test_wayland_client_thread_safety()
                     c.serenity_shell().set_host_setting("mouse.acceleration"sv, "1.5"sv);
                     (void)c.serenity_shell().host_setting("mouse.acceleration"sv, "1.0"sv);
                     (void)c.serenity_shell().host_config();
-                    (void)c.serenity_shell().host_wallpaper();
                     (void)c.serenity_shell().captured_bitmap();
                     (void)c.data_device().clipboard_mime_types();
                     (void)c.window_menubar_visible(1);

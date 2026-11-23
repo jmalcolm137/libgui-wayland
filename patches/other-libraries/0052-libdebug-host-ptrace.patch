@@ -23,9 +23,9 @@ diff --git a/Userland/Libraries/LibDebug/PtraceRegisters.h b/Userland/Libraries/
 +// WSTOPPED|WEXITED; on Linux those are waitid() flags that waitpid() rejects
 +// with EINVAL, so use __WALL, which also reports cloned thread-children.
 +#if defined(AK_OS_SERENITY)
-+#    define SDE_WAITPID_TRACEE (WSTOPPED | WEXITED)
++#    define HOST_WAITPID_TRACEE (WSTOPPED | WEXITED)
 +#else
-+#    define SDE_WAITPID_TRACEE (__WALL)
++#    define HOST_WAITPID_TRACEE (__WALL)
 +#endif
 +
 +// SerenityOS exchanges the register set with PT_GETREGS/PT_SETREGS. Some host
@@ -57,7 +57,7 @@ diff --git a/Userland/Libraries/LibDebug/DebugSession.cpp b/Userland/Libraries/L
  
      int status = 0;
 -    if (waitpid(pid, &status, WSTOPPED | WEXITED) != pid || !WIFSTOPPED(status)) {
-+    if (waitpid(pid, &status, SDE_WAITPID_TRACEE) != pid || !WIFSTOPPED(status)) {
++    if (waitpid(pid, &status, HOST_WAITPID_TRACEE) != pid || !WIFSTOPPED(status)) {
          perror("waitpid");
          return {};
      }
@@ -88,7 +88,7 @@ diff --git a/Userland/Libraries/LibDebug/DebugSession.cpp b/Userland/Libraries/L
      continue_debuggee(type);
      int wstatus = 0;
 -    if (waitpid(m_debuggee_pid, &wstatus, WSTOPPED | WEXITED) != m_debuggee_pid) {
-+    if (waitpid(m_debuggee_pid, &wstatus, SDE_WAITPID_TRACEE) != m_debuggee_pid) {
++    if (waitpid(m_debuggee_pid, &wstatus, HOST_WAITPID_TRACEE) != m_debuggee_pid) {
          perror("waitpid");
          VERIFY_NOT_REACHED();
      }

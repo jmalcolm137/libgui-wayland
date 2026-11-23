@@ -12,7 +12,6 @@
 #include <AK/RefPtr.h>
 #include <AK/Vector.h>
 #include <LibCore/ElapsedTimer.h>
-#include <LibCore/FileWatcher.h>
 #include <LibCore/Socket.h>
 #include <LibGfx/Bitmap.h>
 #include <LibIPC/Connection.h>
@@ -88,22 +87,20 @@ private:
         (void)this->socket().set_blocking(false);
         set_send_timeout(1000);
 
-        // The current theme may be knowable only from the host settings -- there is no
-        // live broker file unless a theme was changed this session -- and the settings
-        // are delivered after this constructor runs. Recompute when they arrive.
+        // The theme and fonts come from the desktop's host settings, which may arrive
+        // after this constructor runs and are re-sent whenever they change.
         //
         // The *first* connection owns the hook: it is the app-facing one
         // (Application::create() creates it before LibWM's server thread exists). The
         // server-side connection is created later, on that thread, and used to take
-        // the hook over -- which both aimed the recompute at an object belonging to
+        // the hook over -- which both aimed the update at an object belonging to
         // another thread and could leave this capture dangling once that object died.
         WaylandClient::the().serenity_shell().set_host_settings_changed_callback(this, [this] {
             MainThreadInvoker::post_to_server([this] {
-                apply_theme_from_broker();
+                apply_host_settings();
             });
         });
-        watch_theme();
-        watch_fonts();
+        apply_host_settings();
 
         // Display links. Owned like the host-settings hook: it captures
         // `this`, so the first connection owns it and the destructor clears it.
@@ -243,9 +240,10 @@ private:
     Messages::WindowServer::GetScreenBitmapResponse get_screen_bitmap(Optional<Gfx::IntRect> const& rect, Optional<u32> const& screen_index) override;
     void set_window_parent_from_client(i32 client_id, i32 parent_id, i32 child_id) override;
 
-    // Mouse/pointer settings (Mouse Settings). Backed by input.ini in the
-    // shared state directory, which the compositor watches and applies to the
-    // (libinput) devices.
+    // The settings below are the desktop's, answered from and forwarded to its
+    // host settings (see serenity-window.xml for the keys).
+
+    // Mouse/pointer settings (Mouse Settings): `mouse.*`.
     void set_mouse_acceleration(float factor) override;
     Messages::WindowServer::GetMouseAccelerationResponse get_mouse_acceleration() override;
     void set_scroll_step_size(u32 step_size) override;
@@ -262,8 +260,7 @@ private:
     Messages::WindowServer::GetDoubleClickSpeedMinResponse get_double_click_speed_min() override;
     Messages::WindowServer::GetDoubleClickSpeedMaxResponse get_double_click_speed_max() override;
 
-    // Cursor theme/highlight (Mouse Settings; the SerenityDE compositor applies
-    // them). Backed by cursor.ini in the state directory.
+    // Cursor theme/highlight (Mouse Settings): `cursor.*`.
     Messages::WindowServer::GetCursorThemeResponse get_cursor_theme() override;
     void apply_cursor_theme(ByteString const& name) override;
     Messages::WindowServer::GetCursorHighlightRadiusResponse get_cursor_highlight_radius() override;
@@ -271,42 +268,38 @@ private:
     Messages::WindowServer::GetCursorHighlightColorResponse get_cursor_highlight_color() override;
     void set_cursor_highlight_color(Gfx::Color color) override;
 
-    // Keyboard layouts (Keyboard Settings). Backed by input.ini [Keyboard].
+    // Keyboard layouts (Keyboard Settings): `keyboard.*`.
     Messages::WindowServer::GetKeyboardLayoutResponse get_keyboard_layout() override;
     void set_keyboard_layout(ByteString const& layouts, ByteString const& variant, ByteString const& model, ByteString const& options) override;
     Messages::WindowServer::GetKeyboardLayoutNamesResponse get_keyboard_layout_names() override;
 
-    // Effects (Display Settings ▸ Effects): apply to this client and record
-    // the choices in WindowServer.ini [Effects] for the compositor and others.
+    // Effects (Display Settings ▸ Effects): apply to this client and forward the
+    // choices as `effects.*`.
     void set_system_effects(Vector<bool> const& effects, u8 geometry, u8 tile_window) override;
 
-    // Broadcasts theme changes between processes (each app has its own
-    // WindowServer shim) via a shared file the compositor and clients watch.
-    void watch_theme();
-    void apply_theme_from_broker();
+    // The theme and system fonts are the desktop's: each application has its own
+    // shim, so a change reaches the others as a host-settings update (`theme.path`,
+    // `fonts`). The applied values are kept to skip re-sends of unchanged ones.
+    void apply_host_settings();
     ByteString m_theme_name { "Default" };
+    ByteString m_applied_theme_path;
     // ThemeEditor's live preview. It restyles this application only: other
     // applications are separate processes with their own LibWM.
     Optional<Core::AnonymousBuffer> m_theme_override;
     Optional<Core::AnonymousBuffer> m_theme_before_override;
-    RefPtr<Core::FileWatcher> m_theme_watcher;
 
-    // System fonts: a session broker ($XDG_RUNTIME_DIR/sde-fonts), like the
-    // theme broker, so a font change applies to every client and the compositor
     // Also what makes size-based zoom work with a scalable family.
     struct FontQueries {
         ByteString default_query;
         ByteString fixed_width_query;
         ByteString window_title_query;
     };
-    static FontQueries read_fonts_broker();
-    void watch_fonts();
-    void apply_fonts_from_broker();
-    RefPtr<Core::FileWatcher> m_fonts_watcher;
+    static FontQueries host_fonts();
+    void apply_fonts(ByteString const& default_query, ByteString const& fixed_width_query, ByteString const& window_title_query);
+    ByteString m_applied_fonts;
 
-    // Wallpaper/background: the shim persists the chosen image, mode and colour
-    // to a shared state directory the compositor watches (no cross-process bus).
-    // The bitmap is loaded on demand, not pushed to every client.
+    // Wallpaper/background: the desktop owns and persists the image, mode and
+    // colour. The bitmap is loaded on demand, not pushed to every client.
     RefPtr<Gfx::Bitmap> m_wallpaper;
     ByteString m_wallpaper_mode;
 

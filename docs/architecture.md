@@ -27,7 +27,7 @@ How LibWM is put together today. For the reasoning behind the approach, see
 
 Nothing above LibWM knows Wayland exists; nothing in the compositor knows
 SerenityOS exists. The one exception is the optional `serenity-window` protocol,
-which the SerenityDE compositor offers and every other compositor ignores.
+which a desktop's compositor may offer and every other compositor ignores.
 
 ## Process model and transport
 
@@ -67,7 +67,7 @@ separate classes that share its mutex and window table:
 | `WaylandOutputs` | `wl_output`, `zxdg_output_v1` | screen size, output scale, client (backing-store) scale |
 | `WaylandSeat` | `wl_seat`, `wl_pointer`, `wl_keyboard`, `zwp_text_input_v3` | input routing and translation, IME, cursors |
 | `WaylandDataDevice` | `wl_data_device` | clipboard and drag-and-drop |
-| `SerenityShell` | `serenity-window` (optional) | SerenityDE host settings, wallpaper, capture, compositor-driven menubar and placement |
+| `SerenityShell` | `serenity-window` (optional) | the desktop's host settings, wallpaper, capture, compositor-driven menubar and placement |
 
 Events reach the WindowServer side through `WaylandClient::InputCallbacks` and a
 few named callbacks; `WindowServerConnection` re-posts every one of them to the
@@ -83,7 +83,7 @@ role from the Serenity window type:
 | Normal, Dialog, … | `xdg_toplevel` (+ server-side decoration if offered, else CSD), transient parent for dialogs |
 | Taskbar | bottom layer-shell panel with an exclusive zone |
 | Desktop | background layer surface filling the output |
-| Applet | top layer surface; SerenityDE lays it out in the applet area |
+| Applet | top layer surface; a desktop's compositor lays it out in the applet area |
 | Popup, Autocomplete, Tooltip, Menu, Notification | overlay layer surface at the client's position |
 
 State that is presented on Wayland (title, minimum size, alpha, maximized) is
@@ -112,7 +112,7 @@ newest content is kept. The opaque region is declared for windows without alpha
 (only when its size changes), and windows with an alpha hit threshold get an
 input region built from their alpha channel, so transparent pixels click through.
 
-**Menubar.** With SerenityDE (`serenity_toplevel` v2) and a subcompositor, the
+**Menubar.** With `serenity-window` (`serenity_toplevel` v2) and a subcompositor, the
 menubar is a subsurface above the content and the compositor offsets the window;
 otherwise it is composed into the window buffer. `MenuController` renders it into
 an image on the server thread whenever the menubar changes or the window is
@@ -165,10 +165,12 @@ timeouts, so a stuck source cannot freeze the application.
 | `filesystemaccess` | `FileSystemAccessServerConnection`: approved requests open directly; prompts show LibGUI's `FilePicker` on the main thread |
 | `image` | upstream `ImageDecoder::ConnectionFromClient`, decoding on the server thread |
 
-## SerenityDE integration
+## Desktop integration
 
 `SerenityShell` is the only code that speaks `serenity-window`. Without it (any
 other compositor) settings fall back to defaults and windows get no
-compositor-driven chrome. `WindowServerSettings.cpp` also reads and writes a few
-SerenityDE state files (theme and font brokers, the wallpaper store) so that
-Display Settings and friends work inside a SerenityDE session.
+compositor-driven chrome. With it, the desktop owns its settings: LibWM answers
+Display Settings and friends from the `host_settings` it sends and forwards their
+changes with `set_host_setting`, never knowing where or how the desktop stores
+them. The keys, including the theme, fonts and the on-demand wallpaper file, are
+documented in the protocol XML.

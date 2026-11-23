@@ -17,7 +17,7 @@ The shim is called **LibWM**. It sits between `LibGUI`'s WindowServer IPC protoc
 [**Building GUI Applications for Wayland**](docs/guide/LibGUI-Wayland-Guide.pdf) is a
 hands-on, application-focused guide to writing LibGUI applications that run as native
 Wayland clients on any compositor. It includes four complete example applications
-(`examples/`), does not rely on the Serenity Desktop Environment, and treats the platform
+(`examples/`), does not rely on any particular desktop, and treats the platform
 layer as an in-process implementation detail rather than part of the application
 programming model.
 
@@ -64,8 +64,7 @@ programming model.
   Linux it does its own output over **PulseAudio** for clients that use `Audio::PlaybackStream`.
   Applications that speak the SerenityOS **AudioServer / AudioManager protocols** directly
   (Piano, SoundPlayer, `aplay`, the Audio applet) are served by an out-of-process **`AudioServer`
-  service that lives in the SDE**, not here; see `serenity-desktop-environment`'s
-  `scripts/run-audio-test.sh`.
+  service** that a desktop provides; LibWM spawns it on demand from `LIBWM_APP_BIN_DIR`.
 - **GPU / OpenGL** — the client-side GL stack (`LibGL` → `LibGPU`/`LibGLSL`) builds on the host
   unchanged, with two `GPU::Device` backends: **`EGLGPU`**, which drives a **Mesa** OpenGL
   compatibility context through EGL (the default), and **`LibSoftGPU`**, the CPU rasterizer.
@@ -75,16 +74,14 @@ programming model.
   no GL messages). The **unmodified `3DFileViewer`** loads and animates an OBJ model, verified
   headlessly by `scripts/run-3dfileviewer-test.sh`; the **`Tubes`** demo builds against the same
   path.
-- **Applications** — 44 of the 49 apps in `Userland/Applications` build and run on the host,
-  including **Spreadsheet**, **TextEditor**, **PixelPaint**, **FileManager**, **Browser**,
-  **Mail**, **Maps**, **Piano**, **Calculator**, **PDFViewer**, **3DFileViewer**, and all the
-  settings/utility apps, with GML, icons, menus, dialogs and syntax highlighting intact. The
-  web stack (`LibWeb`/`LibWebView`) is built on the host too (`-DENABLE_LAGOM_LIBWEB=ON`). The
-  five that remain are Serenity service/kernel-facing and excluded (see below).
+- **Applications** — the framework builds and tests **Calculator**, **PDFViewer** and **Piano**
+  from unmodified source. The rest of `Userland/Applications` is built by the desktop that ships
+  it (see [Desktops](#desktops)), with GML, icons, menus, dialogs and syntax highlighting intact.
+  The web stack (`LibWeb`/`LibWebView`) is built on the host too (`-DENABLE_LAGOM_LIBWEB=ON`).
 
 - **HiDPI & Fractional Scaling (M8)** — LibWM binds `wp_fractional_scale_v1` (`preferred_scale` in
   `1/120` units), infers fractional ratios from `wl_output` physical mode + `zxdg_output_v1`
-  logical size, and supports explicit integer or fractional overrides via `SDE_CLIENT_SCALE` (e.g.
+  logical size, and supports explicit integer or fractional overrides via `LIBWM_CLIENT_SCALE` (e.g.
   `1.5`, `1.75`, `2`, or `0` to force `1x`). At integer scales (`2x`), the client backing store is
   presented directly with `wl_surface.set_buffer_scale`. At fractional scales (`1.25x`, `1.5x`,
   `1.75x`), the client renders its backing store at `ceil(scale)` (`2x`) and LibWM resamples into a
@@ -99,50 +96,30 @@ programming model.
   `zwp_linux_dmabuf_v1` hand-off is not implemented, and the compositor still cannot render GL on
   a client's behalf. `EGLGPU` also does not support GLSL shaders (`glCreateShader`); programs
   that need them must use `LibSoftGPU`. See [docs/development-history.md](docs/development-history.md) §4.11.
-- **Serenity-only applications and settings (host exclusions).** A handful of apps and
-  settings target SerenityOS *system services* rather than a portable protocol; they are
-  deferred until a **Serenity Desktop Environment on Linux** exists — see
-  [Deferred: a Serenity Desktop Environment](#deferred-a-serenity-desktop-environment-on-linux).
-  Every other application in `Userland/Applications` builds and runs.
 - **Theme/font parity, decorations, icons, alpha (M4)** — remaining polish.
 
-## Deferred: a Serenity Desktop Environment on Linux
+## Desktops
 
-Some applications and settings target SerenityOS *system services* instead of a portable
-protocol. Rather than shim each one piecemeal, they are deferred until there is a **Serenity
-Desktop Environment on Linux**: a Serenity-shaped session providing the corresponding services
-and per-compositor backends.
+libgui-wayland is desktop-agnostic: the applications run on any Wayland compositor. What a
+desktop adds is its own business, built on the same pinned SerenityOS source:
 
-Kernel/service-facing applications (in `Userland/Applications`) were originally
-deferred because they assumed the SerenityOS ABI. They are now built and ported to
-Linux **natively** (reading `/proc`, driving `ptrace`, parsing native core dumps)
-rather than against a SerenityOS shim:
+* **The applications it ships.** Applications that read SerenityOS kernel interfaces
+  (SystemMonitor, Debugger, CrashReporter, the Settings apps, ...) need host ports, and the
+  desktop that builds them carries those patches. The libraries they rely on are ported here
+  (LibCore's `ProcessStatisticsReader` on `/proc`, LibDebug on `ptrace`, LibCoredump on native
+  core dumps), so every desktop shares them.
+* **Session services.** A service listening on a portal path (LaunchServer, NotificationServer,
+  AudioServer, ...) takes over from LibWM's in-process fallback; `docs/environment.md` lists the
+  variables that place them.
+* **Desktop-owned settings and chrome.** Pointer, keyboard, cursor, theme, fonts, display layout
+  and wallpaper settings, and compositor-drawn window chrome, travel over the optional
+  [`serenity-window`](src/protocol/serenity-window.xml) protocol, which this repository owns. A
+  compositor that implements it keeps a copy; without it, applications run with defaults.
 
-| App | Was deferred because | Status |
-|---|---|---|
-| `Terminal` | `LibVT`'s plumbing was Serenity-specific | built; runs on a Linux pty |
-| `SystemMonitor` | Serenity `/proc` and `LibSymbolication` (`sys/arch/regs.h`, ptrace) | built Linux-native (`/proc`, libunwind + libdw) |
-| `Debugger` | Serenity's ptrace ABI and `sys/arch/regs.h` | built Linux-native (`PTRACE_GETREGSET`, `__WALL`; patches 0050/0052) |
-| `CrashReporter` | Serenity's core-dump format and `LibCoredump` | built; reads a native ELF core dump (patch 0053) |
-| `MouseSettings` | WindowServer *service* internals plus compositor-specific pointer settings | built; compositor settings via the config seam (see below) |
+The [Serenity Desktop Environment](https://github.com/jmalcolm137/serenity-desktop-environment)
+is one such desktop.
 
-Compositor-specific settings (no Wayland standard exists):
-
-* **Pointer acceleration, scroll step, double-click speed, cursor highlight** — libinput /
-  compositor settings, configured per desktop (KDE KConfig/KWin, GNOME GSettings/Mutter).
-* **Display configuration** (resolution/refresh/scale/rotation) — no adopted Wayland protocol;
-  each desktop has its own (`wlr-output-management-unstable-v1`, `org.gnome.Mutter.DisplayConfig`,
-  `org.kde.KScreen`).
-* **Cursor theme/size** — the *transport* is standard (`org.freedesktop.portal.Settings`), but
-  the keys are desktop-specific.
-
-The **portable path** (not deferred) is a portal service layer: a provider behind
-`PortalServer` that proxies `org.freedesktop.portal.Settings` for appearance/theme settings
-(color scheme, accent, cursor theme/size with a small key map), plus the other portals a GUI
-framework wants (`Screenshot`, `Notification`, `FileChooser`, `OpenURI`, ...). The
-compositor-specific capabilities above would sit behind a thin **per-compositor backend
-interface** (one implementation per desktop, KDE first), so the applications stay portable while
-still working where a backend exists.
+## Building
 
 ```sh
 scripts/fetch-serenity.sh              # pinned, blobless, sparse checkout

@@ -18,7 +18,7 @@ libwm_pinned_serenity_revision() {
 
 # Where build-libgui.sh records which series is applied to the checkout at $1.
 libwm_patch_marker() {
-    echo "$(git -C "$1" rev-parse --absolute-git-dir)/sde-patch-set-applied"
+    echo "$(git -C "$1" rev-parse --absolute-git-dir)/libwm-patch-set-applied"
 }
 
 # A hash of the checkout's HEAD ($1) and of every patch's name and contents

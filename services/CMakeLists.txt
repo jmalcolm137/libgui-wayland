@@ -77,6 +77,5 @@ add_dependencies(SQLServer
 )
 
 # The SerenityOS taskbar applets (WorkspacePicker and friends) are part of the
-# desktop environment, not the port: SDE builds them (serenity-desktop-environment
-# /Applets, scripts/build-applets.sh), replacing any SerenityOS kernel interface
-# with its Linux equivalent.
+# desktop environment, not the port: a desktop builds them, replacing any
+# SerenityOS kernel interface with its host equivalent.

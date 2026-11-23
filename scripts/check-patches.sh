@@ -16,8 +16,8 @@
 # --mark-applied is for after you have edited a patch whose change is already in
 # the serenity/ working tree: build-libgui.sh cannot re-verify overlapping
 # patches in place, so it would refuse the changed series. This trusts that the
-# working tree has the series applied (it cannot check, because SerenityDE's own
-# series edits some of the same files) and updates build-libgui.sh's marker.
+# working tree has the series applied (it cannot check, because a desktop's own
+# series may edit some of the same files) and updates build-libgui.sh's marker.
 set -euo pipefail
 
 mark_applied=0

@@ -7,9 +7,9 @@
 -    auto basename = LexicalPath(path).basename();
 +    // LexicalPath::basename() returns a StringView into the LexicalPath, so keep the
 +    // owner alive: a temporary leaves `basename` dangling and every path built from
-+    // it garbage (the SDE_SESSION_BIN_DIR / SDE_APP_BIN_DIR lookups below then miss).
++    // it garbage (the LIBWM_SESSION_BIN_DIR / LIBWM_APP_BIN_DIR lookups below then miss).
 +    LexicalPath const lexical_path { as_byte_string };
 +    auto basename = lexical_path.basename();
  
-     // A session may shadow /bin with its own helpers: SDE provides sde-power
-     // wrappers for /bin/shutdown, /bin/reboot and /bin/logout in
+     // A session may shadow /bin with its own helpers, such as a desktop's
+     // wrappers for /bin/shutdown, /bin/reboot and /bin/logout, in

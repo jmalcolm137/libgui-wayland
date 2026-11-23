@@ -6,15 +6,15 @@ index e0b6dc9..9c98166 100644
      set_natural_scroll(bool inverted) =|
      is_natural_scroll() => (bool inverted)
  
-+    // R4.6: input-setting bounds, from the SDE config schema, so the settings UI
-+    // does not hardcode them.
++    // Input-setting bounds, which the desktop owns, so the settings UI does not
++    // hardcode them.
 +    get_mouse_acceleration_min() => (float value)
 +    get_mouse_acceleration_max() => (float value)
 +    get_scroll_step_size_min() => (u32 value)
 +    get_double_click_speed_min() => (int value)
 +    get_double_click_speed_max() => (int value)
 +
-+    // R4.6: keyboard layouts (xkb). Keyboard Settings reads/writes these.
++    // Keyboard layouts (xkb). Keyboard Settings reads/writes these.
 +    get_keyboard_layout() => (ByteString layouts, ByteString variant, ByteString model, ByteString options)
 +    set_keyboard_layout(ByteString layouts, ByteString variant, ByteString model, ByteString options) =|
 +    get_keyboard_layout_names() => (Vector<ByteString> names)
@@ -27,7 +27,7 @@ index e0b6dc9..9c98166 100644
  
      set_always_on_top(i32 window_id, bool always_on_top) => ()
 +
-+    // SDE: set the output scale as v120 (the shim writes [Output] DefaultScale).
++    // The output scale as v120, which ScreenLayout's integer scale cannot carry.
 +    // Keep new methods LAST: MessageID is positional, so a mid-file insert shifts
 +    // ids and breaks already-built apps ("Failed to parse IPC message").
 +    set_output_scale(i32 scale_v120) =|

@@ -152,7 +152,7 @@ src/                          LibWM (libwm.so); src/CMakeLists.txt is the Lagom 
   WaylandOutputs.{h,cpp}      wl_output/zxdg_output: screen size, output and client scales
   WaylandSeat.{h,cpp}         seat, pointer, keyboard/XKB, text-input, cursors
   WaylandDataDevice.{h,cpp}   clipboard and drag-and-drop
-  SerenityShell.{h,cpp}       optional serenity-window protocol (SerenityDE): host settings,
+  SerenityShell.{h,cpp}       optional serenity-window protocol: the desktop's host settings,
                               wallpaper, capture, compositor-driven chrome
   MenuController.{h,cpp}      server-rendered menubar and menus
   {Clipboard,Config,Launch,FileSystemAccess}ServerConnection.{h,cpp}   in-process portals

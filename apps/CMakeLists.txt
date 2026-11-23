@@ -1,7 +1,7 @@
 # Unmodified SerenityOS applications, built directly from their upstream
 # sources against the shim. The integration tests drive them (Calculator in
 # run-window-and-portal-tests.sh, PDFViewer in run-pdfviewer-test.sh, Piano for
-# audio). The desktop's full application set is built by the SDE, not here.
+# audio). A desktop's full application set is built by the desktop, not here.
 #
 # No source is edited; only the GML is precompiled (an app's own CMakeLists uses
 # compile_gml, which requires a relative path, so the compiler is invoked
@@ -45,7 +45,7 @@ libwm_gui_executable(PDFViewer
     LIBS LibMain LibGUI LibGfx LibCore LibIPC LibPDF LibFileSystemAccessClient LibConfig LibURL
 )
 
-# --- Piano (audio through the SDE AudioServer service) -----------------------
+# --- Piano (audio through the AudioServer service) ---------------------------
 set(PIANO_SRC "${SERENITY_PROJECT_ROOT}/Userland/Applications/Piano")
 set(PIANO_GEN "${CMAKE_CURRENT_BINARY_DIR}/Applications/Piano/ExportProgressWidget.h")
 add_custom_command(

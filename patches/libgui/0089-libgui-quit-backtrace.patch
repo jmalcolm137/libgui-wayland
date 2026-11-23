@@ -1,6 +1,6 @@
 LibGUI: optional quit backtraces for stress runs
 
-LADYBIRD_SDE_DEBUG_QUIT=1 makes Application::quit and the last-window quit
+LIBWM_DEBUG_QUIT=1 makes Application::quit and the last-window quit
 path print a backtrace. The frontend stress/fuzz harness uses it to tell an
 application-level quit apart from a Wayland connection reset.
 
@@ -22,7 +22,7 @@ application-level quit apart from a Wayland connection reset.
  
 +static void dump_quit_stack(char const* reason)
 +{
-+    if (!getenv("LADYBIRD_SDE_DEBUG_QUIT"))
++    if (!getenv("LIBWM_DEBUG_QUIT"))
 +        return;
 +    warnln("LibGUI: {} - quitting the application", reason);
 +    void* frames[32];

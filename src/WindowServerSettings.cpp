@@ -22,10 +22,9 @@
 
 namespace {
 
-// The wallpaper state is stored as raw pixels, not a PNG: encoding a full-screen
-// image to PNG takes several hundred milliseconds and would stall the UI thread
-// of whichever application applies it. Must match WallpaperHeader in the
-// compositor (WindowServer/src/main.cpp).
+// The `wallpaper.file` layout (see serenity-window.xml): this header, then
+// `height` rows of `pitch` bytes. Raw pixels rather than a PNG, so neither side
+// pays for an encode or decode.
 struct WallpaperHeader {
     u32 magic;
     u32 format;
@@ -35,62 +34,34 @@ struct WallpaperHeader {
 };
 constexpr u32 wallpaper_magic = 0x53445750; // "SDWP"
 
-// Must match Config::state_directory() in the compositor. The wallpaper is
-// persisted there as raw pixels so a client can load it on demand instead of
-// every client receiving (and copying) its own wallpaper bitmap over Wayland.
-ByteString wallpaper_state_directory()
+// Rows are read straight into the bitmap, so loading costs one image-sized
+// allocation rather than a file-sized buffer plus the bitmap.
+RefPtr<Gfx::Bitmap> read_wallpaper_file(StringView path)
 {
-    if (auto const* dir = getenv("SDE_STATE_DIR"); dir && *dir)
-        return ByteString(dir);
-    if (auto const* config = getenv("XDG_CONFIG_HOME"); config && *config)
-        return ByteString::formatted("{}/sde", config);
-    if (auto const* home = getenv("HOME"); home && *home)
-        return ByteString::formatted("{}/.config/sde", home);
-    return ByteString { "/tmp/sde" };
-}
-
-RefPtr<Gfx::Bitmap> read_wallpaper_state()
-{
-    auto path = ByteString::formatted("{}/wallpaper.raw", wallpaper_state_directory());
     auto file = Core::File::open(path, Core::File::OpenMode::Read);
     if (file.is_error())
         return nullptr;
-    auto raw = file.value()->read_until_eof();
-    if (raw.is_error() || raw.value().size() <= sizeof(WallpaperHeader))
-        return nullptr;
+    auto& input = *file.value();
 
     WallpaperHeader header {};
-    memcpy(&header, raw.value().data(), sizeof(header));
-    if (header.magic != wallpaper_magic || header.width == 0 || header.height == 0 || header.pitch == 0)
+    if (input.read_until_filled({ &header, sizeof(header) }).is_error())
         return nullptr;
-    size_t const pixels = static_cast<size_t>(header.pitch) * static_cast<size_t>(header.height);
-    if (raw.value().size() < sizeof(header) + pixels)
+    if (header.magic != wallpaper_magic || header.width == 0 || header.height == 0 || header.pitch == 0
+        || header.format == 0 || !Gfx::is_valid_bitmap_format(header.format))
         return nullptr;
-
     auto bitmap = Gfx::Bitmap::create(static_cast<Gfx::BitmapFormat>(header.format), { static_cast<int>(header.width), static_cast<int>(header.height) });
     if (bitmap.is_error())
         return nullptr;
     auto& created = *bitmap.value();
     auto const row_bytes = min(static_cast<size_t>(header.pitch), static_cast<size_t>(created.pitch()));
-    for (int y = 0; y < created.height(); ++y)
-        memcpy(created.scanline(y), raw.value().data() + sizeof(header) + static_cast<size_t>(y) * header.pitch, row_bytes);
+    for (int y = 0; y < created.height(); ++y) {
+        if (input.read_until_filled({ created.scanline(y), row_bytes }).is_error())
+            return nullptr;
+        auto const extra = static_cast<i64>(header.pitch) - static_cast<i64>(row_bytes);
+        if (extra > 0 && input.seek(extra, SeekMode::FromCurrentPosition).is_error())
+            return nullptr;
+    }
     return bitmap.release_value();
-}
-
-ByteString theme_broker_path()
-{
-    return LibWM::Environment::runtime_path("sde-theme"sv);
-}
-
-ByteString fonts_broker_path()
-{
-    return LibWM::Environment::runtime_path("sde-fonts"sv);
-}
-
-void write_fonts_broker(ByteString const& default_query, ByteString const& fixed_width_query, ByteString const& window_title_query)
-{
-    if (auto file = Core::File::open(fonts_broker_path(), Core::File::OpenMode::Write); !file.is_error())
-        (void)file.value()->write_until_depleted(ByteString::formatted("{}\n{}\n{}\n", default_query, fixed_width_query, window_title_query));
 }
 
 ByteString host_path_for_resource(ByteString const& path)
@@ -102,39 +73,27 @@ ByteString host_path_for_resource(ByteString const& path)
 
 namespace LibWM {
 
-WindowServerConnection::FontQueries WindowServerConnection::read_fonts_broker()
+// The `fonts` host setting: "<default>;<fixed width>;<window title>".
+WindowServerConnection::FontQueries WindowServerConnection::host_fonts()
 {
     FontQueries queries;
-    auto file = Core::File::open(fonts_broker_path(), Core::File::OpenMode::Read);
-    if (file.is_error())
-        return queries;
-    auto contents = file.value()->read_until_eof();
-    if (contents.is_error())
-        return queries;
-    auto lines = StringView { contents.value().bytes() }.split_view('\n');
-    if (lines.size() > 0)
-        queries.default_query = lines[0].trim_whitespace().to_byte_string();
-    if (lines.size() > 1)
-        queries.fixed_width_query = lines[1].trim_whitespace().to_byte_string();
-    if (lines.size() > 2)
-        queries.window_title_query = lines[2].trim_whitespace().to_byte_string();
+    auto fields = WaylandClient::the().serenity_shell().host_setting("fonts"sv).split(';', SplitBehavior::KeepEmpty);
+    if (fields.size() > 0)
+        queries.default_query = fields[0];
+    if (fields.size() > 1)
+        queries.fixed_width_query = fields[1];
+    if (fields.size() > 2)
+        queries.window_title_query = fields[2];
     return queries;
 }
 
 Messages::WindowServer::GetWallpaperResponse WindowServerConnection::get_wallpaper()
 {
-    if (m_wallpaper)
-        return m_wallpaper->to_shareable_bitmap();
-    // Rolling-upgrade compatibility: an older compositor still pushes the
-    // wallpaper over serenity-window. New compositors leave it unset.
-    if (auto host = WaylandClient::the().serenity_shell().host_wallpaper()) {
-        m_wallpaper = host;
-        return m_wallpaper->to_shareable_bitmap();
-    }
-    // The wallpaper is normally loaded on demand from the compositor's persisted
-    // raw state. Only the desktop/Display Settings ask for it, so the rest of the
-    // session does not pay for a private copy of the image.
-    m_wallpaper = read_wallpaper_state();
+    // Loaded on demand from the file the compositor names, rather than pushed to
+    // every client: only the desktop and Display Settings ask for it, so the rest
+    // of the session does not carry a private copy of the image.
+    if (!m_wallpaper)
+        m_wallpaper = read_wallpaper_file(WaylandClient::the().serenity_shell().host_setting("wallpaper.file"sv));
     if (m_wallpaper)
         return m_wallpaper->to_shareable_bitmap();
     return Gfx::ShareableBitmap {};
@@ -177,105 +136,52 @@ Messages::WindowServer::SetSystemThemeResponse WindowServerConnection::set_syste
         return false;
 
     m_theme_name = theme_name;
-    // Restyle this client, then record the choice so other clients and the
-    // compositor pick it up from the shared broker file.
+    m_applied_theme_path = host_theme;
+    // Restyle this client, then hand the choice to the desktop, which persists it
+    // and tells every other client through the host settings.
     async_update_system_theme(buffer.value());
-    if (auto file = Core::File::open(theme_broker_path(), Core::File::OpenMode::Write); !file.is_error())
-        (void)file.value()->write_until_depleted(host_theme);
-    // Persist the choice so it survives a restart (the compositor applies [Theme]
-    // at startup).
-    WaylandClient::the().serenity_shell().set_host_setting("theme.name"sv, theme_name);
     WaylandClient::the().serenity_shell().set_host_setting("theme.path"sv, host_theme);
     return true;
 }
 
-void WindowServerConnection::watch_theme()
+void WindowServerConnection::apply_host_settings()
 {
-    if (m_theme_watcher)
-        return;
-    // Apply any already-chosen theme immediately (a client started after a theme
-    // change, or a fresh session with a persisted [Theme], must pick it up), then
-    // follow further changes.
-    apply_theme_from_broker();
-    m_theme_watcher = Core::FileWatcher::create().release_value_but_fixme_should_propagate_errors();
-    m_theme_watcher->on_change = [this](Core::FileWatcherEvent const& event) {
-        if (event.event_path != theme_broker_path())
-            return;
-        apply_theme_from_broker();
-    };
-    // Watch the runtime directory so creation of the file is seen too, and the
-    // file itself (a write is IN_MODIFY, which a directory watch does not report).
-    if (auto directory = LexicalPath(theme_broker_path()).dirname().to_byte_string(); !directory.is_empty())
-        (void)m_theme_watcher->add_watch(directory, Core::FileWatcherEvent::Type::ChildCreated);
-    auto path = theme_broker_path();
-    if (Core::File::open(path, Core::File::OpenMode::Read).is_error())
-        (void)Core::File::open(path, Core::File::OpenMode::Write);
-    (void)m_theme_watcher->add_watch(path, Core::FileWatcherEvent::Type::ContentModified | Core::FileWatcherEvent::Type::MetadataModified);
-}
-
-void WindowServerConnection::apply_theme_from_broker()
-{
-    ByteString host_theme;
-    bool from_broker = false;
-    if (auto file = Core::File::open(theme_broker_path(), Core::File::OpenMode::Read); !file.is_error()) {
-        if (auto contents = file.value()->read_until_eof(); !contents.is_error()) {
-            host_theme = StringView { contents.value() }.trim_whitespace().to_byte_string();
-            from_broker = !host_theme.is_empty();
+    // Every settings change re-sends the whole set, so act only on what changed:
+    // reloading a theme or relayouting for fonts on, say, a mouse-speed change
+    // would restyle every window for nothing.
+    auto theme_path = WaylandClient::the().serenity_shell().host_setting("theme.path"sv);
+    if (!theme_path.is_empty() && theme_path != m_applied_theme_path) {
+        if (auto buffer = Gfx::load_system_theme(theme_path, {}); !buffer.is_error()) {
+            m_applied_theme_path = theme_path;
+            auto name = WaylandClient::the().serenity_shell().host_setting("theme.name"sv);
+            m_theme_name = name.is_empty() ? ByteString { LexicalPath(theme_path).title() } : name;
+            trace("LibWM: system theme is '{}'", m_theme_name);
+            async_update_system_theme(buffer.value());
         }
     }
-    // Fall back to the persisted theme ([Theme]) when there is no live broker value.
-    if (host_theme.is_empty())
-        host_theme = WaylandClient::the().serenity_shell().host_setting("theme.path"sv, ""sv);
-    if (host_theme.is_empty())
-        return;
-    if (auto buffer = Gfx::load_system_theme(host_theme, {}); !buffer.is_error()) {
-        auto name = WaylandClient::the().serenity_shell().host_setting("theme.name"sv, ""sv);
-        m_theme_name = name.is_empty() ? ByteString { LexicalPath(host_theme).title() } : name;
-        // Say which theme this client settled on and where it heard about it: an
-        // empty theme name is what made Display Settings' Themes page show a theme
-        // other than the running one, and it was invisible from the outside.
-        trace("LibWM: system theme is '{}' (from {})", m_theme_name,
-            from_broker ? "the broker"sv : "the host settings"sv);
-        async_update_system_theme(buffer.value());
+
+    auto fonts = WaylandClient::the().serenity_shell().host_setting("fonts"sv);
+    if (!fonts.is_empty() && fonts != m_applied_fonts) {
+        m_applied_fonts = fonts;
+        auto queries = host_fonts();
+        if (!queries.default_query.is_empty()) {
+            trace("LibWM: system fonts are '{}'", fonts);
+            apply_fonts(queries.default_query, queries.fixed_width_query, queries.window_title_query);
+        }
     }
 }
 
-void WindowServerConnection::watch_fonts()
+void WindowServerConnection::apply_fonts(ByteString const& default_query, ByteString const& fixed_width_query, ByteString const& window_title_query)
 {
-    if (m_fonts_watcher)
-        return;
-    // Apply any already-chosen font immediately (a client started after a font
-    // change must still pick it up), then follow further changes.
-    apply_fonts_from_broker();
-    m_fonts_watcher = Core::FileWatcher::create().release_value_but_fixme_should_propagate_errors();
-    m_fonts_watcher->on_change = [this](Core::FileWatcherEvent const& event) {
-        if (event.event_path != fonts_broker_path())
-            return;
-        apply_fonts_from_broker();
-    };
-    if (auto directory = LexicalPath(fonts_broker_path()).dirname().to_byte_string(); !directory.is_empty())
-        (void)m_fonts_watcher->add_watch(directory, Core::FileWatcherEvent::Type::ChildCreated);
-    auto path = fonts_broker_path();
-    if (Core::File::open(path, Core::File::OpenMode::Read).is_error())
-        (void)Core::File::open(path, Core::File::OpenMode::Write);
-    (void)m_fonts_watcher->add_watch(path, Core::FileWatcherEvent::Type::ContentModified | Core::FileWatcherEvent::Type::MetadataModified);
-}
-
-void WindowServerConnection::apply_fonts_from_broker()
-{
-    auto queries = read_fonts_broker();
-    if (queries.default_query.is_empty())
-        return;
-    trace("LibWM: applying font broker (default '{}')", queries.default_query);
     // The connection runs in-process with the client, so set the queries directly
     // too: widgets created afterwards (e.g. Display Settings' Fonts tab) then see
     // the chosen font, not just those relayouted by the async notification.
-    Gfx::FontDatabase::set_default_font_query(queries.default_query);
-    if (!queries.fixed_width_query.is_empty())
-        Gfx::FontDatabase::set_fixed_width_font_query(queries.fixed_width_query);
-    if (!queries.window_title_query.is_empty())
-        Gfx::FontDatabase::set_window_title_font_query(queries.window_title_query);
-    async_update_system_fonts(queries.default_query, queries.fixed_width_query, queries.window_title_query);
+    Gfx::FontDatabase::set_default_font_query(default_query);
+    if (!fixed_width_query.is_empty())
+        Gfx::FontDatabase::set_fixed_width_font_query(fixed_width_query);
+    if (!window_title_query.is_empty())
+        Gfx::FontDatabase::set_window_title_font_query(window_title_query);
+    async_update_system_fonts(default_query, fixed_width_query, window_title_query);
 }
 
 Messages::WindowServer::IsSystemThemeOverriddenResponse WindowServerConnection::is_system_theme_overridden()
@@ -350,7 +256,7 @@ Messages::WindowServer::GetScreenLayoutResponse WindowServerConnection::get_scre
     WindowServer::ScreenLayout layout;
     WindowServer::ScreenLayout::Screen screen {
         .mode = WindowServer::ScreenLayout::Screen::Mode::Device,
-        .device = ByteString { "sde-0" },
+        .device = ByteString { "wayland-0" },
         .location = { 0, 0 },
         .resolution = m_screen_size,
         .scale_factor = 1,
@@ -582,16 +488,11 @@ void WindowServerConnection::set_system_effects(Vector<bool> const& effects, u8 
 
 Messages::WindowServer::SetSystemFontsResponse WindowServerConnection::set_system_fonts(ByteString const& default_font_query, ByteString const& fixed_width_font_query, ByteString const& window_title_font_query)
 {
-    // Apply in-process (so subsequent lookups resolve the new font), restyle this
-    // client and tell it to re-layout, then record the choice in the session font
-    // broker so the compositor and other clients pick it up.
-    Gfx::FontDatabase::set_default_font_query(default_font_query);
-    if (!fixed_width_font_query.is_empty())
-        Gfx::FontDatabase::set_fixed_width_font_query(fixed_width_font_query);
-    if (!window_title_font_query.is_empty())
-        Gfx::FontDatabase::set_window_title_font_query(window_title_font_query);
-    async_update_system_fonts(default_font_query, fixed_width_font_query, window_title_font_query);
-    write_fonts_broker(default_font_query, fixed_width_font_query, window_title_font_query);
+    // Apply to this client, then hand the choice to the desktop, which persists it
+    // and tells every other client through the host settings.
+    apply_fonts(default_font_query, fixed_width_font_query, window_title_font_query);
+    m_applied_fonts = ByteString::formatted("{};{};{}", default_font_query, fixed_width_font_query, window_title_font_query);
+    WaylandClient::the().serenity_shell().set_host_setting("fonts"sv, m_applied_fonts);
     return true;
 }
 

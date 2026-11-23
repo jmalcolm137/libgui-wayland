@@ -18,7 +18,7 @@ index 6ec367c3..8b988276 100644
 +        // a test use its own session services (on private socket paths) without
 +        // touching, or being answered by, a live session. SerenityOS herself has
 +        // no such override.
-+        if (auto const* session_dir = getenv("SDE_SESSION_DIR"); session_dir && *session_dir)
++        if (auto const* session_dir = getenv("LIBWM_SESSION_DIR"); session_dir && *session_dir)
 +            return general_path.replace("/tmp/session/%sid"sv, ByteString(session_dir), ReplaceMode::All);
          pid_t sid = TRY(root_session_id(force_sid));
          return general_path.replace("%sid"sv, ByteString::number(sid), ReplaceMode::All);

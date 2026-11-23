@@ -29,11 +29,6 @@ static void manager_host_config(void* data, serenity_window_manager*,
         scroll_step_min, double_click_min, double_click_max);
 }
 
-static void manager_wallpaper(void* data, serenity_window_manager*, int32_t width, int32_t height, int32_t pitch, uint32_t format, int32_t fd)
-{
-    static_cast<SerenityShell*>(data)->on_host_wallpaper(width, height, pitch, format, fd);
-}
-
 static void manager_host_settings(void* data, serenity_window_manager*, char const* settings)
 {
     static_cast<SerenityShell*>(data)->on_host_settings(StringView { settings, strlen(settings) });
@@ -51,7 +46,6 @@ static void manager_captured(void* data, serenity_window_manager*, uint32_t seri
 
 static serenity_window_manager_listener const s_manager_listener = {
     .host_settings = manager_host_settings,
-    .wallpaper = manager_wallpaper,
     .dismiss_menus = manager_dismiss_menus,
     .host_config = manager_host_config,
     .captured = manager_captured,
@@ -221,41 +215,26 @@ void SerenityShell::set_host_setting(StringView key, StringView value)
     }
 }
 
-RefPtr<Gfx::Bitmap> SerenityShell::host_wallpaper() const
+void SerenityShell::set_host_wallpaper(Gfx::Bitmap const* bitmap)
 {
     MutexLocker locker(m_client.m_mutex);
-    return copy_for_other_thread(m_host_wallpaper.ptr());
-}
-
-void SerenityShell::on_host_wallpaper(i32 width, i32 height, i32 pitch, u32 format, i32 fd)
-{
-    MutexLocker locker(m_client.m_mutex);
-    m_host_wallpaper = bitmap_from_fd(width, height, pitch, format, fd);
-    trace("LibWM: host wallpaper {}x{}", width, height);
-}
-
-void SerenityShell::set_host_wallpaper(Gfx::Bitmap* bitmap)
-{
-    MutexLocker locker(m_client.m_mutex);
-    if (m_manager) {
-        int fd = bitmap ? memfd_for_bitmap("libwm-wallpaper", *bitmap) : -1;
-        // A `h` argument must be a real file descriptor: libwayland cannot dup a
-        // -1, and aborts the whole request (breaking this connection with it).
-        // "No wallpaper" is expressed by a zero width/height, so hand over a
-        // valid placeholder fd in that case.
-        bool const have_pixels = fd >= 0;
-        if (!have_pixels)
-            fd = memfd_create("libwm-wallpaper-none", MFD_CLOEXEC);
-        serenity_window_manager_set_wallpaper(m_manager,
-            have_pixels ? bitmap->width() : 0, have_pixels ? bitmap->height() : 0,
-            have_pixels ? bitmap->pitch() : 0,
-            have_pixels ? static_cast<uint32_t>(bitmap->format()) : 0, fd);
-        wl_display_flush(m_client.m_display);
-        if (fd >= 0)
-            close(fd);
-    }
-    // Keep our own answers current.
-    m_host_wallpaper = copy_for_other_thread(bitmap);
+    if (!m_manager)
+        return;
+    int fd = bitmap ? memfd_for_bitmap("libwm-wallpaper", *bitmap) : -1;
+    // A `h` argument must be a real file descriptor: libwayland cannot dup a
+    // -1, and aborts the whole request (breaking this connection with it).
+    // "No wallpaper" is expressed by a zero width/height, so hand over a
+    // valid placeholder fd in that case.
+    bool const have_pixels = fd >= 0;
+    if (!have_pixels)
+        fd = memfd_create("libwm-wallpaper-none", MFD_CLOEXEC);
+    serenity_window_manager_set_wallpaper(m_manager,
+        have_pixels ? bitmap->width() : 0, have_pixels ? bitmap->height() : 0,
+        have_pixels ? bitmap->pitch() : 0,
+        have_pixels ? static_cast<uint32_t>(bitmap->format()) : 0, fd);
+    wl_display_flush(m_client.m_display);
+    if (fd >= 0)
+        close(fd);
 }
 
 RefPtr<Gfx::Bitmap> SerenityShell::captured_bitmap() const
@@ -379,7 +358,7 @@ void SerenityShell::set_icon(serenity_toplevel* toplevel, Gfx::Bitmap const* bit
         wl_display_flush(m_client.m_display);
         return;
     }
-    int fd = memfd_for_bitmap("sde-window-icon", *bitmap);
+    int fd = memfd_for_bitmap("libwm-window-icon", *bitmap);
     if (fd < 0)
         return;
     serenity_toplevel_set_icon(toplevel, bitmap->width(), bitmap->height(), bitmap->pitch(), 0, fd);

@@ -15,7 +15,7 @@
 #include <LibMain/Main.h>
 
 // Minimal HiDPI fine-detail repro: a widget that draws full-width rectangles and
-// full-width thin/thick lines. Rendered at 1x and 2x (SDE_OUTPUT_SCALE), then the
+// full-width thin/thick lines. Rendered at output scales 1x and 2x, then the
 // window backing store is dumped (LIBWM_DUMP) and compared: any op that halves at
 // 2x shows up as a line/rect that stops at the horizontal midpoint.
 class DetailWidget final : public GUI::Widget {

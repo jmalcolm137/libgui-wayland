@@ -1,10 +1,11 @@
 # SerenityOS patches
 
 These are the changes libgui-wayland makes to the pinned SerenityOS checkout
-(`scripts/fetch-serenity.sh`) so its libraries and applications build and run on
-a Linux host. `scripts/build-libgui.sh` applies them; changes that make sense for
-SerenityOS on its own belong in the fork's `fixes` branch instead (see
-`fetch-serenity.sh`), and SerenityDE keeps its own series in its repository.
+(`scripts/fetch-serenity.sh`) so its libraries build and run on a Linux host.
+`scripts/build-libgui.sh` applies them; changes that make sense for SerenityOS on
+its own belong in the fork's `fixes` branch instead (see `fetch-serenity.sh`).
+Changes to individual applications belong to the desktop that builds them, which
+keeps its own series and applies it after this one.
 
 ## Layout and order
 
@@ -14,13 +15,12 @@ finding things:
 | Group | Contents |
 |---|---|
 | `lagom-and-resources` | the Lagom build (which libraries and services it builds), IPC additions, resource paths and bundled resources |
-| `libcore` | host seams in LibCore: portals, processes, event loop teardown, session paths |
+| `libcore` | host seams in LibCore: portals, processes, process statistics, event loop teardown, session paths |
 | `libipc` | LibIPC: send bounds, connection loss, threading |
 | `libgfx` | LibGfx host fixes, resource roots, HiDPI painting |
 | `libgui` | LibGUI: HiDPI backing stores, clipboard, damage reporting, teardown |
 | `libvt` | LibVT (the terminal widget) correctness and performance |
-| `other-libraries` | audio, EGL GPU backend, LibDesktop, LibLaunch, ImageDecoder, LibTLS, LibKeyboard, LibDebug/LibELF, LibAccessibility |
-| `applications` | Linux equivalents in individual applications (Settings apps, FileManager, SystemMonitor, debugger, ...) |
+| `other-libraries` | audio, EGL GPU backend, LibDesktop, LibLaunch, ImageDecoder, LibTLS, LibKeyboard, LibDebug/LibELF/LibCoredump, LibAccessibility |
 
 The four-digit number is the **global** application order across all groups:
 several patches touch the same files, so a patch is written against the tree
@@ -48,11 +48,11 @@ scripts/check-patches.sh --mark-applied
 
 That checks the series against the pin and, if it applies, records it as the
 one applied to `serenity/` (`build-libgui.sh` keeps a hash of the pin and of
-every patch's name and contents in `serenity/.git/sde-patch-set-applied`).
+every patch's name and contents in `serenity/.git/libwm-patch-set-applied`).
 Without it, `build-libgui.sh` sees a changed series and re-verifies each patch
 in place, which it cannot do for patches whose hunks overlap later ones, so it
 stops. `--mark-applied` trusts that your working tree really has the series
-applied; it cannot check, since SerenityDE's own series edits some of the same
+applied; it cannot check, since a desktop's own series may edit some of the same
 files.
 
 A fresh checkout needs none of this: `build-libgui.sh` applies the series in

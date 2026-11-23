@@ -29,8 +29,7 @@ done
 if [[ ${#TARGETS[@]} -eq 0 ]]; then
     # The framework: the LibGUI/LibGfx host port, the WindowServer shim (LibWM)
     # and the GPU backend. The *applications* are the desktop's, not the
-    # framework's — the SDE builds them (serenity-desktop-environment's
-    # scripts/build-apps.sh).
+    # framework's: a desktop builds them.
     TARGETS=(
         LibGfx LibGUI LibWM eglgpu
     )

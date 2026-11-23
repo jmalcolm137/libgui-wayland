@@ -81,7 +81,7 @@ class WaylandSeat;
 //   outputs()        WaylandOutputs     screen size, output and client scales
 //   seat()           WaylandSeat        pointer, keyboard, text input, cursor
 //   data_device()    WaylandDataDevice  clipboard and drag-and-drop
-//   serenity_shell() SerenityShell      the optional SerenityDE integration
+//   serenity_shell() SerenityShell      the optional serenity-window protocol
 //
 // Those are friends: they share this object's mutex, globals and window table.
 //
@@ -284,9 +284,8 @@ public:
         MutexLocker locker(m_mutex);
         m_layer_shell = shell;
     }
-    // The SerenityDE integration (serenity-window protocol): desktop-owned
-    // settings, wallpaper, capture, and compositor-driven window chrome. Inert on
-    // other compositors.
+    // The serenity-window protocol: desktop-owned settings, wallpaper, capture,
+    // and compositor-driven window chrome. Inert on compositors without it.
     SerenityShell& serenity_shell() { return *m_serenity_shell; }
 
     // GUI::DisplayLink. SerenityOS drives it from the window server's frame loop;

@@ -9,7 +9,7 @@ set -euo pipefail
 # The checkout comes from our public fork's `fixes` branch: SerenityOS at the
 # pinned upstream revision (see below), plus fixes that make sense for SerenityOS
 # on its own, each one a candidate for an upstream PR (docs/development-history.md
-# §4.1.1). A change that only exists because of how this port or the SDE uses
+# §4.1.1). A change that only exists because of how this port or a desktop uses
 # SerenityOS does not belong there: it stays in patches/.
 SERENITY_REMOTE="${SERENITY_REMOTE:-https://github.com/jmalcolm137/serenity.git}"
 # Pinned so the patch series in this repo is reproducible (see patches/README.md).

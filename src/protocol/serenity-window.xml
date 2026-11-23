@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <protocol name="serenity_window">
   <copyright>
-    Copyright (c) 2026, Serenity Desktop Environment contributors
+    Copyright (c) 2026, libgui-wayland contributors
 
     Permission is hereby granted, free of charge, to any person obtaining a
     copy of this software and associated documentation files (the "Software"),
@@ -24,19 +24,23 @@
   </copyright>
 
   <!--
-    Serenity-window coordination between the SDE compositor (WindowServer) and
-    the in-process WindowServer implementation used by applications
-    (LibWindowServer).
+    serenity-window: an optional extension through which a compositor plays the
+    role SerenityOS's own WindowServer plays for SerenityOS applications. Its
+    client side is libgui-wayland's in-process WindowServer implementation
+    (LibWM); applications run without it on any compositor.
 
-    The compositor owns some of the window chrome that LibWindowServer draws
-    into the client's buffer; this protocol carries the compositor's decisions
-    for that chrome (menu bar visibility, position) and, the other way, the
-    client's window icon (set_icon), which the compositor shows in the titlebar
-    and the Alt+Tab switcher. This file is shared verbatim between the SDE
-    repository (server side) and libgui-wayland (client side); keep them in
-    sync.
+    The compositor owns some of the window chrome that LibWM draws into the
+    client's buffer; this protocol carries the compositor's decisions for that
+    chrome (menu bar visibility, position) and, the other way, the client's
+    window icon (set_icon), which the compositor shows in the titlebar and the
+    Alt+Tab switcher. It also carries the settings a desktop owns (host_config,
+    host_settings), so LibWM answers an application's WindowServer settings
+    requests without knowing where or how the desktop stores them.
+
+    This file belongs to libgui-wayland. A compositor that implements it keeps a
+    verbatim copy.
   -->
-  <interface name="serenity_window_manager" version="3">
+  <interface name="serenity_window_manager" version="4">
     <description summary="compositor-side window chrome control">
       Global factory for per-toplevel chrome handles.
     </description>
@@ -44,10 +48,45 @@
     <event name="host_settings">
       <description summary="the desktop-owned settings the shim answers from">
         Key/value settings the desktop owns, as newline-separated `key=value`
-        lines. Sent with the host configuration (and again whenever they change),
-        so the shim answers an application's WindowServer config requests without
-        reading the desktop's configuration files. Keys are the desktop's
-        business; see docs/24 in the serenity-desktop-environment repository.
+        lines. Sent with the host configuration, and the whole set again
+        whenever any of them changes. Keys:
+
+        mouse.acceleration, mouse.scroll_step_size, mouse.double_click_speed,
+        mouse.buttons_switched, mouse.natural_scroll: the pointer settings
+        (booleans are "true"/"false").
+
+        keyboard.layouts, keyboard.variant, keyboard.model, keyboard.options:
+        the XKB keymap.
+
+        cursor.theme, cursor.highlight_radius, cursor.highlight_color: the
+        cursor theme name and the highlight (a radius in pixels, a #rrggbb
+        colour).
+
+        theme.name, theme.path: the system theme in effect, as a name and the
+        absolute path of its .ini file.
+
+        fonts: the system font queries, "default;fixed width;window title".
+
+        effects.show_geometry, effects.tile_window, effects.NAME: the
+        SystemEffects choices, NAME being an effect's SerenityOS name.
+
+        workspaces.rows, workspaces.columns: the workspace grid.
+
+        screenlayout: the output layout,
+        "main=I;MODE,DEVICE,LEFT,TOP,WIDTH,HEIGHT,SCALE;...".
+
+        output.default_scale: the scale for outputs without one of their own.
+
+        wallpaper.mode, wallpaper.color: how the wallpaper is placed, and the
+        background colour.
+
+        wallpaper.file: the absolute path of a file holding the wallpaper, read
+        on demand so a client that never asks pays nothing for it. It is a header
+        of five native-endian u32 values (magic 0x53445750, a Gfx::BitmapFormat
+        value, width, height, pitch) followed by height rows of pitch bytes. An
+        empty or missing file means no wallpaper.
+
+        The desktop may send keys not listed here; clients ignore them.
       </description>
       <arg name="settings" type="string"/>
     </event>
@@ -55,27 +94,12 @@
     <request name="set_host_setting">
       <description summary="hand a changed setting to the desktop">
         The application changed a setting the desktop owns; the shim forwards it
-        here. The desktop applies and persists it in its own configuration.
+        here, with a key from host_settings. The desktop applies and persists it
+        in its own configuration, then sends host_settings to every client.
       </description>
       <arg name="key" type="string"/>
       <arg name="value" type="string"/>
     </request>
-
-    <event name="wallpaper">
-      <description summary="the wallpaper the desktop currently shows">
-        The desktop's wallpaper as raw pixels: format is a wl_shm format value
-        (0 = ARGB8888, little-endian) and fd carries width*height pixels. fd is
-        -1 (with width 0) when there is no wallpaper. The SDE compositor does not
-        push this event on bind: clients that need the wallpaper load the
-        persisted raw state on demand, so an idle applet does not carry a private
-        copy of the image. The event remains for compositor compatibility.
-      </description>
-      <arg name="width" type="int"/>
-      <arg name="height" type="int"/>
-      <arg name="pitch" type="int"/>
-      <arg name="format" type="uint"/>
-      <arg name="fd" type="fd"/>
-    </event>
 
     <request name="set_wallpaper">
       <description summary="hand a new wallpaper to the desktop">
@@ -115,8 +139,7 @@
         WindowServer for and that the *desktop* owns: the workspace grid and the
         input-setting bounds. The shim answers an application's
         get_workspace_settings / get_mouse_acceleration_min / ... requests from
-        this, instead of reading the desktop's configuration file itself (see
-        docs/24 in the serenity-desktop-environment repository).
+        this.
       </description>
       <arg name="workspace_rows" type="uint"/>
       <arg name="workspace_columns" type="uint"/>
@@ -144,8 +167,8 @@
 
     <event name="captured">
       <description summary="the pixels of a requested region">
-        Raw pixels of the most recent request_capture, in the same encoding as
-        `wallpaper`: format is a wl_shm value and fd carries width*height pixels.
+        Raw pixels of the most recent request_capture: format is a wl_shm value
+        (0 = ARGB8888, little-endian) and fd carries height rows of pitch bytes.
         width/height are 0 (and fd -1) when the region could not be captured.
       </description>
       <arg name="serial" type="uint"/>
@@ -157,7 +180,7 @@
     </event>
   </interface>
 
-  <interface name="serenity_toplevel" version="3">
+  <interface name="serenity_toplevel" version="4">
     <description summary="per-toplevel chrome control">
       Compositor-driven chrome for a single toplevel.
     </description>

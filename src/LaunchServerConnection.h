@@ -21,9 +21,9 @@ namespace LibWM {
 
 // The in-process LaunchServer fallback, used when no session LaunchServer is
 // present (i.e. libgui-wayland running stand-alone under any compositor).
-// Handler resolution is delegated to Launch::HandlerDatabase, the same shared
-// resolver the SDE session LaunchServer uses, so an application's declared
-// handlers behave identically either way. Spawning resolves "/bin/X" to the host
+// Handler resolution is delegated to Launch::HandlerDatabase, a shared resolver
+// a session LaunchServer can use too, so an application's declared handlers
+// behave identically either way. Spawning resolves "/bin/X" to the host
 // binary next to the running executable.
 class LaunchServerConnection final
     : public IPC::Connection<LaunchServerEndpoint, LaunchClientEndpoint>
@@ -47,9 +47,9 @@ private:
     void load_handlers_if_needed();
     // "/bin/TextEditor" -> "<dir of this executable>/TextEditor", so the handler
     // runs the host binary rather than the (nonexistent) Serenity /bin path.
-    // A standalone session service (the SDE LaunchServer) is not built next to
-    // the applications, so it points at their directory with the session's app
-    // directory: LIBWM_APP_BIN_DIR (generic) or SDE_APP_BIN_DIR (its older name).
+    // A standalone session service (a desktop's LaunchServer) is not built next
+    // to the applications, so it points at their directory with the session's
+    // app directory, LIBWM_APP_BIN_DIR.
     static ByteString port_binary_path(StringView executable);
     static ByteString details_for(ByteString const& executable);
 

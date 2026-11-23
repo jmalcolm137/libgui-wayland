@@ -228,9 +228,9 @@ index 00000000..c5b604f4
 +// Resolves a file or URL to the applications that can open it.
 +//
 +// This is the shared launch-handler resolution used by both libgui-wayland's
-+// in-process LaunchServer fallback and the SDE LaunchServer service, so an
-+// application's declared handlers behave the same whether or not SDE is
-+// running. Keep it dependency-light (LibCore + LibURL only): LibDesktop's
++// in-process LaunchServer fallback and a desktop's LaunchServer service, so an
++// application's declared handlers behave the same whether or not that service
++// is running. Keep it dependency-light (LibCore + LibURL only): LibDesktop's
 +// AppFile cannot be used here because it pulls in LibGUI.
 +class HandlerDatabase {
 +public:

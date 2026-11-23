@@ -63,7 +63,7 @@ static void registry_global(void* data, wl_registry* registry, uint32_t name, ch
     } else if (!strcmp(interface, zwlr_layer_shell_v1_interface.name)) {
         self.set_layer_shell(reinterpret_cast<zwlr_layer_shell_v1*>(wl_registry_bind(registry, name, &zwlr_layer_shell_v1_interface, min(version, 4u))));
     } else if (!strcmp(interface, serenity_window_manager_interface.name)) {
-        self.serenity_shell().bind(reinterpret_cast<serenity_window_manager*>(wl_registry_bind(registry, name, &serenity_window_manager_interface, min(version, 3u))));
+        self.serenity_shell().bind(reinterpret_cast<serenity_window_manager*>(wl_registry_bind(registry, name, &serenity_window_manager_interface, min(version, 4u))));
     } else if (!strcmp(interface, zwp_text_input_manager_v3_interface.name)) {
         self.seat().set_text_input_manager(reinterpret_cast<zwp_text_input_manager_v3*>(wl_registry_bind(registry, name, &zwp_text_input_manager_v3_interface, 1)));
     }
