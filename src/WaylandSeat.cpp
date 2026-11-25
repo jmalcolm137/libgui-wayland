@@ -591,6 +591,11 @@ void WaylandSeat::on_pointer_enter(wl_surface* surface, Gfx::IntPoint position)
             apply_window_cursor(*window_surface);
         if (m_client.m_input.window_entered)
             m_client.m_input.window_entered(m_state.pointer_window);
+        // The window's hovered widget follows mouse motion, and the pointer only
+        // sends motion once it is inside. Without this, entering a window straight
+        // onto the location bar leaves the widget unaware until the pointer moves
+        // again, so the I-beam (and hover highlight) arrives late.
+        dispatch_pointer_motion(position);
     }
 }
 
@@ -616,7 +621,11 @@ void WaylandSeat::on_pointer_motion(Gfx::IntPoint position)
 {
     MutexLocker locker(m_client.m_mutex);
     m_state.pointer_position = position;
+    dispatch_pointer_motion(position);
+}
 
+void WaylandSeat::dispatch_pointer_motion(Gfx::IntPoint position)
+{
     if (m_state.pointer_popup >= 0) {
         if (m_client.m_input.popup_motion)
             m_client.m_input.popup_motion(m_state.pointer_popup, position);

@@ -88,6 +88,8 @@ public:
     void note_pointer_enter_serial(u32 serial);
     void on_seat_capabilities(u32 capabilities);
     void on_pointer_enter(wl_surface*, Gfx::IntPoint);
+    // Deliver a motion position to the focused window/popup. Caller holds the client mutex.
+    void dispatch_pointer_motion(Gfx::IntPoint);
     void on_pointer_leave();
     void on_pointer_motion(Gfx::IntPoint);
     void on_pointer_button(u32 button, bool pressed);
