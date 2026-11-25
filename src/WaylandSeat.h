@@ -74,6 +74,9 @@ public:
     u32 current_modifiers() const;
     // Show the cursor `window_surface` asks for, if the pointer is over it.
     void apply_window_cursor(WaylandClient::WindowSurface const&);
+    // Decode the cursors a window is likely to ask for, so the first move onto
+    // a text field or link does not pay for the bitmap load.
+    void preload_cursors();
     // Drop references to a window or popup that is being destroyed.
     void forget_window(i32 window_id, wl_surface* surface, wl_surface* menubar_surface);
     void forget_popup(i32 popup_id);

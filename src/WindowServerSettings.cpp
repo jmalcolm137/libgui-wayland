@@ -8,6 +8,7 @@
 #include "Environment.h"
 #include "SerenityShell.h"
 #include "WaylandClient.h"
+#include "WaylandSeat.h"
 #include "WaylandOutputs.h"
 #include <AK/LexicalPath.h>
 #include <AK/QuickSort.h>
@@ -69,18 +70,22 @@ ByteString host_path_for_resource(ByteString const& path)
     return LibWM::Environment::host_resource_path(path);
 }
 
-// The desktop may name its theme with an absolute path into its own resource
-// tree. That path does not exist inside a Flatpak, so fall back to the bundled
-// theme with the same file name. A desktop that names "/res/..." paths is
-// already mapped by host_resource_path() and loads directly.
+// Themes are loaded by name from the application's own resource tree first, so
+// the palette is the same inside and outside a Flatpak. A desktop may name a
+// custom theme that is not bundled; that path is used as a fallback.
 ErrorOr<Core::AnonymousBuffer> load_theme_with_bundled_fallback(ByteString const& path, Optional<ByteString> const& scheme = {})
 {
-    auto buffer = Gfx::load_system_theme(path, scheme);
-    if (!buffer.is_error())
-        return buffer;
+    // Prefer the theme shipped with this application. A desktop may name an
+    // absolute path into its own resource tree; that tree is not mounted in a
+    // Flatpak, and opening the missing path can yield an empty (all-zero, black)
+    // theme. Loading the bundled copy of the same theme by name keeps the palette
+    // correct in and out of a sandbox. If the desktop has a custom theme we do
+    // not ship, fall back to its path.
     auto basename = LexicalPath(path).basename();
     auto bundled = ByteString::formatted("{}/themes/{}", LibWM::Environment::resource_root(), basename);
-    return Gfx::load_system_theme(bundled, scheme);
+    if (auto buffer = Gfx::load_system_theme(bundled, scheme); !buffer.is_error())
+        return buffer;
+    return Gfx::load_system_theme(host_path_for_resource(path), scheme);
 }
 
 }
@@ -183,6 +188,10 @@ void WindowServerConnection::apply_host_settings()
             apply_fonts(queries.default_query, queries.fixed_width_query, queries.window_title_query);
         }
     }
+
+    // The cursor theme is part of these settings, so this is the right moment to
+    // decode the cursors a first interaction will ask for.
+    WaylandClient::the().seat().preload_cursors();
 }
 
 void WindowServerConnection::apply_fonts(ByteString const& default_query, ByteString const& fixed_width_query, ByteString const& window_title_query)

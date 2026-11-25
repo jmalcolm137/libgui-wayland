@@ -7,6 +7,7 @@
 #include "WaylandSeat.h"
 #include "WaylandClient.h"
 #include "SerenityShell.h"
+#include <AK/Time.h>
 #include "WaylandDataDevice.h"
 #include "Environment.h"
 #include <Kernel/API/KeyCode.h>
@@ -1022,7 +1023,11 @@ void WaylandSeat::apply_window_cursor(WaylandClient::WindowSurface const& window
     if (!m_state.pointer || !m_client.m_compositor || !m_client.m_shm)
         return;
 
-    auto const cursor_enum = static_cast<Gfx::StandardCursor>(window_surface.cursor_type);
+    auto const requested_cursor = static_cast<Gfx::StandardCursor>(window_surface.cursor_type);
+    // Serenity's WindowServer treats "no override" as the default arrow. Keeping
+    // the previous cursor here made an I-beam persist after leaving a text field
+    // for a button, the bookmark bar, or another widget without a cursor.
+    auto const cursor_enum = requested_cursor == Gfx::StandardCursor::None ? Gfx::StandardCursor::Arrow : requested_cursor;
     bool const already_applied_for_this_enter = m_state.applied_cursor_serial == m_state.pointer_enter_serial;
 
     if (!window_surface.custom_cursor && cursor_enum == Gfx::StandardCursor::Hidden) {
@@ -1050,6 +1055,21 @@ void WaylandSeat::apply_window_cursor(WaylandClient::WindowSurface const& window
     }
 
     apply_cursor_bitmap(cursor_entry.bitmap, cursor_entry.hotspot);
+}
+
+void WaylandSeat::preload_cursors()
+{
+    // A cursor is decoded from the resource tree the first time a widget asks for
+    // it. On a cold start that load lands on the UI thread exactly when the user
+    // moves onto the location bar (I-beam) or a link (hand), which feels like a
+    // stutter. Warm the common ones once the host settings name the theme.
+    auto const start = MonotonicTime::now();
+    size_t loaded = 0;
+    for (auto cursor : { Gfx::StandardCursor::Arrow, Gfx::StandardCursor::IBeam, Gfx::StandardCursor::Hand, Gfx::StandardCursor::Crosshair }) {
+        if (load_standard_cursor(cursor).has_value())
+            ++loaded;
+    }
+    trace("LibWM/Wayland: preloaded {} cursors in {} ms", loaded, (MonotonicTime::now() - start).to_milliseconds());
 }
 
 void WaylandSeat::apply_standard_cursor(Gfx::StandardCursor cursor)
