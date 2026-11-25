@@ -69,6 +69,20 @@ ByteString host_path_for_resource(ByteString const& path)
     return LibWM::Environment::host_resource_path(path);
 }
 
+// The desktop may name its theme with an absolute path into its own resource
+// tree. That path does not exist inside a Flatpak, so fall back to the bundled
+// theme with the same file name. A desktop that names "/res/..." paths is
+// already mapped by host_resource_path() and loads directly.
+ErrorOr<Core::AnonymousBuffer> load_theme_with_bundled_fallback(ByteString const& path, Optional<ByteString> const& scheme = {})
+{
+    auto buffer = Gfx::load_system_theme(path, scheme);
+    if (!buffer.is_error())
+        return buffer;
+    auto basename = LexicalPath(path).basename();
+    auto bundled = ByteString::formatted("{}/themes/{}", LibWM::Environment::resource_root(), basename);
+    return Gfx::load_system_theme(bundled, scheme);
+}
+
 }
 
 namespace LibWM {
@@ -131,7 +145,7 @@ Messages::WindowServer::SetSystemThemeResponse WindowServerConnection::set_syste
     if (color_scheme_path.has_value())
         host_scheme = host_path_for_resource(color_scheme_path.value());
 
-    auto buffer = Gfx::load_system_theme(host_theme, host_scheme);
+    auto buffer = load_theme_with_bundled_fallback(host_theme, host_scheme);
     if (buffer.is_error())
         return false;
 
@@ -151,7 +165,7 @@ void WindowServerConnection::apply_host_settings()
     // would restyle every window for nothing.
     auto theme_path = WaylandClient::the().serenity_shell().host_setting("theme.path"sv);
     if (!theme_path.is_empty() && theme_path != m_applied_theme_path) {
-        if (auto buffer = Gfx::load_system_theme(theme_path, {}); !buffer.is_error()) {
+        if (auto buffer = load_theme_with_bundled_fallback(theme_path); !buffer.is_error()) {
             m_applied_theme_path = theme_path;
             auto name = WaylandClient::the().serenity_shell().host_setting("theme.name"sv);
             m_theme_name = name.is_empty() ? ByteString { LexicalPath(theme_path).title() } : name;
