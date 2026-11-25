@@ -107,6 +107,10 @@ private:
 
     void ensure_text_input();
     Optional<CachedCursor> load_standard_cursor(Gfx::StandardCursor);
+    void apply_cursor_bitmap(RefPtr<Gfx::Bitmap> const&, Gfx::IntPoint hotspot);
+    void apply_standard_cursor(Gfx::StandardCursor);
+    // Caller holds WaylandClient::the().mutex().
+    void apply_standard_cursor_locked(Gfx::StandardCursor);
 
     struct State {
         wl_seat* seat { nullptr };

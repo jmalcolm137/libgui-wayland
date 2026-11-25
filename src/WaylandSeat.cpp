@@ -577,6 +577,10 @@ void WaylandSeat::on_pointer_enter(wl_surface* surface, Gfx::IntPoint position)
         position.x(), position.y());
 
     if (m_state.pointer_popup >= 0) {
+        // Popups (menus, context menus, comboboxes) use the default arrow. Without
+        // this the cursor keeps the last style set by the window, so leaving a
+        // text field for a menu would keep showing the I-beam.
+        apply_standard_cursor_locked(Gfx::StandardCursor::Arrow);
         if (m_client.m_input.popup_motion)
             m_client.m_input.popup_motion(m_state.pointer_popup, position);
         return;
@@ -1045,7 +1049,29 @@ void WaylandSeat::apply_window_cursor(WaylandClient::WindowSurface const& window
         return;
     }
 
-    auto const& bitmap = cursor_entry.bitmap;
+    apply_cursor_bitmap(cursor_entry.bitmap, cursor_entry.hotspot);
+}
+
+void WaylandSeat::apply_standard_cursor(Gfx::StandardCursor cursor)
+{
+    MutexLocker locker(m_client.m_mutex);
+    apply_standard_cursor_locked(cursor);
+}
+
+void WaylandSeat::apply_standard_cursor_locked(Gfx::StandardCursor cursor)
+{
+    if (!m_state.pointer || !m_client.m_compositor || !m_client.m_shm)
+        return;
+    auto loaded = load_standard_cursor(cursor);
+    if (!loaded.has_value())
+        return;
+    apply_cursor_bitmap(loaded->bitmap, loaded->hotspot);
+}
+
+void WaylandSeat::apply_cursor_bitmap(RefPtr<Gfx::Bitmap> const& bitmap, Gfx::IntPoint hotspot)
+{
+    bool const already_applied_for_this_enter = m_state.applied_cursor_serial == m_state.pointer_enter_serial;
+
     if (!bitmap || bitmap->size().is_empty())
         return;
 
@@ -1076,14 +1102,13 @@ void WaylandSeat::apply_window_cursor(WaylandClient::WindowSurface const& window
 
     m_client.bind_bitmap(m_state.cursor_surface, buffer.value(), upload, m_state.cursor_buffers);
     wl_surface_commit(m_state.cursor_surface);
-    wl_pointer_set_cursor(m_state.pointer, m_state.pointer_enter_serial, m_state.cursor_surface, cursor_entry.hotspot.x(), cursor_entry.hotspot.y());
+    wl_pointer_set_cursor(m_state.pointer, m_state.pointer_enter_serial, m_state.cursor_surface, hotspot.x(), hotspot.y());
     wl_display_flush(m_client.m_display);
 
     m_state.applied_cursor = bitmap;
     m_state.applied_cursor_hidden = false;
     m_state.applied_cursor_serial = m_state.pointer_enter_serial;
-    trace("LibWM/Wayland: set cursor on window {} ({}x{}, hotspot {},{})",
-        window_surface.window_id, bitmap->width(), bitmap->height(), cursor_entry.hotspot.x(), cursor_entry.hotspot.y());
+    trace("LibWM/Wayland: set cursor ({}x{}, hotspot {},{})", bitmap->width(), bitmap->height(), hotspot.x(), hotspot.y());
 }
 
 }
