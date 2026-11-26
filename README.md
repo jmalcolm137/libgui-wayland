@@ -37,19 +37,10 @@ limitations, non-goals and what the desktop provides are in
 
 ## Desktops
 
-libgui-wayland is desktop-agnostic: the applications run on any Wayland compositor. What a
-desktop adds is its own business, built on the same pinned SerenityOS source:
+libgui-wayland is desktop-agnostic: the applications will run on any Wayland compositor:
 
-* **The applications it ships.** The applications themselves are the desktop's: it defines
-  their build targets, carries their host patches and assets, and tests them against its own
-  compositor (SerenityDE: `patches/0008-sde-lagom-targets.patch`, `scripts/build-apps.sh`,
-  `scripts/run-libgui-apps-test.sh`). Applications that read SerenityOS kernel interfaces
-  (SystemMonitor, Debugger, CrashReporter, the Settings apps, ...) need host ports, and the
-  desktop that builds them carries those patches. The libraries they rely on are ported here
-  (LibCore's `ProcessStatisticsReader` on `/proc`, LibDebug on `ptrace`, LibCoredump on native
-  core dumps), so every desktop shares them.
 * **Session services.** A service listening on a portal path (LaunchServer, NotificationServer,
-  AudioServer, ...) takes over from LibWM's in-process fallback; `docs/environment.md` lists the
+  AudioServer, ...) may take over from LibWM's in-process fallback; `docs/environment.md` lists the
   variables that place them.
 * **Desktop-owned settings and chrome.** Pointer, keyboard, cursor, theme, fonts, display layout
   and wallpaper settings, and compositor-drawn window chrome, travel over the optional
@@ -58,9 +49,8 @@ desktop adds is its own business, built on the same pinned SerenityOS source:
 * **Requests with no client protocol.** Screen-number overlays (`show_screen_numbers`) and shadows
   around a surface are compositor features; the shim forwards the screen-number request as the
   `effects.show_screen_numbers` host setting, and the desktop is the right place to draw it. Pointer
-  warping and global mouse tracking are the exceptions: they have protocols
-  (`wp_pointer_warp_v1`, `ext-input-observation-v1`), implemented by SerenityDE, and the shim uses
-  both.
+  warping and global mouse tracking have protocols (`wp_pointer_warp_v1`, `ext-input-observation-v1`),
+  implemented by SerenityDE, and the shim uses both.
 * **Standard protocols the desktop only has to advertise.** Window icons
   (`xdg-toplevel-icon-v1`), primary selection (`zwp_primary_selection_v1`), the appearance
   preference (`org.freedesktop.portal.Settings`, via `xdg-desktop-portal`) and the usual
@@ -71,11 +61,10 @@ desktop adds is its own business, built on the same pinned SerenityOS source:
   `xdg-toplevel-icon-v1` is absent, and the portal only where no theme is sent at all.
 
 The [Serenity Desktop Environment](https://github.com/jmalcolm137/serenity-desktop-environment)
-is that desktop and the reference session: its compositor, Taskbar/Desktop/applets and session
+is the reference desktop and session: its compositor, Taskbar/Desktop/applets and session
 services supply what [docs/limitations.md](docs/limitations.md) lists as desktop-provided
 (screenshots, theme/input/display settings, wallpaper and applet layout), and they consume the
-standard protocols above, so Serenity applications' icons and selections appear in its Taskbar
-and clipboard just like native ones'.
+standard protocols above.
 
 ## Building
 
