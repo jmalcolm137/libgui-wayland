@@ -37,7 +37,7 @@ limitations, non-goals and what the desktop provides are in
 
 ## Desktops
 
-libgui-wayland is desktop-agnostic: the applications will run on any Wayland compositor:
+libgui-wayland is desktop-agnostic: the applications run on any Wayland compositor:
 
 * **Session services.** A service listening on a portal path (LaunchServer, NotificationServer,
   AudioServer, ...) may take over from LibWM's in-process fallback; `docs/environment.md` lists the
