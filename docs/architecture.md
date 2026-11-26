@@ -29,6 +29,11 @@ Nothing above LibWM knows Wayland exists; nothing in the compositor knows
 SerenityOS exists. The one exception is the optional `serenity-window` protocol,
 which a desktop's compositor may offer and every other compositor ignores.
 
+The applications in the top box are not part of this repository: the framework
+builds them into itself only as test clients (`src/test/`), and the desktop that
+ships them owns their build targets, patches and assets (see
+[limitations.md](limitations.md)).
+
 ## Process model and transport
 
 LibWM is a library in the application process, not a server. Each application

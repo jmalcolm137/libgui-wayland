@@ -7,7 +7,9 @@
 #
 #   src/test   LibWM's own test programs and the CTest registrations
 #   services   upstream SerenityOS services LibWM spawns on demand
-#   apps       unmodified upstream applications used by the integration tests
+#
+# The applications are not part of this build: the desktop that ships them
+# defines their Lagom targets, builds them and tests them against its compositor.
 
 set(LIBGUI_WAYLAND_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." CACHE INTERNAL "libgui-wayland source root")
 include("${LIBGUI_WAYLAND_ROOT}/cmake/LibWMHelpers.cmake")
@@ -151,4 +153,3 @@ add_dependencies(LibWM
 enable_testing()
 add_subdirectory(test)
 add_subdirectory("${LIBGUI_WAYLAND_ROOT}/services" "${CMAKE_CURRENT_BINARY_DIR}/services")
-add_subdirectory("${LIBGUI_WAYLAND_ROOT}/apps" "${CMAKE_CURRENT_BINARY_DIR}/apps")

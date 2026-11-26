@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Menubar/menu integration test (headless, no X11).
 #
-# Runs Calculator under the headless compositor and exercises two menus:
+# Runs LibWM's menubar test app under the headless compositor and exercises two menus:
 #   * File -> Quit  : the item activates and the app exits 0.
 #   * Help -> About : the item activates and a second window (the dialog) opens.
 set -euo pipefail
@@ -13,12 +13,12 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERENITY_SRC="${SERENITY_SRC:-$PROJECT_ROOT/serenity}"
 BUILD_DIR="${BUILD_DIR:-$PROJECT_ROOT/build/lagom}"
 HC="${HC:-$PROJECT_ROOT/build/xlib-wayland/headless-compositor}"
-APP="$BUILD_DIR/bin/Calculator"
+APP="$BUILD_DIR/bin/libwm-menu-test"
 
 if [[ ! -x "$HC" ]]; then
     "$PROJECT_ROOT/scripts/build-headless-compositor.sh"
 fi
-ninja -C "$BUILD_DIR" Calculator >/dev/null
+ninja -C "$BUILD_DIR" libwm-menu-test >/dev/null
 
 RUNTIME="$(mktemp -d "${TMPDIR:-/tmp}/libwm-menu.XXXXXX")"
 chmod 700 "$RUNTIME"
@@ -76,7 +76,9 @@ run_case about 225 57 6
 check "Help: menubar click opened a popup"        "grep -q 'popup .* created' '$RUNTIME/about.app.log'"
 check "Help: About activated an item"             "grep -q 'menu item activated' '$RUNTIME/about.app.log'"
 check "Help: About opened a second window"        "[[ \$(grep -c 'create_window' '$RUNTIME/about.app.log') -ge 2 ]]"
-check "Help: app stayed running (dialog)"         "[[ $CASE_EXIT -ne 0 ]]"
+# The app runs until the compositor's timeout closes the connection; a dialog
+# left open must not have quit it early (a crash would also be non-zero).
+check "Help: app stayed until the compositor closed" "grep -q 'the compositor closed the connection' '$RUNTIME/about.app.log' && [[ $CASE_EXIT -eq 0 || $CASE_EXIT -eq 124 ]]"
 
 # Keyboard navigation: F10 opens the first menu, Down selects Quit, Enter runs it.
 cat > "$RUNTIME/kbd.input" <<'EOF'
@@ -202,7 +204,7 @@ PY
 }
 menubar_frame mb1x 1 'sleep 1500\n'
 menubar_frame mb2x 2 'sleep 1500\n'
-# Calculator is not resizable; the submenu test window (300x200) is.
+# The menu test window is not resizable; the submenu test window (300x200) is.
 ninja -C "$BUILD_DIR" libwm-submenu-test >/dev/null
 menubar_frame mbresize 2 'sleep 1000\nresize 600 400\nsleep 1200\n' "$BUILD_DIR/bin/libwm-submenu-test"
 check "menubar drawn at 1x"                         "menubar_pixels_ok mb1x 1 >> '$RUNTIME/menubar-pixels.log'"

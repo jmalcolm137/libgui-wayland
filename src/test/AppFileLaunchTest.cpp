@@ -38,8 +38,11 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         return 0;
     }
 
+    // A name is looked up in the resource root's apps/ directory; a path (used
+    // by the suite, since the suite's launch target is not a Serenity app) is
+    // opened directly.
     auto name = arguments.strings[1];
-    auto app_file = Desktop::AppFile::get_for_app(name);
+    auto app_file = name.ends_with(".af"sv) ? Desktop::AppFile::open(name) : Desktop::AppFile::get_for_app(name);
     if (!app_file->is_valid())
         return Error::from_string_literal("AppFile is invalid (missing or malformed)");
 
@@ -49,7 +52,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         bool opened = Desktop::Launcher::open(url);
         if (!opened)
             return Error::from_string_literal("Desktop::Launcher::open failed");
-        dbgln("LAUNCHER-OPEN: opened '{}' ({})", name, app_file->executable());
+        dbgln("LAUNCHER-OPEN: opened '{}' ({})", app_file->name(), app_file->executable());
         return 0;
     }
 
@@ -58,6 +61,6 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         extra_arguments.append(arguments.strings[i]);
 
     TRY(app_file->spawn_with_escalation(extra_arguments.span()));
-    dbgln("APPFILE-LAUNCH: spawned '{}' ({})", name, app_file->executable());
+    dbgln("APPFILE-LAUNCH: spawned '{}' ({})", app_file->name(), app_file->executable());
     return 0;
 }

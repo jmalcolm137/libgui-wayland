@@ -32,7 +32,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         dbgln("ABOUT-TEST: AboutDialogWidget::try_create error: {}", widget.error());
     else
         dbgln("ABOUT-TEST: AboutDialogWidget::try_create ok");
-    GUI::AboutDialog::show("Calculator"_string, Core::Version::read_long_version_string().release_value_but_fixme_should_propagate_errors(), nullptr, window.ptr());
+    GUI::AboutDialog::show("LibWM About Test"_string, Core::Version::read_long_version_string().release_value_but_fixme_should_propagate_errors(), nullptr, window.ptr());
     dbgln("ABOUT-TEST: AboutDialog::show returned");
 
     return app->exec();

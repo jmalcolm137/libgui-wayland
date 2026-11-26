@@ -1,8 +1,9 @@
 # LibWM — Running SerenityOS LibGUI/LibGfx Applications on Wayland
 
-**Target:** build **unmodified** SerenityOS `LibGfx` and `LibGUI` applications (e.g.
-`Calculator`, `PDFViewer`) on Linux and run them **natively on a Wayland compositor** —
-with no SerenityOS WindowServer, no X server, and no `xlib-wayland`.
+**Target:** run **unmodified** SerenityOS `LibGfx` and `LibGUI` applications (e.g.
+`Calculator`, `PDFViewer`) **natively on a Wayland compositor** — with no SerenityOS
+WindowServer, no X server, and no `xlib-wayland`. The applications are built by the desktop
+that ships them; this repository is the framework they link.
 
 The SerenityOS revision is pinned in `scripts/fetch-serenity.sh`; the host changes
 to it are the patch series in `patches/` (see `patches/README.md`).
@@ -71,7 +72,7 @@ compositor, receive input events", the mapping onto Wayland is unusually direct:
 * **G1** — Build the **full** `LibGfx` and `LibGUI` (all 117 `LibGUI/*.cpp`, plus generated
   GML) from pristine upstream source against the host toolchain, with **zero source edits**.
   Not the six-file `LibGUI` stub that Lagom ships today ([history](docs/development-history.md) §2.4).
-* **G2** — Build the unmodified `Calculator` and `PDFViewer` applications and run them
+* **G2** — Run the unmodified `Calculator` and `PDFViewer` applications (built by the desktop)
   **directly on a Wayland compositor**: no WindowServer, no XWayland, no `$DISPLAY`.
 * **G3** — Correct behaviour: widget painting, anti-aliased text, icons, alpha, DPI scaling,
   window lifecycle, menus/popups, pointer/keyboard/wheel input, focus, clipboard.
@@ -159,7 +160,6 @@ src/                          LibWM (libwm.so); src/CMakeLists.txt is the Lagom 
   protocol/                   wlr-layer-shell and serenity-window protocol XML
   test/                       LibWM test programs + CTest registration of the scripts below
 services/                     upstream WebContent, RequestServer, SQLServer (spawned on demand)
-apps/                         upstream Calculator, PDFViewer, Piano (driven by the integration tests)
 libeglgpu/                    Mesa/EGL GPU::Device backend for LibGL apps
 scripts/fetch-serenity.sh     pinned, blobless, sparse checkout of SerenityOS
 scripts/build-libgui.sh       apply patches + build the framework (+ run tests unless --no-tests)

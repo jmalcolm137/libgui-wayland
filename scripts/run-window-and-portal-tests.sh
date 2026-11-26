@@ -23,7 +23,7 @@ ninja -C "$BUILD_DIR" \
     libwm-appfile-test \
     libwm-warp-test \
     libwm-wm-requests-test \
-    Calculator >/dev/null
+    libwm-test-window >/dev/null
 
 RUNTIME="$(mktemp -d "${TMPDIR:-/tmp}/libwm-winportal.XXXXXX")"
 chmod 700 "$RUNTIME"
@@ -298,20 +298,29 @@ for _ in $(seq 1 50); do [[ -S "$RUNTIME/session/portal/notify" ]] && break; sle
 HC_PID=$!
 for _ in $(seq 1 100); do [[ -e "$RUNTIME/libwm-portal" ]] && break; sleep 0.1; done
 
-# Run libwm-appfile-test Calculator --launcher: exercises stale socket recovery on
-# the launch portal AND LaunchServerConnection::open_url spawning /bin/Calculator.
+# The launch target is a LibWM test app with an app file in the run directory:
+# the launcher/AppFile path no longer depends on an application the framework
+# does not build (the applications live in the desktop).
+cat > "$RUNTIME/libwm-launch-test.af" <<'AF'
+[App]
+Name=LibWM Launch Test
+Executable=/bin/libwm-test-window
+AF
+
+# Run libwm-appfile-test <app file> --launcher: exercises stale socket recovery on
+# the launch portal AND LaunchServerConnection::open_url spawning the target.
 env XDG_RUNTIME_DIR="$RUNTIME" LIBWM_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY=libwm-portal \
     SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
     LIBWM_APP_BIN_DIR="$BUILD_DIR/bin" \
     LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-    timeout 5 "$BUILD_DIR/bin/libwm-appfile-test" Calculator --launcher > "$RUNTIME/launcher.log" 2>&1 || true
+    timeout 5 "$BUILD_DIR/bin/libwm-appfile-test" "$RUNTIME/libwm-launch-test.af" --launcher > "$RUNTIME/launcher.log" 2>&1 || true
 
 # Also run direct AppFile::spawn_with_escalation path.
 env XDG_RUNTIME_DIR="$RUNTIME" LIBWM_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY=libwm-portal \
     SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
     LIBWM_APP_BIN_DIR="$BUILD_DIR/bin" \
     LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-    timeout 5 "$BUILD_DIR/bin/libwm-appfile-test" Calculator > "$RUNTIME/appfile.log" 2>&1 || true
+    timeout 5 "$BUILD_DIR/bin/libwm-appfile-test" "$RUNTIME/libwm-launch-test.af" > "$RUNTIME/appfile.log" 2>&1 || true
 
 # Exercise live external session socket deferral (notify) and SOCKET_TAKEOVER
 # single-client (RequestServer) & multi-client (SQLServer) spawning.
@@ -344,15 +353,15 @@ for _ in $(seq 1 30); do [[ -s "$RUNTIME/request-takeover.out" && -s "$RUNTIME/s
 wait "$HC_PID" 2>/dev/null || true
 wait "$SOCK_HELPER_PID" 2>/dev/null || true
 HC_PID=""
-pkill -f "$BUILD_DIR/bin/Calculator" 2>/dev/null || true
+pkill -f "$BUILD_DIR/bin/libwm-test-window" 2>/dev/null || true
 
 check "portal: stale Unix socket detected & unlinked"  "grep -q \"portal socket '.*/session/portal/launch' is stale; serving in-process\" '$RUNTIME/launcher.log'"
 check "portal: live session socket deferred to"        "grep -q \"deferring to the session service on '.*/session/portal/notify'\" '$RUNTIME/portals.log'"
 check "portal: single-client SOCKET_TAKEOVER spawned"  "grep -q 'requestserver:True' '$RUNTIME/request-takeover.out'"
 check "portal: multi-client SOCKET_TAKEOVER spawned"   "grep -q 'sql:True' '$RUNTIME/sql-takeover.out'"
-check "portal: LaunchServer launched /bin/Calculator"  "grep -q 'LaunchServer: launched executable .*/bin/Calculator' '$RUNTIME/launcher.log'"
-check "portal: Desktop::Launcher::open succeeded"      "grep -q \"LAUNCHER-OPEN: opened 'Calculator' (/bin/Calculator)\" '$RUNTIME/launcher.log'"
-check "portal: AppFile::spawn_with_escalation worked"  "grep -q \"APPFILE-LAUNCH: spawned 'Calculator' (/bin/Calculator)\" '$RUNTIME/appfile.log'"
+check "portal: LaunchServer launched /bin/libwm-test-window" "grep -q 'LaunchServer: launched executable .*/bin/libwm-test-window' '$RUNTIME/launcher.log'"
+check "portal: Desktop::Launcher::open succeeded"      "grep -q \"LAUNCHER-OPEN: opened 'LibWM Launch Test' (/bin/libwm-test-window)\" '$RUNTIME/launcher.log'"
+check "portal: AppFile::spawn_with_escalation worked"  "grep -q \"APPFILE-LAUNCH: spawned 'LibWM Launch Test' (/bin/libwm-test-window)\" '$RUNTIME/appfile.log'"
 
 if [[ $failures -ne 0 ]]; then
     KEEP=1

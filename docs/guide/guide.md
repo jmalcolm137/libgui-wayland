@@ -66,7 +66,7 @@ The SerenityOS heritage explains a few API names and a handful of internal inter
 | **LibMain** | The entry point that calls `serenity_main` | SerenityOS userland |
 | **Wayland support** | Presents LibGUI windows as Wayland surfaces and maps input back to widgets | This project; linked into your process |
 
-The applications in the SerenityOS tree — Calculator, TextEditor, PixelPaint, PDFViewer, and many others — are ordinary clients of these libraries. Some of them run on Linux through this stack without source changes.
+The applications in the SerenityOS tree — Calculator, TextEditor, PixelPaint, PDFViewer, and many others — are ordinary clients of these libraries. Some of them run on Linux through this stack without source changes. They are built and shipped by the desktop that owns them, not by this framework: this repository builds the libraries, the Wayland support and its own test programs.
 
 ## 1.2 How a window reaches the screen
 
@@ -159,7 +159,7 @@ scripts/fetch-serenity.sh      # pinned, blobless, sparse SerenityOS checkout
 scripts/build-libgui.sh        # patches + LibGfx/LibGUI + Wayland support + tests
 ```
 
-`fetch-serenity.sh` downloads the pinned SerenityOS revision into `serenity/`. It is a sparse checkout, so it does not pull the kernel or the full toolchain. `build-libgui.sh` applies the small host-build patches in `patches/`, configures Lagom (SerenityOS's host build), and builds the libraries, the Wayland support library, the test applications, and the integration tests.
+`fetch-serenity.sh` downloads the pinned SerenityOS revision into `serenity/`. It is a sparse checkout, so it does not pull the kernel or the full toolchain. `build-libgui.sh` applies the small host-build patches in `patches/`, configures Lagom (SerenityOS's host build), and builds the libraries, the Wayland support library, its test programs, and the integration tests.
 
 When it finishes, the important paths are:
 
@@ -168,16 +168,20 @@ build/lagom/lib/liblagom-gui.so       LibGUI
 build/lagom/lib/liblagom-gfx.so       LibGfx
 build/lagom/lib/liblagom-ak.so        AK
 build/lagom/lib/libwm.so             Wayland support (in-process)
-build/lagom/bin/Calculator            an unmodified SerenityOS application
+build/lagom/bin/libwm-test-window     a framework test window (exercises input and menus)
 build/lagom/bin/GMLCompiler           the GML-to-C++ compiler
 ```
 
-You can smoke-test the stack with the unmodified Calculator:
+You can smoke-test the stack with the framework's test window:
 
 ```bash
 export SERENITY_RES_ROOT="$PWD/serenity/Base/res"
-build/lagom/bin/Calculator
+build/lagom/bin/libwm-test-window
 ```
+
+The unmodified SerenityOS applications (Calculator, PDFViewer, …) are built by
+the desktop that ships them — for SerenityDE, `scripts/build-apps.sh` in that
+repository — and link the same framework. Build them there rather than here.
 
 The binary has an rpath that points at `build/lagom/lib`, so it runs from the build tree without `LD_LIBRARY_PATH`. `SERENITY_RES_ROOT` tells the toolkit where the SerenityOS themes, fonts, and icons live. If you move the build tree, set it to the matching `Base/res` directory.
 

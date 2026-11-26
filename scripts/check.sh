@@ -5,7 +5,7 @@
 #   scripts/check.sh -L integration  only suites with that label
 #   scripts/check.sh -R menu         only suites whose name matches
 #
-# Extra arguments are passed to ctest. Labels: integration, apps, gl, tools,
+# Extra arguments are passed to ctest. Labels: integration, gl, tools,
 # upstream (see src/test/CMakeLists.txt). The default excludes nothing; CI runs
 # the same command.
 set -euo pipefail

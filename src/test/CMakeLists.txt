@@ -11,6 +11,12 @@
 # The tests include LibWM's private headers, some of which use the generated stubs.
 set(LIBWM_TEST_INCLUDES "${CMAKE_CURRENT_SOURCE_DIR}/.." "${LIBWM_STUB_DIR}")
 
+# The menu suite's menubar target (Calculator moved to the desktop).
+libwm_gui_executable(libwm-menu-test
+    SOURCES MenuTest.cpp
+    INCLUDES ${LIBWM_TEST_INCLUDES}
+    LIBS LibMain LibGUI LibGfx LibCore LibIPC)
+
 # A minimal unmodified-style LibGUI application used to exercise the shim.
 libwm_gui_executable(libwm-test-window
     SOURCES TestWindow.cpp
@@ -49,7 +55,8 @@ libwm_gui_executable(libwm-appfile-test
 
 # Client-side GL through LibWM: LibGL renders a solid colour (EGLGPU or
 # LibSoftGPU, forced by the suite), LibGUI paints the bitmap, LibWM presents it.
-# This is what gives CI GL coverage without the desktop's 3DFileViewer.
+# This is the framework's own client-side GL coverage; the desktop builds and
+# tests the GL applications (3DFileViewer, Tubes) itself.
 libwm_gui_executable(libwm-gl-test
     SOURCES GlTest.cpp
     INCLUDES ${LIBWM_TEST_INCLUDES}
@@ -62,6 +69,20 @@ libwm_gui_executable(libwm-wm-requests-test
     SOURCES WmRequestsTest.cpp
     INCLUDES ${LIBWM_TEST_INCLUDES}
     LIBS LibMain LibGUI LibGfx LibCore LibIPC)
+
+# PDF rendering through LibWM (the PDFViewer application lives in the desktop):
+# opens a PDF through the FileSystemAccess portal and renders it with LibPDF.
+libwm_gui_executable(libwm-pdf-test
+    SOURCES PdfTest.cpp
+    INCLUDES ${LIBWM_TEST_INCLUDES}
+    LIBS LibMain LibGUI LibGfx LibCore LibIPC LibPDF LibFileSystemAccessClient)
+
+# Animated client-side 3D GL (3DFileViewer lives in the desktop): LibGL renders
+# frames into an offscreen bitmap, LibGUI paints it, LibWM presents it.
+libwm_gui_executable(libwm-3d-test
+    SOURCES ThreeDTest.cpp
+    INCLUDES ${LIBWM_TEST_INCLUDES}
+    LIBS LibMain LibGUI LibGfx LibCore LibIPC LibGL LibGPU)
 
 # Global mouse tracking: a GUI::MouseTracker subclass must receive the pointer
 # position outside the window too (ext-input-observation-v1).
@@ -125,15 +146,12 @@ libwm_add_script_test(mouse-tracking run-mouse-tracking-test.sh "integration")
 libwm_add_script_test(window-and-portal run-window-and-portal-tests.sh "integration")
 libwm_add_script_test(clipboard run-clipboard-test.sh "integration")
 libwm_add_script_test(menu run-menu-test.sh "integration")
-libwm_add_script_test(pdfviewer run-pdfviewer-test.sh "integration;apps")
+libwm_add_script_test(pdf run-pdf-test.sh "integration")
 libwm_add_script_test(gl run-gl-test.sh "integration;gl")
 libwm_add_script_test(settings-portal run-settings-portal-test.sh "integration")
 # No libsystemd in the build: the portal bridge is not compiled in.
 set_tests_properties(libwm.settings-portal PROPERTIES SKIP_RETURN_CODE 77)
-libwm_add_script_test(3dfileviewer run-3dfileviewer-test.sh "integration;apps;gl")
-# 3DFileViewer comes from a desktop's application set; without it the suite
-# exits 77 and is reported as skipped.
-set_tests_properties(libwm.3dfileviewer PROPERTIES SKIP_RETURN_CODE 77)
+libwm_add_script_test(3d run-3d-test.sh "integration;gl")
 libwm_add_script_test(triage test-triage-failure.sh "tools")
 libwm_add_script_test(patches check-patches.sh "tools")
 libwm_add_script_test(upstream-libgfx run-lib-tests.sh "upstream")
