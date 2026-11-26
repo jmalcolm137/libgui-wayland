@@ -1,0 +1,15 @@
+diff --git a/Userland/Libraries/LibGUI/Dialog.cpp b/Userland/Libraries/LibGUI/Dialog.cpp
+--- a/Userland/Libraries/LibGUI/Dialog.cpp
++++ b/Userland/Libraries/LibGUI/Dialog.cpp
+@@ -40,6 +40,11 @@ Dialog::ExecResult Dialog::exec()
+     }
+ 
+     show();
++    // The compositor does not reliably stack a new dialog above the window it
++    // was opened from (a click can re-raise the parent afterwards), which
++    // leaves the dialog hidden behind it. Keep dialogs above normal windows
++    // while they are open.
++    set_always_on_top(true);
+     auto result = m_event_loop->exec();
+     m_event_loop = nullptr;
+     dbgln("{}: Event loop returned with result {}", *this, result);
