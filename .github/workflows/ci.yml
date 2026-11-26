@@ -68,7 +68,7 @@ jobs:
             done < <(grep -E 'FAIL$|\*\*\*Failed|^zoom: |^scroll: ' check.log | tail -8)
             while IFS= read -r line; do
               echo "::notice::${line}"
-            done < <(grep -E 'axis delta' check.log | tail -6)
+            done < <(grep -E 'axis delta|wheel on window|no window under the pointer' check.log | tail -6)
             {
               echo "## LibWM checks failed (ctest exit $status)"
               echo

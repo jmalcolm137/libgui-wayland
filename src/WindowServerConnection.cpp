@@ -189,6 +189,7 @@ void WindowServerConnection::install_input_callbacks()
         metadata.last_position = position;
     });
     callbacks.mouse_wheel = on_server_thread([this](i32 window_id, Gfx::IntPoint position, u32 buttons, u32 modifiers, i32 wheel_delta_x, i32 wheel_delta_y) {
+        trace("LibWM: wheel to window {} at {},{} delta {}x{}", window_id, position.x(), position.y(), wheel_delta_x, wheel_delta_y);
         async_mouse_wheel(window_id, position, 0, buttons, modifiers, wheel_delta_x, wheel_delta_y, wheel_delta_x, wheel_delta_y);
     });
     callbacks.key = on_server_thread([this](i32 window_id, u32 code_point, u32 key, u8 map_entry_index, u32 modifiers, u32 scancode, bool is_press) {

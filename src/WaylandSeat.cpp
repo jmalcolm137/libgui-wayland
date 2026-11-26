@@ -855,8 +855,10 @@ void WaylandSeat::on_pointer_axis(i32 x, i32 y)
             m_client.m_input.popup_wheel(m_state.pointer_popup, y);
         return;
     }
-    if (m_state.pointer_window < 0)
+    if (m_state.pointer_window < 0) {
+        trace("LibWM/Wayland: wheel with no window under the pointer");
         return;
+    }
     auto* window_surface = m_client.find(m_state.pointer_window);
     if (window_surface && window_surface->menubar_surface) {
         if (m_state.pointer_surface == window_surface->menubar_surface)
@@ -866,6 +868,8 @@ void WaylandSeat::on_pointer_axis(i32 x, i32 y)
         return;
     }
     int inset = window_surface ? window_surface->total_top_inset() : 0;
+    trace("LibWM/Wayland: wheel on window {} at {},{} delta {}x{}", m_state.pointer_window,
+        m_state.pointer_position.x(), m_state.pointer_position.y() - inset, x, y);
     if (m_client.m_input.mouse_wheel)
         m_client.m_input.mouse_wheel(m_state.pointer_window, m_state.pointer_position.translated(0, -inset), m_state.pointer_buttons, current_modifiers(), x, y);
 }
