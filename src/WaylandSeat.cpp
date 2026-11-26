@@ -468,13 +468,6 @@ void WaylandSeat::forget_popup(i32 popup_id)
         m_state.pointer_popup = -1;
 }
 
-bool WaylandSeat::client_side_repeat(StringView host_setting)
-{
-    // A compositor that repeats a held key itself says so; everything else
-    // follows the protocol and leaves repeat to the client.
-    return host_setting != "compositor"sv;
-}
-
 void WaylandSeat::on_keyboard_repeat_info(i32 rate, i32 delay)
 {
     MutexLocker locker(m_client.m_mutex);
@@ -494,13 +487,9 @@ void WaylandSeat::start_key_repeat(u32 key)
         stop_key_repeat();
         return;
     }
-    if (!client_side_repeat(m_client.m_serenity_shell->host_setting("keyboard.repeat"sv, "client"sv)))
-        return;
-
-    // A press for the key already repeating is another source's repeat (this
-    // client generates one stream; the compositor may generate another). Do not
-    // restart our delay on it, or a compositor that repeats server-side without
-    // declaring it would silently suppress ours instead of doubling.
+    // A press for the key already repeating is another source's repeat: this
+    // client generates one stream, and a rogue compositor may generate another.
+    // Do not restart our delay on it.
     if (m_state.repeating_key == key && m_state.repeat_timer_running)
         return;
 

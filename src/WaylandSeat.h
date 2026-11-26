@@ -73,13 +73,6 @@ public:
     i32 pointer_window() const;
     u32 pointer_buttons() const;
     u32 current_modifiers() const;
-    // Whether LibWM must generate key repeat itself, given the desktop's
-    // `keyboard.repeat` host setting. Wayland leaves repeat to the client
-    // (wl_keyboard.repeat_info advertises the rate); a compositor that repeats
-    // server-side -- SerenityDE does -- declares "compositor" so clients stand
-    // down, or the key would repeat twice as fast.
-    static bool client_side_repeat(StringView host_setting);
-
     // Show the cursor `window_surface` asks for, if the pointer is over it.
     void apply_window_cursor(WaylandClient::WindowSurface const&);
     // Decode the cursors a window is likely to ask for, so the first move onto

@@ -8,6 +8,7 @@
 #include "Environment.h"
 #include "WaylandClient.h"
 #include "WaylandSeat.h"
+#include "primary-selection-unstable-v1-client-protocol.h"
 #include <AK/ByteBuffer.h>
 #include <AK/Time.h>
 #include <errno.h>
@@ -26,6 +27,8 @@ using MutexLocker = WaylandClient::MutexLocker;
 static constexpr int clipboard_idle_timeout_ms = 2000;
 static constexpr int drag_idle_timeout_ms = 1000;
 static constexpr int drag_total_deadline_ms = 1000;
+
+static ErrorOr<ByteBuffer> read_pipe_until_closed(int fd, int idle_timeout_ms, Optional<int> total_deadline_ms = {});
 
 // --- wl_data_device / wl_data_offer / wl_data_source -------------------------
 
@@ -158,6 +161,260 @@ void WaylandDataDevice::on_drag_source_action(u32 action)
     m_state.drag_action = action;
 }
 
+// --- zwp_primary_selection_v1 ------------------------------------------------
+
+static void primary_offer_offer(void* data, zwp_primary_selection_offer_v1* offer, char const* mime_type)
+{
+    static_cast<WaylandDataDevice*>(data)->on_primary_offer_mime(offer, mime_type);
+}
+
+static zwp_primary_selection_offer_v1_listener const s_primary_offer_listener = {
+    .offer = primary_offer_offer,
+};
+
+static void primary_device_data_offer(void* data, zwp_primary_selection_device_v1*, zwp_primary_selection_offer_v1* offer)
+{
+    static_cast<WaylandDataDevice*>(data)->on_primary_offer(offer);
+}
+
+static void primary_device_selection(void* data, zwp_primary_selection_device_v1*, zwp_primary_selection_offer_v1* offer)
+{
+    static_cast<WaylandDataDevice*>(data)->on_primary_selection(offer);
+}
+
+static zwp_primary_selection_device_v1_listener const s_primary_device_listener = {
+    .data_offer = primary_device_data_offer,
+    .selection = primary_device_selection,
+};
+
+static void primary_source_send(void* data, zwp_primary_selection_source_v1* source, char const* mime_type, int32_t fd)
+{
+    static_cast<WaylandDataDevice*>(data)->on_primary_source_send(source, mime_type, fd);
+}
+
+static void primary_source_cancelled(void* data, zwp_primary_selection_source_v1* source)
+{
+    static_cast<WaylandDataDevice*>(data)->on_primary_source_cancelled(source);
+}
+
+static zwp_primary_selection_source_v1_listener const s_primary_source_listener = {
+    .send = primary_source_send,
+    .cancelled = primary_source_cancelled,
+};
+
+void WaylandDataDevice::bind_primary(zwp_primary_selection_device_manager_v1* manager)
+{
+    MutexLocker locker(m_client.m_mutex);
+    m_state.primary_manager = manager;
+    maybe_create_primary_device();
+}
+
+void WaylandDataDevice::maybe_create_primary_device()
+{
+    MutexLocker locker(m_client.m_mutex);
+    if (m_state.primary_device || !m_state.primary_manager)
+        return;
+    auto* seat = m_client.m_seat->wayland_seat();
+    if (!seat)
+        return;
+    m_state.primary_device = zwp_primary_selection_device_manager_v1_get_device(m_state.primary_manager, seat);
+    if (m_state.primary_device)
+        zwp_primary_selection_device_v1_add_listener(m_state.primary_device, &s_primary_device_listener, this);
+}
+
+bool WaylandDataDevice::owns_primary() const
+{
+    MutexLocker locker(m_client.m_mutex);
+    return m_state.primary_source && !m_state.primary_offers.is_empty();
+}
+
+Vector<ByteString> WaylandDataDevice::primary_mime_types() const
+{
+    MutexLocker locker(m_client.m_mutex);
+    if (m_state.primary_source && !m_state.primary_offers.is_empty()) {
+        Vector<ByteString> mimes;
+        mimes.ensure_capacity(m_state.primary_offers.size());
+        for (auto const& it : m_state.primary_offers)
+            mimes.append(ByteString { it.key.view() });
+        return mimes;
+    }
+    if (!m_state.primary_offer)
+        return {};
+    if (auto it = m_state.primary_offer_mime_types.find(reinterpret_cast<u64>(m_state.primary_offer)); it != m_state.primary_offer_mime_types.end()) {
+        Vector<ByteString> mimes;
+        mimes.ensure_capacity(it->value.size());
+        for (auto const& mime : it->value)
+            mimes.append(ByteString { mime.view() });
+        return mimes;
+    }
+    return {};
+}
+
+void WaylandDataDevice::on_primary_offer(zwp_primary_selection_offer_v1* offer)
+{
+    MutexLocker locker(m_client.m_mutex);
+    m_state.primary_pending_offers.append(offer);
+    m_state.primary_offer_mime_types.set(reinterpret_cast<u64>(offer), {});
+    zwp_primary_selection_offer_v1_add_listener(offer, &s_primary_offer_listener, this);
+}
+
+void WaylandDataDevice::on_primary_offer_mime(zwp_primary_selection_offer_v1* offer, char const* mime_type)
+{
+    MutexLocker locker(m_client.m_mutex);
+    auto it = m_state.primary_offer_mime_types.find(reinterpret_cast<u64>(offer));
+    if (it != m_state.primary_offer_mime_types.end())
+        it->value.append(ByteString(mime_type));
+}
+
+void WaylandDataDevice::on_primary_selection(zwp_primary_selection_offer_v1* offer)
+{
+    MutexLocker locker(m_client.m_mutex);
+    for (auto* pending : m_state.primary_pending_offers) {
+        if (pending == offer)
+            continue;
+        m_state.primary_offer_mime_types.remove(reinterpret_cast<u64>(pending));
+        zwp_primary_selection_offer_v1_destroy(pending);
+    }
+    m_state.primary_pending_offers.clear();
+    if (offer)
+        m_state.primary_pending_offers.append(offer);
+    m_state.primary_offer = offer;
+    trace("LibWM/Wayland: primary selection changed ({} type(s))", offer ? primary_mime_types().size() : 0);
+}
+
+void WaylandDataDevice::forget_primary_offer(zwp_primary_selection_offer_v1* offer)
+{
+    m_state.primary_offer_mime_types.remove(reinterpret_cast<u64>(offer));
+    if (m_state.primary_offer == offer)
+        m_state.primary_offer = nullptr;
+    for (size_t i = m_state.primary_pending_offers.size(); i > 0; --i) {
+        if (m_state.primary_pending_offers[i - 1] == offer)
+            m_state.primary_pending_offers.remove(i - 1);
+    }
+}
+
+ByteBuffer WaylandDataDevice::receive_primary_offer_data(zwp_primary_selection_offer_v1* offer, ByteString const& mime)
+{
+    if (!offer)
+        return {};
+    int fds[2] = { -1, -1 };
+    if (pipe(fds) != 0)
+        return {};
+    {
+        MutexLocker locker(m_client.m_mutex);
+        zwp_primary_selection_offer_v1_receive(offer, mime.characters(), fds[1]);
+        close(fds[1]);
+        wl_display_flush(m_client.m_display);
+    }
+    auto data = read_pipe_until_closed(fds[0], clipboard_idle_timeout_ms);
+    close(fds[0]);
+    if (data.is_error()) {
+        trace("LibWM/Wayland: primary data for '{}' not received: {}", mime, data.error());
+        return {};
+    }
+    return data.release_value();
+}
+
+ErrorOr<ByteBuffer> WaylandDataDevice::read_primary_for_mime(ByteString const& wanted_mime, ByteString& out_mime_type)
+{
+    out_mime_type = {};
+    if (wanted_mime.is_empty())
+        return Error::from_string_literal("LibWM: no MIME type requested");
+
+    zwp_primary_selection_offer_v1* offer = nullptr;
+    {
+        MutexLocker locker(m_client.m_mutex);
+        if (m_state.primary_source && !m_state.primary_offers.is_empty()) {
+            if (auto it = m_state.primary_offers.find(wanted_mime); it != m_state.primary_offers.end()) {
+                out_mime_type = it->key;
+                return ByteBuffer::copy(it->value);
+            }
+            if (wanted_mime == "text/plain"sv || wanted_mime.starts_with("text/plain;"sv)) {
+                for (auto const& alias : { "text/plain"sv, "text/plain;charset=utf-8"sv, "UTF8_STRING"sv, "STRING"sv }) {
+                    if (auto it = m_state.primary_offers.find(ByteString(alias)); it != m_state.primary_offers.end()) {
+                        out_mime_type = ByteString("text/plain");
+                        return ByteBuffer::copy(it->value);
+                    }
+                }
+            }
+            return Error::from_string_literal("LibWM: primary selection does not offer the requested MIME type");
+        }
+        if (!m_state.primary_offer || !m_client.m_display)
+            return Error::from_string_literal("LibWM: no primary selection");
+        offer = m_state.primary_offer;
+    }
+
+    // Read outside the lock, as for the clipboard.
+    auto data = receive_primary_offer_data(offer, wanted_mime);
+    auto mime = wanted_mime;
+    if (mime.starts_with("text/plain"sv))
+        mime = ByteString("text/plain");
+    out_mime_type = move(mime);
+    return data;
+}
+
+void WaylandDataDevice::write_primary_offers(HashMap<ByteString, ByteBuffer> const& offers)
+{
+    {
+        MutexLocker locker(m_client.m_mutex);
+        m_state.primary_offers.clear();
+        for (auto const& it : offers) {
+            if (auto copy = ByteBuffer::copy(it.value.bytes()); !copy.is_error())
+                m_state.primary_offers.set(it.key, copy.release_value());
+        }
+        if (!m_state.primary_device) {
+            // Without the protocol there is no PRIMARY to publish to; the clipboard
+            // still has it.
+            m_state.primary_offers.clear();
+            return;
+        }
+        if (m_state.primary_source) {
+            zwp_primary_selection_source_v1_destroy(m_state.primary_source);
+            m_state.primary_source = nullptr;
+        }
+        if (offers.is_empty()) {
+            zwp_primary_selection_device_v1_set_selection(m_state.primary_device, nullptr, m_client.m_seat->last_serial());
+            wl_display_flush(m_client.m_display);
+            return;
+        }
+        m_state.primary_source = zwp_primary_selection_device_manager_v1_create_source(m_state.primary_manager);
+        if (!m_state.primary_source) {
+            m_state.primary_offers.clear();
+            return;
+        }
+        zwp_primary_selection_source_v1_add_listener(m_state.primary_source, &s_primary_source_listener, this);
+        for (auto const& it : m_state.primary_offers)
+            zwp_primary_selection_source_v1_offer(m_state.primary_source, it.key.characters());
+        zwp_primary_selection_device_v1_set_selection(m_state.primary_device, m_state.primary_source, m_client.m_seat->last_serial());
+        wl_display_flush(m_client.m_display);
+    }
+    trace("LibWM/Wayland: set primary selection ({} representation(s))", offers.size());
+}
+
+void WaylandDataDevice::on_primary_source_send(zwp_primary_selection_source_v1*, char const* mime_type, int fd)
+{
+    MutexLocker locker(m_client.m_mutex);
+    if (auto it = m_state.primary_offers.find(ByteString(mime_type)); it != m_state.primary_offers.end()) {
+        size_t written = 0;
+        while (written < it->value.size()) {
+            ssize_t n = write(fd, it->value.data() + written, it->value.size() - written);
+            if (n <= 0)
+                break;
+            written += static_cast<size_t>(n);
+        }
+    }
+    close(fd);
+}
+
+void WaylandDataDevice::on_primary_source_cancelled(zwp_primary_selection_source_v1* source)
+{
+    MutexLocker locker(m_client.m_mutex);
+    if (source == m_state.primary_source)
+        m_state.primary_source = nullptr;
+    if (source)
+        zwp_primary_selection_source_v1_destroy(source);
+}
+
 void WaylandDataDevice::bind(wl_data_device_manager* manager)
 {
     MutexLocker locker(m_client.m_mutex);
@@ -174,6 +431,7 @@ void WaylandDataDevice::maybe_create_data_device()
     trace("LibWM/Wayland: data device created: {}", m_state.device != nullptr);
     if (m_state.device)
         wl_data_device_add_listener(m_state.device, &s_data_device_listener, this);
+    maybe_create_primary_device();
 }
 
 ByteString WaylandDataDevice::preferred_mime_for(wl_data_offer* offer) const
@@ -271,7 +529,7 @@ void WaylandDataDevice::on_source_cancelled(wl_data_source* source)
 // Read `fd` until the writer closes it. Fails with ETIMEDOUT if the writer is
 // silent for `idle_timeout_ms`, or (when given) the whole read exceeds
 // `total_deadline_ms`: a truncated offer is an error, not partial data.
-static ErrorOr<ByteBuffer> read_pipe_until_closed(int fd, int idle_timeout_ms, Optional<int> total_deadline_ms = {})
+static ErrorOr<ByteBuffer> read_pipe_until_closed(int fd, int idle_timeout_ms, Optional<int> total_deadline_ms)
 {
     ByteBuffer data;
     Optional<MonotonicTime> deadline;
@@ -681,6 +939,10 @@ void WaylandDataDevice::write_clipboard(HashMap<ByteString, ByteBuffer> offers)
     wl_data_device_set_selection(m_state.device, m_state.selection_source, m_client.m_seat->last_serial());
     wl_display_flush(m_client.m_display);
     trace("LibWM/Wayland: set clipboard ({} representation(s), serial {})", m_state.clipboard_offers.size(), m_client.m_seat->last_serial());
+
+    // SerenityOS has one clipboard; offer the same representations as PRIMARY so
+    // native toolkits can paste them with the middle button.
+    write_primary_offers(m_state.clipboard_offers);
 }
 
 }

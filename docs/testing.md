@@ -27,7 +27,7 @@ invoke ninja on the build tree, so CTest runs them one at a time.
 |---|---|---|---|
 | `libwm.headless` | `run-headless-tests.sh` | integration | presentation, input (pointer, wheel, XKB keys, double-click, held-key repeat), cursors, min size, alpha regions, opaque region, interactive resize (`xdg_toplevel.resize`, and the no-serial/none cases), outgoing and incoming drag-and-drop (including bad and stalled peers), long titles, IME, connection loss |
 | `libwm.window-and-portal` | `run-window-and-portal-tests.sh` | integration | `libwm-unit-test` (MenuController, clipboard image transcoding, Config persistence, thread safety, scale inference), fullscreen/maximize/resize, HiDPI at 1x and 2x, CSD, launching through `Desktop::AppFile`, the Calculator |
-| `libwm.clipboard` | `run-clipboard-test.sh` | integration | clipboard in both directions with a native peer: text aliases, HTML, URI lists, PNG ↔ Serenity images |
+| `libwm.clipboard` | `run-clipboard-test.sh` | integration | clipboard and primary selection in both directions with a native peer: text aliases, HTML, URI lists, PNG ↔ Serenity images |
 | `libwm.menu` | `run-menu-test.sh` | integration | menubar, popups, submenus, keyboard navigation, item activation, the About dialog; menubar pixels at 1x, 2x and after a resize |
 | `libwm.pdfviewer` | `run-pdfviewer-test.sh` | integration, apps | the unmodified PDFViewer: rendering, toolbar, Config and FileSystemAccess portals, opening a file, and zooming and wheel scrolling (measured from window dumps: the page grows, then moves) |
 | `libwm.3dfileviewer` | `run-3dfileviewer-test.sh` | integration, apps, gl | LibGL through EGLGPU/LibSoftGPU; **skipped** (exit 77) when the build has no `3DFileViewer` target, which only a desktop's app set adds |

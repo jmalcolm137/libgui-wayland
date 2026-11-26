@@ -80,6 +80,8 @@ libwm_wayland_protocol(LibWM fractional-scale-v1 "${WAYLAND_PROTOCOLS_DIR}/stagi
 libwm_wayland_protocol(LibWM text-input-unstable-v3 "${WAYLAND_PROTOCOLS_DIR}/unstable/text-input/text-input-unstable-v3.xml")
 libwm_wayland_protocol(LibWM xdg-decoration "${WAYLAND_PROTOCOLS_DIR}/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml")
 libwm_wayland_protocol(LibWM xdg-output "${WAYLAND_PROTOCOLS_DIR}/unstable/xdg-output/xdg-output-unstable-v1.xml")
+# zwp_primary_selection_v1: the middle-click selection shared with other toolkits.
+libwm_wayland_protocol(LibWM primary-selection-unstable-v1 "${WAYLAND_PROTOCOLS_DIR}/unstable/primary-selection/primary-selection-unstable-v1.xml")
 # wlr-layer-shell: the Serenity Taskbar/Desktop/applets map to layer surfaces.
 libwm_wayland_protocol(LibWM wlr-layer-shell-unstable-v1 "${CMAKE_CURRENT_SOURCE_DIR}/protocol/wlr-layer-shell-unstable-v1.xml")
 # serenity-window: compositor <-> shim chrome control (menubar, window menu,

@@ -96,10 +96,23 @@ Vector<GUI::ClipboardEntry> ClipboardServerConnection::current_entries() const
     if (client.data_device().owns_clipboard() && !m_entries.is_empty())
         return m_entries;
 
+    // SerenityOS has one clipboard, native toolkits two selections. Prefer
+    // CLIPBOARD; when nobody owns it, use PRIMARY, so a Ctrl+V in a Serenity
+    // application can paste what was just selected (middle-clicked) in a native
+    // one. LibWM publishes the same representations as both, so the reverse
+    // direction (Serenity copy -> native middle-click paste) needs no fallback.
     auto mimes = client.data_device().clipboard_mime_types();
+    bool const from_primary = mimes.is_empty();
+    if (from_primary)
+        mimes = client.data_device().primary_mime_types();
     Vector<GUI::ClipboardEntry> entries;
     if (mimes.is_empty())
         return entries;
+
+    auto read = [&](ByteString const& mime, ByteString& actual_mime) {
+        return from_primary ? client.data_device().read_primary_for_mime(mime, actual_mime)
+                            : client.data_device().read_clipboard_for_mime(mime, actual_mime);
+    };
 
     auto find = [&](auto predicate) -> Optional<ByteString> {
         for (auto const& mime : mimes) {
@@ -111,7 +124,7 @@ Vector<GUI::ClipboardEntry> ClipboardServerConnection::current_entries() const
 
     auto fetch = [&](ByteString const& mime, ByteString canonical_mime) {
         ByteString actual_mime;
-        auto data = client.data_device().read_clipboard_for_mime(mime, actual_mime);
+        auto data = read(mime, actual_mime);
         if (data.is_error())
             return;
         entries.append({ data.release_value(), move(canonical_mime), {} });
@@ -128,7 +141,7 @@ Vector<GUI::ClipboardEntry> ClipboardServerConnection::current_entries() const
     // metadata, so decoding the PNG is the only way to restore it.
     if (auto mime = find([](auto const& candidate) { return candidate == "image/png"sv; }); mime.has_value()) {
         ByteString actual_mime;
-        auto png = client.data_device().read_clipboard_for_mime(*mime, actual_mime);
+        auto png = read(*mime, actual_mime);
         if (!png.is_error()) {
             HashMap<ByteString, ByteString> metadata;
             auto raw = png_to_serenity_image(png.value().bytes(), metadata);

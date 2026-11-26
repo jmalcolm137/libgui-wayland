@@ -169,8 +169,6 @@ void SerenityShell::on_host_settings(StringView blob)
         m_host_settings.set(line.substring_view(0, *separator).to_byte_string(), line.substring_view(*separator + 1).to_byte_string());
     }
     trace("LibWM: host settings: {} entries", m_host_settings.size());
-    if (auto it = m_host_settings.find(ByteString { "keyboard.repeat" }); it != m_host_settings.end())
-        trace("LibWM: keyboard repeat is the {}'s", it->value);
     if (m_host_settings_changed)
         m_host_settings_changed();
 }

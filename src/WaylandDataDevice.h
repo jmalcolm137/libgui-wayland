@@ -24,6 +24,10 @@ struct wl_data_device_manager;
 struct wl_data_offer;
 struct wl_data_source;
 struct wl_surface;
+struct zwp_primary_selection_device_manager_v1;
+struct zwp_primary_selection_device_v1;
+struct zwp_primary_selection_offer_v1;
+struct zwp_primary_selection_source_v1;
 
 namespace LibWM {
 
@@ -51,6 +55,15 @@ public:
     // Whether this client currently owns the selection.
     bool owns_clipboard() const;
 
+    // --- primary selection (zwp_primary_selection_v1) ---
+    // The selection native toolkits paste with the middle button. SerenityOS has
+    // only one clipboard, so LibWM offers the same representations as both
+    // CLIPBOARD and PRIMARY, and lets the clipboard portal fall back to PRIMARY
+    // when another toolkit owns the selection.
+    Vector<ByteString> primary_mime_types() const;
+    ErrorOr<ByteBuffer> read_primary_for_mime(ByteString const& wanted_mime, ByteString& out_mime_type);
+    bool owns_primary() const;
+
     // --- drag and drop ---
     // The source starts a drag from the window under the pointer; the target
     // receives enter/motion/drop with the mime data.
@@ -59,6 +72,7 @@ public:
 
     // --- registry and protocol events ---
     void bind(wl_data_device_manager*);
+    void bind_primary(zwp_primary_selection_device_manager_v1*);
     // Creates the device once both the manager and a seat exist.
     void maybe_create_data_device();
     void on_data_offer(wl_data_offer*);
@@ -74,6 +88,11 @@ public:
     void on_drag_source_drop_performed();
     void on_drag_source_finished();
     void on_drag_source_action(u32 action);
+    void on_primary_offer(zwp_primary_selection_offer_v1*);
+    void on_primary_offer_mime(zwp_primary_selection_offer_v1*, char const* mime_type);
+    void on_primary_selection(zwp_primary_selection_offer_v1*);
+    void on_primary_source_send(zwp_primary_selection_source_v1*, char const* mime_type, int fd);
+    void on_primary_source_cancelled(zwp_primary_selection_source_v1*);
 
 private:
     ByteString preferred_mime_for(wl_data_offer*) const;
@@ -82,6 +101,10 @@ private:
     // Drop an offer we are about to destroy from the selection state (the drag
     // and the selection share the pending-offer list).
     void forget_offer(wl_data_offer*);
+    void maybe_create_primary_device();
+    void write_primary_offers(HashMap<ByteString, ByteBuffer> const&);
+    ByteBuffer receive_primary_offer_data(zwp_primary_selection_offer_v1*, ByteString const& mime);
+    void forget_primary_offer(zwp_primary_selection_offer_v1*);
 
     struct State {
         wl_data_device_manager* manager { nullptr };
@@ -107,6 +130,15 @@ private:
         bool drag_dropped { false };
         ByteString drag_mime;
         HashMap<String, ByteBuffer> drag_received;
+        // Primary selection (zwp_primary_selection_v1). The offers we publish are
+        // a copy of clipboard_offers: SerenityOS has one clipboard.
+        zwp_primary_selection_device_manager_v1* primary_manager { nullptr };
+        zwp_primary_selection_device_v1* primary_device { nullptr };
+        zwp_primary_selection_offer_v1* primary_offer { nullptr };
+        Vector<zwp_primary_selection_offer_v1*> primary_pending_offers;
+        HashMap<u64, Vector<ByteString>> primary_offer_mime_types;
+        zwp_primary_selection_source_v1* primary_source { nullptr };
+        HashMap<ByteString, ByteBuffer> primary_offers;
     };
 
     WaylandClient& m_client;

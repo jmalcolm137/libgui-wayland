@@ -8,6 +8,8 @@
 #include <AK/StringView.h>
 #include <LibCore/Timer.h>
 #include <LibGUI/Application.h>
+#include <LibGUI/Widget.h>
+#include <LibGUI/Window.h>
 #include <LibGUI/Clipboard.h>
 #include <LibGfx/Bitmap.h>
 #include <LibGfx/Color.h>
@@ -42,6 +44,27 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     }
 
     StringView mode = arguments.strings.size() > 1 ? arguments.strings[1] : ""sv;
+
+    // "windowed" publishes after the window has been mapped and focused: a
+    // compliant compositor only accepts a selection with a serial from a recent
+    // input event, and this application has no other surface to receive one on.
+    if (mode == "windowed"sv) {
+        auto window = GUI::Window::construct();
+        window->set_title("LibWM Clipboard Test");
+        window->set_rect(100, 100, 200, 120);
+        auto widget = window->set_main_widget<GUI::Widget>();
+        widget->set_fill_with_background_color(true);
+        window->show();
+        auto publish = Core::Timer::create_single_shot(900, [&] {
+            GUI::Clipboard::the().set_plain_text("libwm-clipboard-hello"sv);
+            dbgln("CLIPBOARD-TEST: wrote text");
+        });
+        publish->start();
+        auto quit = Core::Timer::create_single_shot(5000, [&] { app->quit(0); });
+        quit->start();
+        return app->exec();
+    }
+
     if (mode == "image"sv) {
         auto bitmap = TRY(Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, { 3, 3 }));
         for (int y = 0; y < 3; ++y)

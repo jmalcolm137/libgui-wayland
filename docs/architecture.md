@@ -144,8 +144,7 @@ axis deltas (accumulated into whole steps), XKB key codes, code points
 modifiers are translated. Double-clicks are synthesised in
 `WindowServerConnection`. `zwp_text_input_v3` relays preedit and commit text to
 the application. Held keys repeat: Wayland leaves repeat to the client, so LibWM arms a timer
-from `wl_keyboard.repeat_info` (delay, then 1/rate) and re-sends the press, unless the desktop
-declares that its compositor repeats (`keyboard.repeat=compositor` in the host settings).
+from `wl_keyboard.repeat_info` (delay, then 1/rate) and re-sends the press.
 Cursors are the bundled SerenityOS cursor theme (decoded once and cached) or a custom bitmap,
 set with `wl_pointer.set_cursor`.
 
@@ -163,7 +162,11 @@ grab for toplevel parents, and overlay layer surfaces for layer-surface parents
 `ClipboardServerConnection` bridges Serenity's multi-representation clipboard to
 `wl_data_device` offers: text under its usual aliases, HTML, URI lists, and images
 as `image/png` (transcoded from Serenity's raw format, which is also offered
-for lossless LibWM-to-LibWM copies). Drag-and-drop works in both directions; the
+for lossless LibWM-to-LibWM copies). SerenityOS has one clipboard and native
+toolkits two selections, so the same representations are also published as the
+**primary selection** (`zwp_primary_selection_v1`), and reads fall back to PRIMARY
+when nothing owns CLIPBOARD: a copy in either world can be pasted in the other
+(middle-click into a native application, Ctrl+V in a Serenity one). Drag-and-drop works in both directions; the
 drop target's widget decides acceptance. Offers from other clients are read with
 timeouts, so a stuck source cannot freeze the application.
 

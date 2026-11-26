@@ -21,7 +21,9 @@ APP="$BUILD_DIR/bin/libwm-clipboard-test"
 if [[ ! -x "$HC" ]]; then
     "$PROJECT_ROOT/scripts/build-headless-compositor.sh"
 fi
-cc -O2 -Wall -o "$PEER_BIN" "$PROJECT_ROOT/tools/wl-clipboard-peer.c" $(pkg-config --cflags --libs wayland-client)
+# shellcheck source=lib/build-peer.sh
+source "$PROJECT_ROOT/scripts/lib/build-peer.sh"
+build_wl_clipboard_peer "$PEER_BIN"
 ninja -C "$BUILD_DIR" libwm-clipboard-test >/dev/null
 
 RUNTIME="$(mktemp -d "${TMPDIR:-/tmp}/libwm-clip.XXXXXX")"
@@ -80,6 +82,32 @@ run_scenario() {
     kill "$PEER_PID" 2>/dev/null || true
     wait "$PEER_PID" 2>/dev/null || true
 }
+
+# --- primary selection (zwp_primary_selection_v1) ---------------------------
+# SerenityOS has one clipboard, so LibWM publishes it as PRIMARY too and the
+# clipboard portal falls back to PRIMARY when nothing owns CLIPBOARD. Both
+# directions are checked against the same native peer.
+
+# A native toolkit selects text (PRIMARY only, no CLIPBOARD owner): the app's
+# first read must fall back to it.
+WAYLAND_DISPLAY=clip-test "$PEER_BIN" --primary set "peer-primary-payload" > "$RUNTIME/peer-primary-in.log" 2>&1 &
+PEER_PID=$!
+for _ in $(seq 1 50); do grep -q "serving primary selection" "$RUNTIME/peer-primary-in.log" 2>/dev/null && break; sleep 0.1; done
+WAYLAND_DISPLAY=clip-test SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
+    LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    "$APP" > "$RUNTIME/app-primary-in.log" 2>&1 &
+APP_PID=$!
+for _ in $(seq 1 50); do grep -q "wrote text" "$RUNTIME/app-primary-in.log" 2>/dev/null && break; sleep 0.1; done
+sleep 0.3
+# Then the app copies its own text: it must also be readable as PRIMARY.
+WAYLAND_DISPLAY=clip-test timeout 5 "$PEER_BIN" --primary get text/plain > "$RUNTIME/get-primary.out" 2>&1 || true
+wait "$APP_PID" 2>/dev/null || true
+kill "$PEER_PID" 2>/dev/null || true
+wait "$PEER_PID" 2>/dev/null || true
+PEER_PID=""
+check_contains "primary: native selection pastes in the app" "content='peer-primary-payload'" "$RUNTIME/app-primary-in.log"
+check_contains "primary: the app's copy is offered as PRIMARY" "libwm-clipboard-hello" "$RUNTIME/get-primary.out"
+check_contains "primary: the app mirrored its copy"          "set primary selection" "$RUNTIME/app-primary-in.log"
 
 # --- text --------------------------------------------------------------------
 GET_MIME=""

@@ -213,16 +213,6 @@ void test_menu_controller()
     controller.close_open_menus();
 }
 
-void test_key_repeat_mode()
-{
-    // wl_keyboard leaves repeat to the client; a compositor that repeats
-    // server-side declares it, so the client must stand down.
-    using Seat = LibWM::WaylandSeat;
-    check(Seat::client_side_repeat(""sv), "repeat: no declaration -> client repeats"sv);
-    check(Seat::client_side_repeat("client"sv), "repeat: 'client' -> client repeats"sv);
-    check(!Seat::client_side_repeat("compositor"sv), "repeat: 'compositor' -> client stands down"sv);
-}
-
 void test_resize_direction_edges()
 {
     // Serenity ResizeDirection -> xdg_toplevel resize edges (top 1, bottom 2,
@@ -410,7 +400,6 @@ ErrorOr<int> serenity_main(Main::Arguments)
     test_config_server_portal();
     test_wayland_client_thread_safety();
     test_resize_direction_edges();
-    test_key_repeat_mode();
 
     outln("==> libwm-unit-test: {} passed, {} failed", s_passed, s_failed);
     return s_failed == 0 ? 0 : 1;

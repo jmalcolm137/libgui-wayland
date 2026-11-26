@@ -21,6 +21,7 @@
 #include <wayland-client.h>
 
 #include "fractional-scale-v1-client-protocol.h"
+#include "primary-selection-unstable-v1-client-protocol.h"
 #include "serenity-window-client-protocol.h"
 #include "text-input-unstable-v3-client-protocol.h"
 #include "viewporter-client-protocol.h"
@@ -54,6 +55,8 @@ static void registry_global(void* data, wl_registry* registry, uint32_t name, ch
         self.add_wm_base(reinterpret_cast<xdg_wm_base*>(wl_registry_bind(registry, name, &xdg_wm_base_interface, 1)));
     else if (!strcmp(interface, zxdg_decoration_manager_v1_interface.name))
         self.set_decoration_manager(reinterpret_cast<zxdg_decoration_manager_v1*>(wl_registry_bind(registry, name, &zxdg_decoration_manager_v1_interface, min(version, 1u))));
+    else if (!strcmp(interface, zwp_primary_selection_device_manager_v1_interface.name))
+        self.data_device().bind_primary(reinterpret_cast<zwp_primary_selection_device_manager_v1*>(wl_registry_bind(registry, name, &zwp_primary_selection_device_manager_v1_interface, 1)));
     else if (!strcmp(interface, wl_data_device_manager_interface.name)) {
         trace("LibWM/Wayland: found wl_data_device_manager v{}", version);
         self.data_device().bind(reinterpret_cast<wl_data_device_manager*>(wl_registry_bind(registry, name, &wl_data_device_manager_interface, min(version, 3u))));

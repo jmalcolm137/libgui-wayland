@@ -15,11 +15,22 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/mman.h>
 #include <wayland-client.h>
+
+#include "xdg-shell-client-protocol.h"
+#include "primary-selection-unstable-v1-client-protocol.h"
 
 static struct wl_display *display;
 static struct wl_compositor *compositor;
 static struct wl_data_device_manager *manager;
+static struct xdg_wm_base *wm_base;
+static struct wl_shm *shm;
+static struct wl_surface *peer_surface;
+static struct xdg_surface *peer_xdg_surface;
+static struct xdg_toplevel *peer_toplevel;
+static struct wl_keyboard *peer_keyboard;
+static uint32_t last_serial;
 static struct wl_seat *seat;
 static struct wl_data_device *device;
 static struct wl_data_source *source;
@@ -33,6 +44,191 @@ static int set_count;
 static char const *want_mime;
 static char mimes[32][128];
 static int mime_count;
+// --primary: operate on the primary selection (zwp_primary_selection_v1)
+// instead of the clipboard, so a test covers both directions with native
+// toolkits.
+static int use_primary;
+static struct zwp_primary_selection_device_manager_v1 *primary_manager;
+static struct zwp_primary_selection_device_v1 *primary_device;
+static struct zwp_primary_selection_source_v1 *primary_source;
+static struct zwp_primary_selection_offer_v1 *primary_offer;
+static int got_primary_selection;
+
+static void xdg_surface_configure(void *data, struct xdg_surface *surface, uint32_t serial)
+{
+    (void)data;
+    xdg_surface_ack_configure(surface, serial);
+}
+static struct xdg_surface_listener const xdg_surface_listener = {
+    .configure = xdg_surface_configure,
+};
+
+static void toplevel_configure(void *d, struct xdg_toplevel *t, int32_t w, int32_t h, struct wl_array *states)
+{
+    (void)d; (void)t; (void)w; (void)h; (void)states;
+}
+static void toplevel_close(void *d, struct xdg_toplevel *t)
+{
+    (void)d; (void)t;
+}
+static struct xdg_toplevel_listener const toplevel_listener = {
+    .configure = toplevel_configure,
+    .close = toplevel_close,
+};
+
+static void keyboard_keymap(void *d, struct wl_keyboard *k, uint32_t format, int32_t fd, uint32_t size)
+{
+    (void)d; (void)k; (void)format; (void)size;
+    close(fd);
+}
+static void keyboard_enter(void *d, struct wl_keyboard *k, uint32_t serial, struct wl_surface *s, struct wl_array *keys)
+{
+    (void)d; (void)k; (void)s; (void)keys;
+    // PRIMARY reaches the focused client; the enter serial is the one a
+    // selection request must carry.
+    last_serial = serial;
+}
+static void keyboard_leave(void *d, struct wl_keyboard *k, uint32_t serial, struct wl_surface *s)
+{
+    (void)d; (void)k; (void)serial; (void)s;
+}
+static void keyboard_key(void *d, struct wl_keyboard *k, uint32_t serial, uint32_t time, uint32_t key, uint32_t state)
+{
+    (void)d; (void)k; (void)time; (void)key; (void)state;
+    last_serial = serial;
+}
+static void keyboard_modifiers(void *d, struct wl_keyboard *k, uint32_t serial, uint32_t a, uint32_t b, uint32_t c, uint32_t e)
+{
+    (void)d; (void)k; (void)a; (void)b; (void)c; (void)e;
+    last_serial = serial;
+}
+static void keyboard_repeat_info(void *d, struct wl_keyboard *k, int32_t rate, int32_t delay)
+{
+    (void)d; (void)k; (void)rate; (void)delay;
+}
+static struct wl_keyboard_listener const keyboard_listener = {
+    .keymap = keyboard_keymap,
+    .enter = keyboard_enter,
+    .leave = keyboard_leave,
+    .key = keyboard_key,
+    .modifiers = keyboard_modifiers,
+    .repeat_info = keyboard_repeat_info,
+};
+
+static void seat_capabilities(void *d, struct wl_seat *seat, uint32_t capabilities)
+{
+    (void)d;
+    if ((capabilities & WL_SEAT_CAPABILITY_KEYBOARD) && !peer_keyboard) {
+        peer_keyboard = wl_seat_get_keyboard(seat);
+        wl_keyboard_add_listener(peer_keyboard, &keyboard_listener, NULL);
+    }
+}
+static void seat_name(void *d, struct wl_seat *s, const char *name) { (void)d; (void)s; (void)name; }
+static struct wl_seat_listener const seat_listener_for_peer = {
+    .capabilities = seat_capabilities,
+    .name = seat_name,
+};
+
+// Map a 1x1 toplevel so the compositor focuses this client: wlroots sends the
+// primary selection only to the keyboard-focused client, and a selection
+// request needs a serial from that focus.
+static void map_peer_toplevel(void)
+{
+    if (!wm_base || !shm || !compositor)
+        return;
+    int const stride = 4;
+    int const size = stride * 1;
+    int fd = memfd_create("wl-peer", MFD_CLOEXEC);
+    if (fd < 0)
+        return;
+    if (ftruncate(fd, size) < 0) {
+        close(fd);
+        return;
+    }
+    void *data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (data == MAP_FAILED) {
+        close(fd);
+        return;
+    }
+    memset(data, 0xff, size);
+    munmap(data, size);
+    struct wl_shm_pool *pool = wl_shm_create_pool(shm, fd, size);
+    struct wl_buffer *buffer = wl_shm_pool_create_buffer(pool, 0, 1, 1, stride, WL_SHM_FORMAT_XRGB8888);
+    wl_shm_pool_destroy(pool);
+    close(fd);
+
+    peer_surface = wl_compositor_create_surface(compositor);
+    peer_xdg_surface = xdg_wm_base_get_xdg_surface(wm_base, peer_surface);
+    xdg_surface_add_listener(peer_xdg_surface, &xdg_surface_listener, NULL);
+    peer_toplevel = xdg_surface_get_toplevel(peer_xdg_surface);
+    xdg_toplevel_add_listener(peer_toplevel, &toplevel_listener, NULL);
+    xdg_toplevel_set_title(peer_toplevel, "wl-clipboard-peer");
+    wl_surface_commit(peer_surface);
+    for (int i = 0; i < 20 && !last_serial; ++i)
+        wl_display_roundtrip(display);
+    wl_surface_attach(peer_surface, buffer, 0, 0);
+    wl_surface_damage(peer_surface, 0, 0, 1, 1);
+    wl_surface_commit(peer_surface);
+    for (int i = 0; i < 20 && !last_serial; ++i)
+        wl_display_roundtrip(display);
+}
+
+static void primary_offer_offer(void *data, struct zwp_primary_selection_offer_v1 *offer, const char *mime)
+{
+    (void)data; (void)offer;
+    if (mime_count < (int)(sizeof(mimes) / sizeof(mimes[0]))) {
+        strncpy(mimes[mime_count], mime, sizeof(mimes[0]) - 1);
+        mime_count++;
+    }
+}
+static struct zwp_primary_selection_offer_v1_listener const primary_offer_listener = {
+    .offer = primary_offer_offer,
+};
+static void primary_device_data_offer(void *data, struct zwp_primary_selection_device_v1 *dev, struct zwp_primary_selection_offer_v1 *offer)
+{
+    (void)data; (void)dev;
+    zwp_primary_selection_offer_v1_add_listener(offer, &primary_offer_listener, NULL);
+}
+static void primary_device_selection(void *data, struct zwp_primary_selection_device_v1 *dev, struct zwp_primary_selection_offer_v1 *offer)
+{
+    (void)data; (void)dev;
+    primary_offer = offer;
+    got_primary_selection = 1;
+}
+static struct zwp_primary_selection_device_v1_listener const primary_device_listener = {
+    .data_offer = primary_device_data_offer,
+    .selection = primary_device_selection,
+};
+static void primary_source_send(void *data, struct zwp_primary_selection_source_v1 *src, const char *mime, int32_t fd)
+{
+    (void)data; (void)src;
+    unsigned char *bytes = NULL;
+    size_t size = 0;
+    for (int i = 0; i < set_count; ++i) {
+        if (!strcmp(set_mimes[i], mime)) {
+            bytes = set_datas[i];
+            size = set_sizes[i];
+            break;
+        }
+    }
+    if (!bytes && set_count) {
+        bytes = set_datas[0];
+        size = set_sizes[0];
+    }
+    if (bytes && size)
+        (void)write(fd, bytes, size);
+    close(fd);
+}
+static void primary_source_cancelled(void *data, struct zwp_primary_selection_source_v1 *src)
+{
+    (void)data;
+    zwp_primary_selection_source_v1_destroy(src);
+    primary_source = NULL;
+}
+static struct zwp_primary_selection_source_v1_listener const primary_source_listener = {
+    .send = primary_source_send,
+    .cancelled = primary_source_cancelled,
+};
 
 static char const *preferred(void)
 {
@@ -176,8 +372,16 @@ static void registry_global(void *data, struct wl_registry *registry, uint32_t n
         compositor = wl_registry_bind(registry, name, &wl_compositor_interface, 1);
     else if (!strcmp(interface, wl_data_device_manager_interface.name))
         manager = wl_registry_bind(registry, name, &wl_data_device_manager_interface, version < 3 ? version : 3);
-    else if (!strcmp(interface, wl_seat_interface.name))
+    else if (!strcmp(interface, wl_seat_interface.name)) {
         seat = wl_registry_bind(registry, name, &wl_seat_interface, 1);
+        wl_seat_add_listener(seat, &seat_listener_for_peer, NULL);
+    }
+    else if (!strcmp(interface, wl_shm_interface.name))
+        shm = wl_registry_bind(registry, name, &wl_shm_interface, 1);
+    else if (!strcmp(interface, xdg_wm_base_interface.name))
+        wm_base = wl_registry_bind(registry, name, &xdg_wm_base_interface, 1);
+    else if (!strcmp(interface, zwp_primary_selection_device_manager_v1_interface.name))
+        primary_manager = wl_registry_bind(registry, name, &zwp_primary_selection_device_manager_v1_interface, 1);
 }
 static void registry_global_remove(void *d, struct wl_registry *r, uint32_t n) { (void)d; (void)r; (void)n; }
 static struct wl_registry_listener const registry_listener = { registry_global, registry_global_remove };
@@ -201,8 +405,19 @@ static int read_file(char const *path, unsigned char **out, size_t *out_size)
 int main(int argc, char **argv)
 {
     if (argc < 2) {
-        fprintf(stderr, "usage: %s set TEXT | set-file MIME PATH | set-formats MIME PATH [MIME PATH ...] | get [MIME]\n", argv[0]);
+        fprintf(stderr, "usage: %s [--primary] set TEXT | set-file MIME PATH | set-formats MIME PATH [MIME PATH ...] | get [MIME]\n", argv[0]);
         return 2;
+    }
+    // The optional --primary flag selects the primary selection instead of the
+    // clipboard.
+    if (!strcmp(argv[1], "--primary")) {
+        use_primary = 1;
+        argc--;
+        argv++;
+        if (argc < 2) {
+            fprintf(stderr, "peer: --primary needs a mode\n");
+            return 2;
+        }
     }
     int mode = 0; // 0=get, 1=set text, 2=set file, 3=set formats
     if (!strcmp(argv[1], "set")) {
@@ -264,13 +479,39 @@ int main(int argc, char **argv)
     struct wl_registry *registry = wl_display_get_registry(display);
     wl_registry_add_listener(registry, &registry_listener, NULL);
     wl_display_roundtrip(display);
-    if (!manager || !seat) { fprintf(stderr, "missing globals\n"); return 1; }
+    if (!seat || (!use_primary && !manager)) { fprintf(stderr, "missing globals\n"); return 1; }
 
-    device = wl_data_device_manager_get_data_device(manager, seat);
-    wl_data_device_add_listener(device, &device_listener, NULL);
-    wl_display_roundtrip(display);
+    if (manager) {
+        device = wl_data_device_manager_get_data_device(manager, seat);
+        wl_data_device_add_listener(device, &device_listener, NULL);
+        wl_display_roundtrip(display);
+    }
 
-    if (mode != 0) {
+    if (use_primary) {
+        if (!primary_manager) {
+            fprintf(stderr, "PEER: no primary selection manager\n");
+            return 1;
+        }
+        map_peer_toplevel();
+        primary_device = zwp_primary_selection_device_manager_v1_get_device(primary_manager, seat);
+        zwp_primary_selection_device_v1_add_listener(primary_device, &primary_device_listener, NULL);
+        wl_display_roundtrip(display);
+        if (mode != 0) {
+            primary_source = zwp_primary_selection_device_manager_v1_create_source(primary_manager);
+            zwp_primary_selection_source_v1_add_listener(primary_source, &primary_source_listener, NULL);
+            for (int i = 0; i < set_count; ++i)
+                zwp_primary_selection_source_v1_offer(primary_source, set_mimes[i]);
+            zwp_primary_selection_device_v1_set_selection(primary_device, primary_source, last_serial);
+            wl_display_flush(display);
+            printf("PEER: serving primary selection\n");
+            fflush(stdout);
+            for (;;) {
+                if (wl_display_dispatch(display) < 0)
+                    break;
+            }
+            return 0;
+        }
+    } else if (mode != 0) {
         source = wl_data_device_manager_create_data_source(manager);
         wl_data_source_add_listener(source, &source_listener, NULL);
         int offers_plain_text = 0;
@@ -298,6 +539,36 @@ int main(int argc, char **argv)
             if (wl_display_dispatch(display) < 0)
                 break;
         }
+        return 0;
+    }
+
+    if (use_primary) {
+        for (int i = 0; i < 200 && !got_primary_selection; ++i) {
+            if (wl_display_roundtrip(display) < 0)
+                break;
+        }
+        if (!got_primary_selection || !primary_offer) {
+            fprintf(stderr, "PEER: no primary selection\n");
+            return 1;
+        }
+        char const *mime = want_mime ? want_mime : preferred();
+        if (!mime || (want_mime && !mimes_has(want_mime))) {
+            fprintf(stderr, "PEER: requested mime not offered\n");
+            return 1;
+        }
+        int fds[2];
+        if (pipe(fds) != 0)
+            return 1;
+        zwp_primary_selection_offer_v1_receive(primary_offer, mime, fds[1]);
+        wl_display_flush(display);
+        close(fds[1]);
+        unsigned char buffer[65536];
+        ssize_t n = read(fds[0], buffer, sizeof(buffer));
+        close(fds[0]);
+        if (n < 0)
+            n = 0;
+        fwrite(buffer, 1, (size_t)n, stdout);
+        fflush(stdout);
         return 0;
     }
 

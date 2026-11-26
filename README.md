@@ -47,9 +47,8 @@ on every run of the test suites.
   Serenity `KeyCode`/modifiers), focus/activation/close handled, and the full input path is
   verified headlessly (the compositor injects a click; the widget receives it). The
   **unmodified Calculator** builds and runs, decorated and movable, on KDE Plasma. Held keys
-  repeat where the compositor leaves repeat to the client (the protocol default, and what KDE,
-  GNOME and wlroots 0.20+ do); SerenityDE repeats them itself and says so, and LibWM stands
-  down (`keyboard.repeat`).
+  repeat client-side from `wl_keyboard.repeat_info`, as Wayland intends, so repeat works the
+  same under every compositor and does not double with toolkits that already repeat.
 - **M4** — theme, fonts, decorations, icons, alpha: done. The system theme and fonts come from
   the bundled `Base/res` or the desktop's broker; windows get server-side decorations
   (`zxdg_decoration_manager_v1`) or LibWM's own 22px client-side titlebar with
@@ -104,6 +103,11 @@ on every run of the test suites.
   and LibWM presents as a `wl_shm` buffer, so the Wayland transport is untouched (the
   WindowServer protocol carries no GL messages). The **unmodified `3DFileViewer`** loads and
   animates an OBJ model; the **`Tubes`** demo builds against the same path.
+- **M11** — primary selection: done. SerenityOS has one clipboard, native toolkits also have
+  PRIMARY (middle-click). LibWM publishes a Serenity copy as both CLIPBOARD and PRIMARY, and
+  falls back to PRIMARY when nothing owns CLIPBOARD, so text crosses in both directions between
+  Serenity applications and native ones (`zwp_primary_selection_v1`). wlroots-based compositors
+  only deliver PRIMARY to the focused client, which is what a paste does.
 - **Applications** — the framework builds and tests **Calculator**, **PDFViewer** and **Piano**
   from unmodified source. The rest of `Userland/Applications` is built by the desktop that ships
   it (see [Desktops](#desktops)), with GML, icons, menus, dialogs and syntax highlighting intact.
@@ -156,10 +160,6 @@ where the portable protocol or portal is not implemented:
 - **Pointer lock** (`pointer-constraints`/`relative-pointer`, for mouse-look games) and **idle
   inhibit** (for video playback) are not used by LibWM, and **touch input** (`wl_touch`) is not
   handled at all.
-- **Primary selection.** LibWM neither offers nor reads it, so middle-click paste between
-  Serenity and native applications does not work; compositors, SerenityDE's included, support
-  it. Serenity applications paste explicitly (Ctrl+V), so this matters only for interoperability.
-
 ### Upstream or out of scope
 
 - **Audio resampling.** Cross-rate clients use LibAudio's insert/drop resampler (`Resampler.h`

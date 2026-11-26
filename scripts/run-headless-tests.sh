@@ -22,7 +22,9 @@ FRAME_OUT="${FRAME_OUT:-$PROJECT_ROOT/build/headless-frame.png}"
 if [[ ! -x "$HC" ]]; then
     "$PROJECT_ROOT/scripts/build-headless-compositor.sh"
 fi
-cc -O2 -Wall -o "$PEER_BIN" "$PROJECT_ROOT/tools/wl-clipboard-peer.c" $(pkg-config --cflags --libs wayland-client)
+# shellcheck source=lib/build-peer.sh
+source "$PROJECT_ROOT/scripts/lib/build-peer.sh"
+build_wl_clipboard_peer "$PEER_BIN"
 ninja -C "$BUILD_DIR" libwm-test-window libwm-resize-test >/dev/null
 
 RUNTIME="$(mktemp -d "${TMPDIR:-/tmp}/libwm-headless.XXXXXX")"
