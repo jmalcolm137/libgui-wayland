@@ -510,6 +510,10 @@ private:
     void create_layer_window(i32 window_id, i32 window_type, Gfx::IntPoint position, Gfx::IntSize size, ByteString const& title, bool has_alpha, bool resizable);
     void create_overlay_window(i32 window_id, i32 window_type, Gfx::IntPoint position, Gfx::IntSize size, ByteString const& title, bool has_alpha, bool resizable);
     void create_toplevel_window(i32 window_id, Gfx::IntSize size, ByteString const& title, bool has_alpha, bool resizable, bool frameless, i32 window_mode, i32 parent_window_id, Gfx::IntRect const& launch_origin);
+    void request_frame_callback(WindowSurface&);
+    bool present_fractional(WindowSurface&, u8 const* src_base, size_t src_pitch, int src_w, int src_h, Gfx::IntSize visible_size, int logical_height, int csd_h, int menubar_h, int scale_v120, bool has_alpha);
+    void present_composed(WindowSurface&, int client_fd, Gfx::IntSize size, Gfx::IntSize visible_size, i32 pitch, int csd_h, int menubar_h, int scale, int scale_v120, bool is_fractional, bool has_alpha, Vector<Gfx::IntRect> damage, bool full_damage);
+    void present_direct(WindowSurface&, int client_fd, Gfx::IntSize size, Gfx::IntSize visible_size, i32 pitch, int scale, bool has_alpha, bool is_fractional, Vector<Gfx::IntRect> damage, bool full_damage);
     void create_layer_popup(i32 popup_id, Gfx::IntPoint layer_position, Gfx::IntRect anchor, Gfx::IntSize size, bool is_submenu);
     void create_xdg_popup(i32 popup_id, xdg_surface* parent_xdg, Gfx::IntRect anchor, Gfx::IntSize size, bool is_submenu);
     // Publish (or clear) the window's icon with xdg-toplevel-icon-v1; false when

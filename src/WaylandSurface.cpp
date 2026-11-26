@@ -29,6 +29,7 @@
 
 #include "fractional-scale-v1-client-protocol.h"
 #include "viewporter-client-protocol.h"
+#include "pointer-warp-v1-client-protocol.h"
 #include "xdg-toplevel-icon-v1-client-protocol.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "xdg-decoration-client-protocol.h"
@@ -1376,164 +1377,141 @@ void WaylandClient::update_input_region(WindowSurface& window_surface, u8 const*
     }
 }
 
-void WaylandClient::commit_window_content(WindowSurface& window_surface, int client_fd, Gfx::IntSize size, Gfx::IntSize visible_size, i32 pitch, bool has_alpha)
+void WaylandClient::request_frame_callback(WindowSurface& window_surface)
 {
-    MutexLocker locker(m_mutex);
-    if (m_display_link.enabled)
-        request_display_link_frame();
-    auto request_frame = [&] {
-        window_surface.frame_callback = wl_surface_frame(window_surface.surface);
-        wl_callback_add_listener(window_surface.frame_callback, &s_frame_listener, this);
-        window_surface.frame_in_flight = true;
-    };
+    window_surface.frame_callback = wl_surface_frame(window_surface.surface);
+    wl_callback_add_listener(window_surface.frame_callback, &s_frame_listener, this);
+    window_surface.frame_in_flight = true;
+}
 
-    int const scale = m_outputs->client_scale();
-    int const scale_v120 = m_outputs->client_scale_v120();
-    bool const is_fractional = (scale_v120 % 120) != 0;
-
-    if (window_surface.stretch_active && !window_surface.resizing) {
-        if (window_surface.viewport && !is_fractional)
-            wp_viewport_set_destination(window_surface.viewport, -1, -1);
-        window_surface.stretch_active = false;
+bool WaylandClient::present_fractional(WindowSurface& window_surface, u8 const* src_base, size_t src_pitch, int src_w, int src_h,
+    Gfx::IntSize visible_size, int logical_height, int csd_h, int menubar_h, int scale_v120, bool has_alpha)
+{
+    int const frac_w = max(1, (visible_size.width() * scale_v120 + 60) / 120);
+    int const frac_h = max(1, (logical_height * scale_v120 + 60) / 120);
+    auto const fmt = has_alpha ? Gfx::BitmapFormat::BGRA8888 : Gfx::BitmapFormat::BGRx8888;
+    size_t const frac_pitch = Gfx::Bitmap::minimum_pitch(frac_w, fmt);
+    if (!window_surface.fractional_bitmap || window_surface.fractional_bitmap->size() != Gfx::IntSize { frac_w, frac_h } || window_surface.fractional_bitmap->format() != fmt) {
+        auto buf = Core::AnonymousBuffer::create_with_size(frac_pitch * static_cast<size_t>(frac_h));
+        if (buf.is_error())
+            return false;
+        window_surface.fractional_buffer = buf.release_value();
+        auto bmp = Gfx::Bitmap::create_with_anonymous_buffer(fmt, window_surface.fractional_buffer, { frac_w, frac_h }, 1);
+        if (bmp.is_error())
+            return false;
+        window_surface.fractional_bitmap = bmp.release_value();
     }
+    resample_to_fractional(src_base, src_pitch, src_w, src_h, *window_surface.fractional_bitmap);
+    wl_surface_set_buffer_scale(window_surface.surface, 1);
+    if (window_surface.viewport && !window_surface.resizing)
+        wp_viewport_set_destination(window_surface.viewport, visible_size.width(), logical_height);
+    Vector<Gfx::IntRect> frac_damage;
+    frac_damage.append({ 0, 0, visible_size.width(), logical_height });
+    request_frame_callback(window_surface);
+    bind_bitmap(window_surface.surface, window_surface.fractional_buffer, *window_surface.fractional_bitmap, window_surface.buffers, &frac_damage);
+    wl_surface_commit(window_surface.surface);
+    wl_display_flush(m_display);
+    trace("LibWM/Wayland: presented window {} ({}x{} @{:.2f}x -> {}x{}px incl. {}px csd + {}px inset)",
+        window_surface.window_id, visible_size.width(), visible_size.height(),
+        static_cast<double>(scale_v120) / 120.0, frac_w, frac_h, csd_h, menubar_h);
+    return true;
+}
 
-    purge_released_buffers(window_surface);
-
-    Vector<Gfx::IntRect> damage = move(window_surface.damage);
-    window_surface.damage.clear();
-    bool const full_damage = window_surface.damage_full || damage.is_empty();
-    window_surface.damage_full = false;
-
-    if (window_surface.menubar_surface) {
-        present_menubar(window_surface, visible_size);
-        if (window_surface.xdg_surface_object)
-            xdg_surface_set_window_geometry(window_surface.xdg_surface_object, 0, 0,
-                visible_size.width(), visible_size.height());
-    }
-
-    int const csd_h = window_surface.csd_height();
-    int const menubar_h = (window_surface.inset > 0 && !window_surface.menubar_surface) ? window_surface.inset : 0;
+void WaylandClient::present_composed(WindowSurface& window_surface, int client_fd, Gfx::IntSize size, Gfx::IntSize visible_size, i32 pitch,
+    int csd_h, int menubar_h, int scale, int scale_v120, bool is_fractional, bool has_alpha,
+    Vector<Gfx::IntRect> damage, bool full_damage)
+{
     int const total_inset = csd_h + menubar_h;
     int const logical_height = visible_size.height() + total_inset;
+    int const display_width = visible_size.width() * scale;
+    int const display_height = logical_height * scale;
+    size_t const composed_pitch = Gfx::Bitmap::minimum_pitch(display_width, Gfx::BitmapFormat::BGRA8888);
+    size_t const composed_height = static_cast<size_t>(display_height);
 
-    auto present_fractional = [&](u8 const* src_base, size_t src_pitch, int src_w, int src_h) -> bool {
-        int const frac_w = max(1, (visible_size.width() * scale_v120 + 60) / 120);
-        int const frac_h = max(1, (logical_height * scale_v120 + 60) / 120);
-        auto const fmt = has_alpha ? Gfx::BitmapFormat::BGRA8888 : Gfx::BitmapFormat::BGRx8888;
-        size_t const frac_pitch = Gfx::Bitmap::minimum_pitch(frac_w, fmt);
-        if (!window_surface.fractional_bitmap || window_surface.fractional_bitmap->size() != Gfx::IntSize { frac_w, frac_h } || window_surface.fractional_bitmap->format() != fmt) {
-            auto buf = Core::AnonymousBuffer::create_with_size(frac_pitch * static_cast<size_t>(frac_h));
-            if (buf.is_error())
-                return false;
-            window_surface.fractional_buffer = buf.release_value();
-            auto bmp = Gfx::Bitmap::create_with_anonymous_buffer(fmt, window_surface.fractional_buffer, { frac_w, frac_h }, 1);
-            if (bmp.is_error())
-                return false;
-            window_surface.fractional_bitmap = bmp.release_value();
-        }
-        resample_to_fractional(src_base, src_pitch, src_w, src_h, *window_surface.fractional_bitmap);
-        wl_surface_set_buffer_scale(window_surface.surface, 1);
-        if (window_surface.viewport && !window_surface.resizing)
-            wp_viewport_set_destination(window_surface.viewport, visible_size.width(), logical_height);
-        Vector<Gfx::IntRect> frac_damage;
-        frac_damage.append({ 0, 0, visible_size.width(), logical_height });
-        request_frame();
-        bind_bitmap(window_surface.surface, window_surface.fractional_buffer, *window_surface.fractional_bitmap, window_surface.buffers, &frac_damage);
-        wl_surface_commit(window_surface.surface);
-        wl_display_flush(m_display);
-        trace("LibWM/Wayland: presented window {} ({}x{} @{:.2f}x -> {}x{}px incl. {}px csd + {}px inset)",
-            window_surface.window_id, visible_size.width(), visible_size.height(),
-            static_cast<double>(scale_v120) / 120.0, frac_w, frac_h, csd_h, menubar_h);
-        return true;
-    };
-
-    if (total_inset > 0) {
-        int const display_width = visible_size.width() * scale;
-        int const display_height = logical_height * scale;
-        size_t const composed_pitch = Gfx::Bitmap::minimum_pitch(display_width, Gfx::BitmapFormat::BGRA8888);
-        size_t const composed_height = static_cast<size_t>(display_height);
-
-        bool recreate = !window_surface.composed_valid || !window_surface.composed_bitmap
-            || window_surface.composed_bitmap->size() != Gfx::IntSize { visible_size.width(), logical_height }
-            || window_surface.composed_bitmap->scale() != scale;
-        if (recreate) {
-            auto buffer = Core::AnonymousBuffer::create_with_size(composed_pitch * composed_height);
-            if (buffer.is_error())
-                return;
-            window_surface.composed_buffer = buffer.release_value();
-            auto composed = Gfx::Bitmap::create_with_anonymous_buffer(Gfx::BitmapFormat::BGRA8888, window_surface.composed_buffer, { visible_size.width(), logical_height }, scale);
-            if (composed.is_error())
-                return;
-            window_surface.composed_bitmap = composed.release_value();
-            window_surface.composed_valid = true;
-        }
-        auto& destination = *window_surface.composed_bitmap;
-
-        size_t client_bytes = static_cast<size_t>(pitch) * static_cast<size_t>(size.height());
-        auto* source = static_cast<u8 const*>(mmap(nullptr, client_bytes, PROT_READ, MAP_SHARED, client_fd, 0));
-        if (source == MAP_FAILED)
+    bool recreate = !window_surface.composed_valid || !window_surface.composed_bitmap
+        || window_surface.composed_bitmap->size() != Gfx::IntSize { visible_size.width(), logical_height }
+        || window_surface.composed_bitmap->scale() != scale;
+    if (recreate) {
+        auto buffer = Core::AnonymousBuffer::create_with_size(composed_pitch * composed_height);
+        if (buffer.is_error())
             return;
-        auto copy_rect = [&](Gfx::IntRect rect) {
-            rect = rect.intersected({ 0, 0, visible_size.width(), visible_size.height() });
-            if (rect.is_empty())
-                return;
-            size_t const row_bytes = static_cast<size_t>(rect.width()) * scale * 4;
-            for (int row = rect.y() * scale; row < (rect.y() + rect.height()) * scale; ++row)
-                memcpy(destination.scanline(total_inset * scale + row) + static_cast<size_t>(rect.x()) * scale,
-                    source + static_cast<size_t>(row) * pitch + static_cast<size_t>(rect.x()) * scale * 4,
-                    row_bytes);
-        };
-        if (recreate || full_damage) {
-            copy_rect({ 0, 0, visible_size.width(), visible_size.height() });
-        } else {
-            for (auto const& rect : damage)
-                copy_rect(rect);
-        }
-        if (needs_input_region_pixels(window_surface))
-            update_input_region(window_surface, source, static_cast<size_t>(pitch), visible_size, scale, total_inset);
-        munmap(const_cast<u8*>(source), client_bytes);
-        update_opaque_region(window_surface, { visible_size.width(), logical_height });
-
-        bool const redraw_csd = csd_h > 0 && (recreate || window_surface.csd_dirty);
-        if (redraw_csd) {
-            render_csd_titlebar(window_surface, destination, visible_size.width());
-            window_surface.csd_dirty = false;
-        }
-
-        bool const redraw_inset = menubar_h > 0 && (recreate || window_surface.inset_dirty);
-        if (redraw_inset) {
-            draw_inset_image(window_surface, destination, { 0, csd_h, visible_size.width(), menubar_h });
-            window_surface.inset_dirty = false;
-        }
-
-        if (is_fractional && present_fractional(reinterpret_cast<u8 const*>(destination.scanline(0)), destination.pitch(), display_width, display_height))
+        window_surface.composed_buffer = buffer.release_value();
+        auto composed = Gfx::Bitmap::create_with_anonymous_buffer(Gfx::BitmapFormat::BGRA8888, window_surface.composed_buffer, { visible_size.width(), logical_height }, scale);
+        if (composed.is_error())
             return;
+        window_surface.composed_bitmap = composed.release_value();
+        window_surface.composed_valid = true;
+    }
+    auto& destination = *window_surface.composed_bitmap;
 
-        Vector<Gfx::IntRect> surface_damage;
-        if (recreate || full_damage) {
-            surface_damage.append({ 0, 0, visible_size.width(), logical_height });
-        } else {
-            if (redraw_csd)
-                surface_damage.append({ 0, 0, visible_size.width(), csd_h });
-            if (redraw_inset)
-                surface_damage.append({ 0, csd_h, visible_size.width(), menubar_h });
-            for (auto const& rect : damage) {
-                auto clipped = rect.intersected({ 0, 0, visible_size.width(), visible_size.height() });
-                if (!clipped.is_empty())
-                    surface_damage.append({ clipped.x(), clipped.y() + total_inset, clipped.width(), clipped.height() });
-            }
-            if (surface_damage.is_empty())
-                surface_damage.append({ 0, 0, visible_size.width(), logical_height });
-        }
-
-        request_frame();
-        bind_bitmap(window_surface.surface, window_surface.composed_buffer, destination, window_surface.buffers, &surface_damage);
-        wl_surface_commit(window_surface.surface);
-        wl_display_flush(m_display);
-        trace("LibWM/Wayland: presented window {} ({}x{} @{}x incl. {}px csd + {}px inset)", window_surface.window_id, visible_size.width(), visible_size.height(), scale, csd_h, menubar_h);
+    size_t client_bytes = static_cast<size_t>(pitch) * static_cast<size_t>(size.height());
+    auto* source = static_cast<u8 const*>(mmap(nullptr, client_bytes, PROT_READ, MAP_SHARED, client_fd, 0));
+    if (source == MAP_FAILED)
         return;
+    auto copy_rect = [&](Gfx::IntRect rect) {
+        rect = rect.intersected({ 0, 0, visible_size.width(), visible_size.height() });
+        if (rect.is_empty())
+            return;
+        size_t const row_bytes = static_cast<size_t>(rect.width()) * scale * 4;
+        for (int row = rect.y() * scale; row < (rect.y() + rect.height()) * scale; ++row)
+            memcpy(destination.scanline(total_inset * scale + row) + static_cast<size_t>(rect.x()) * scale,
+                source + static_cast<size_t>(row) * pitch + static_cast<size_t>(rect.x()) * scale * 4,
+                row_bytes);
+    };
+    if (recreate || full_damage) {
+        copy_rect({ 0, 0, visible_size.width(), visible_size.height() });
+    } else {
+        for (auto const& rect : damage)
+            copy_rect(rect);
+    }
+    if (needs_input_region_pixels(window_surface))
+        update_input_region(window_surface, source, static_cast<size_t>(pitch), visible_size, scale, total_inset);
+    munmap(const_cast<u8*>(source), client_bytes);
+    update_opaque_region(window_surface, { visible_size.width(), logical_height });
+
+    bool const redraw_csd = csd_h > 0 && (recreate || window_surface.csd_dirty);
+    if (redraw_csd) {
+        render_csd_titlebar(window_surface, destination, visible_size.width());
+        window_surface.csd_dirty = false;
     }
 
+    bool const redraw_inset = menubar_h > 0 && (recreate || window_surface.inset_dirty);
+    if (redraw_inset) {
+        draw_inset_image(window_surface, destination, { 0, csd_h, visible_size.width(), menubar_h });
+        window_surface.inset_dirty = false;
+    }
+
+    if (is_fractional && present_fractional(window_surface, reinterpret_cast<u8 const*>(destination.scanline(0)), destination.pitch(), display_width, display_height,
+            visible_size, logical_height, csd_h, menubar_h, scale_v120, has_alpha))
+        return;
+
+    Vector<Gfx::IntRect> surface_damage;
+    if (recreate || full_damage) {
+        surface_damage.append({ 0, 0, visible_size.width(), logical_height });
+    } else {
+        if (redraw_csd)
+            surface_damage.append({ 0, 0, visible_size.width(), csd_h });
+        if (redraw_inset)
+            surface_damage.append({ 0, csd_h, visible_size.width(), menubar_h });
+        for (auto const& rect : damage) {
+            auto clipped = rect.intersected({ 0, 0, visible_size.width(), visible_size.height() });
+            if (!clipped.is_empty())
+                surface_damage.append({ clipped.x(), clipped.y() + total_inset, clipped.width(), clipped.height() });
+        }
+        if (surface_damage.is_empty())
+            surface_damage.append({ 0, 0, visible_size.width(), logical_height });
+    }
+
+    request_frame_callback(window_surface);
+    bind_bitmap(window_surface.surface, window_surface.composed_buffer, destination, window_surface.buffers, &surface_damage);
+    wl_surface_commit(window_surface.surface);
+    wl_display_flush(m_display);
+    trace("LibWM/Wayland: presented window {} ({}x{} @{}x incl. {}px csd + {}px inset)", window_surface.window_id, visible_size.width(), visible_size.height(), scale, csd_h, menubar_h);
+}
+
+void WaylandClient::present_direct(WindowSurface& window_surface, int client_fd, Gfx::IntSize size, Gfx::IntSize visible_size, i32 pitch,
+    int scale, bool has_alpha, bool is_fractional, Vector<Gfx::IntRect> damage, bool full_damage)
+{
     int const display_width = visible_size.width() * scale;
     int const display_height = visible_size.height() * scale;
 
@@ -1546,7 +1524,8 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
             if (needs_input_region_pixels(window_surface))
                 update_input_region(window_surface, source, static_cast<size_t>(pitch), visible_size, scale, 0);
             if (is_fractional) {
-                bool const ok = present_fractional(source, static_cast<size_t>(pitch), display_width, display_height);
+                bool const ok = present_fractional(window_surface, source, static_cast<size_t>(pitch), display_width, display_height,
+                    visible_size, visible_size.height(), 0, 0, m_outputs->client_scale_v120(), has_alpha);
                 munmap(const_cast<u8*>(source), client_bytes);
                 if (ok)
                     return;
@@ -1575,7 +1554,7 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
         return;
     }
 
-    request_frame();
+    request_frame_callback(window_surface);
     wl_surface_attach(window_surface.surface, buffer, 0, 0);
     if (full_damage) {
         wl_surface_damage(window_surface.surface, 0, 0, visible_size.width(), visible_size.height());
@@ -1599,6 +1578,47 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
 
     trace("LibWM/Wayland: presented window {} ({}x{})", window_surface.window_id, visible_size.width(), visible_size.height());
 }
+
+void WaylandClient::commit_window_content(WindowSurface& window_surface, int client_fd, Gfx::IntSize size, Gfx::IntSize visible_size, i32 pitch, bool has_alpha)
+{
+    MutexLocker locker(m_mutex);
+    if (m_display_link.enabled)
+        request_display_link_frame();
+
+    int const scale = m_outputs->client_scale();
+    int const scale_v120 = m_outputs->client_scale_v120();
+    bool const is_fractional = (scale_v120 % 120) != 0;
+
+    if (window_surface.stretch_active && !window_surface.resizing) {
+        if (window_surface.viewport && !is_fractional)
+            wp_viewport_set_destination(window_surface.viewport, -1, -1);
+        window_surface.stretch_active = false;
+    }
+
+    purge_released_buffers(window_surface);
+
+    Vector<Gfx::IntRect> damage = move(window_surface.damage);
+    window_surface.damage.clear();
+    bool const full_damage = window_surface.damage_full || damage.is_empty();
+    window_surface.damage_full = false;
+
+    if (window_surface.menubar_surface) {
+        present_menubar(window_surface, visible_size);
+        if (window_surface.xdg_surface_object)
+            xdg_surface_set_window_geometry(window_surface.xdg_surface_object, 0, 0,
+                visible_size.width(), visible_size.height());
+    }
+
+    int const csd_h = window_surface.csd_height();
+    int const menubar_h = (window_surface.inset > 0 && !window_surface.menubar_surface) ? window_surface.inset : 0;
+
+    if (csd_h + menubar_h > 0) {
+        present_composed(window_surface, client_fd, size, visible_size, pitch, csd_h, menubar_h, scale, scale_v120, is_fractional, has_alpha, move(damage), full_damage);
+        return;
+    }
+    present_direct(window_surface, client_fd, size, visible_size, pitch, scale, has_alpha, is_fractional, move(damage), full_damage);
+}
+
 
 void WaylandClient::on_frame_done(wl_callback* callback)
 {
