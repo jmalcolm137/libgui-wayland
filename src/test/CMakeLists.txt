@@ -47,6 +47,12 @@ libwm_gui_executable(libwm-appfile-test
     INCLUDES ${LIBWM_TEST_INCLUDES}
     LIBS LibMain LibGUI LibGfx LibCore LibIPC LibDesktop LibURL)
 
+# Interactive resize: asks for a bottom-right resize as the ResizeCorner does.
+libwm_gui_executable(libwm-resize-test
+    SOURCES ResizeTest.cpp
+    INCLUDES ${LIBWM_TEST_INCLUDES}
+    LIBS LibMain LibGUI LibGfx LibCore LibIPC)
+
 # HiDPI fine detail: full-width rects and thin/thick lines dumped at 1x and 2x,
 # checked for ops that don't scale.
 libwm_gui_executable(libwm-hidpi-detail-test
@@ -56,7 +62,7 @@ libwm_gui_executable(libwm-hidpi-detail-test
 
 # Direct unit tests of LibWM's Wayland/Linux translation helpers (MenuController,
 # clipboard PNG/Serenity image transcoding, in-process ConfigServer portal,
-# WaylandClient thread safety and scale inference).
+# WaylandClient thread safety, scale inference, resize direction mapping).
 libwm_gui_executable(libwm-unit-test
     SOURCES UnitTest.cpp
     INCLUDES ${LIBWM_TEST_INCLUDES}

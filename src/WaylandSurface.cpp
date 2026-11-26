@@ -18,6 +18,7 @@
 #include <LibGfx/StylePainter.h>
 #include <LibGfx/SystemTheme.h>
 #include <LibGUI/Window.h>
+#include <WindowServer/ResizeDirection.h>
 #include <WindowServer/WindowType.h>
 #include <stdlib.h>
 #include <string.h>
@@ -954,6 +955,58 @@ void WaylandClient::set_minimized(i32 window_id)
         window_surface->minimized = true;
         wl_display_flush(m_display);
     }
+}
+
+u32 WaylandClient::resize_edges_for_direction(i32 direction)
+{
+    switch (static_cast<WindowServer::ResizeDirection>(direction)) {
+    case WindowServer::ResizeDirection::Left:
+        return XDG_TOPLEVEL_RESIZE_EDGE_LEFT;
+    case WindowServer::ResizeDirection::UpLeft:
+        return XDG_TOPLEVEL_RESIZE_EDGE_TOP | XDG_TOPLEVEL_RESIZE_EDGE_LEFT;
+    case WindowServer::ResizeDirection::Up:
+        return XDG_TOPLEVEL_RESIZE_EDGE_TOP;
+    case WindowServer::ResizeDirection::UpRight:
+        return XDG_TOPLEVEL_RESIZE_EDGE_TOP | XDG_TOPLEVEL_RESIZE_EDGE_RIGHT;
+    case WindowServer::ResizeDirection::Right:
+        return XDG_TOPLEVEL_RESIZE_EDGE_RIGHT;
+    case WindowServer::ResizeDirection::DownRight:
+        return XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM | XDG_TOPLEVEL_RESIZE_EDGE_RIGHT;
+    case WindowServer::ResizeDirection::Down:
+        return XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM;
+    case WindowServer::ResizeDirection::DownLeft:
+        return XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM | XDG_TOPLEVEL_RESIZE_EDGE_LEFT;
+    default:
+        return 0;
+    }
+}
+
+void WaylandClient::start_window_resize(i32 window_id, i32 direction)
+{
+    MutexLocker locker(m_mutex);
+    auto* window_surface = find(window_id);
+    if (!window_surface || !window_surface->toplevel || window_surface->is_layer || !window_surface->resizable)
+        return;
+
+    uint32_t const edges = resize_edges_for_direction(direction);
+    if (edges == 0)
+        return;
+
+    // xdg_toplevel.resize takes the serial of the input event that asked for the
+    // resize (the press on the corner); without one the compositor would ignore
+    // it (or reject it as a protocol error).
+    auto* seat = m_seat->wayland_seat();
+    auto const serial = m_seat->last_serial();
+    if (!seat || serial == 0) {
+        trace("LibWM/Wayland: no input serial; not resizing window {}", window_id);
+        return;
+    }
+
+    SurfaceLocker surface_locker(window_surface->mutex);
+    xdg_toplevel_resize(window_surface->toplevel, seat, serial, edges);
+    wl_display_flush(m_display);
+    trace("LibWM/Wayland: started interactive resize of window {} (direction={}, edges={:#x}, serial={})",
+        window_id, direction, edges, serial);
 }
 
 bool WaylandClient::is_window_minimized(i32 window_id) const

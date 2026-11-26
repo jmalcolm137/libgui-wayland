@@ -23,7 +23,7 @@ if [[ ! -x "$HC" ]]; then
     "$PROJECT_ROOT/scripts/build-headless-compositor.sh"
 fi
 cc -O2 -Wall -o "$PEER_BIN" "$PROJECT_ROOT/tools/wl-clipboard-peer.c" $(pkg-config --cflags --libs wayland-client)
-ninja -C "$BUILD_DIR" libwm-test-window >/dev/null
+ninja -C "$BUILD_DIR" libwm-test-window libwm-resize-test >/dev/null
 
 RUNTIME="$(mktemp -d "${TMPDIR:-/tmp}/libwm-headless.XXXXXX")"
 chmod 700 "$RUNTIME"
@@ -115,6 +115,49 @@ wait "$APP_PID" 2>/dev/null || true
 wait "$PEER_PID" 2>/dev/null || true
 wait "$HC_PID" 2>/dev/null || true
 
+# Scenario 3: interactive resize. A statusbar corner asks for a bottom-right
+# resize (start_window_resize), which LibWM must turn into xdg_toplevel.resize
+# with the serial of the press; the "None" direction must send nothing.
+cat > "$RUNTIME/resize-input.txt" <<'EOF'
+sleep 200
+motion 200 150
+button PRESS left
+button RELEASE left
+sleep 1500
+EOF
+
+"$HC" --socket libwm-resize --size 800x600 --timeout 3 \
+    --input "$RUNTIME/resize-input.txt" > "$RUNTIME/resize-hc.log" 2>&1 &
+HC_PID=$!
+for _ in $(seq 1 100); do [[ -e "$RUNTIME/libwm-resize" ]] && break; sleep 0.1; done
+
+env XDG_RUNTIME_DIR="$RUNTIME" LIBWM_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY=libwm-resize \
+    SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
+    LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    timeout 4 "$BUILD_DIR/bin/libwm-resize-test" > "$RUNTIME/resize-app.log" 2>&1 || true
+
+wait "$HC_PID" 2>/dev/null || true
+HC_PID=""
+
+# Scenario 4: no input yet. xdg_toplevel.resize needs the serial of the press
+# that asked for it, so LibWM must decline instead of sending a bad request.
+cat > "$RUNTIME/resize-noserial-input.txt" <<'EOF'
+sleep 1500
+EOF
+
+"$HC" --socket libwm-resize-noserial --size 800x600 --timeout 3 \
+    --input "$RUNTIME/resize-noserial-input.txt" > "$RUNTIME/resize-noserial-hc.log" 2>&1 &
+HC_PID=$!
+for _ in $(seq 1 100); do [[ -e "$RUNTIME/libwm-resize-noserial" ]] && break; sleep 0.1; done
+
+env XDG_RUNTIME_DIR="$RUNTIME" LIBWM_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY=libwm-resize-noserial \
+    SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
+    LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    timeout 4 "$BUILD_DIR/bin/libwm-resize-test" > "$RUNTIME/resize-noserial-app.log" 2>&1 || true
+
+wait "$HC_PID" 2>/dev/null || true
+HC_PID=""
+
 failures=0
 check() {
     if eval "$2"; then
@@ -152,6 +195,10 @@ check "incoming Wayland drag entered widget"     "grep -q 'TestWindow: drag move
 check "incoming Wayland drop transferred text"   "grep -q \"TestWindow: drop at 145,115 text='peer-dropped-payload'\" '$RUNTIME/dnd-app.log'"
 check "external drag source got dnd_finished"    "grep -q 'PEER: dnd_finished' '$RUNTIME/dnd-peer.log'"
 check "stuck drag source timed out, not hung"     "grep -q 'PEER: stalling' '$RUNTIME/dnd-peer.log' && grep -q \"drag data for 'application/x-libwm-stall' not received\" '$RUNTIME/dnd-app.log'"
+check "resize: corner request became xdg_toplevel.resize" "grep -q 'started interactive resize of window .* (direction=6, edges=0xa, serial=[1-9]' '$RUNTIME/resize-app.log'"
+check "resize: no request for direction None"     "[ \$(grep -c 'started interactive resize' '$RUNTIME/resize-app.log') -eq 1 ]"
+check "resize: no seat serial declines the request" "grep -q 'no input serial; not resizing window' '$RUNTIME/resize-noserial-app.log'"
+check "resize: nothing sent without a serial"     "! grep -q 'started interactive resize' '$RUNTIME/resize-noserial-app.log'"
 check "frame captured to PNG"                    "[[ -s '$FRAME_OUT' ]]"
 
 if grep -q 'captured' "$RUNTIME/hc.log"; then

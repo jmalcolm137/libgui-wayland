@@ -193,6 +193,13 @@ public:
     void set_maximized(i32 window_id, bool maximized);
     bool is_window_maximized(i32 window_id) const;
     void set_minimized(i32 window_id);
+    // Ask the compositor to resize the window interactively (Serenity's
+    // ResizeDirection): it takes the pointer and sends RESIZING configures until
+    // the button is released. Uses the seat serial of the press that started it.
+    void start_window_resize(i32 window_id, i32 direction);
+    // xdg_toplevel resize edges for a Serenity ResizeDirection: a bitmask of
+    // 1 top, 2 bottom, 4 left, 8 right; 0 for None (or an unknown direction).
+    static u32 resize_edges_for_direction(i32 direction);
     // xdg_toplevel never reports minimization, so this is LibWM's own record:
     // set by set_minimized(), cleared when the compositor activates the window.
     bool is_window_minimized(i32 window_id) const;

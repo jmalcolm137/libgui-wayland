@@ -51,7 +51,7 @@ env XDG_RUNTIME_DIR="$RUNTIME" XDG_CONFIG_HOME="$RUNTIME/config" LIBWM_SESSION_D
     SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
     LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
     "$BUILD_DIR/bin/libwm-unit-test" > "$RUNTIME/unit.log" 2>&1 || UNIT_EXIT=$?
-check "unit: MenuController, PNG, Config & concurrency" "[[ $UNIT_EXIT -eq 0 ]] && grep -qE '[1-9][0-9]* passed, 0 failed' '$RUNTIME/unit.log'"
+check "unit: menus, PNG, Config, threads, resize edges" "[[ $UNIT_EXIT -eq 0 ]] && grep -qE '[1-9][0-9]* passed, 0 failed' '$RUNTIME/unit.log'"
 [[ $UNIT_EXIT -eq 0 ]] || grep -E 'FAIL|passed' "$RUNTIME/unit.log" || true
 
 # --- 2. Window state transitions (fullscreen, maximize, minimize, resize) ----

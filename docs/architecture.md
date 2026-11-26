@@ -86,6 +86,14 @@ role from the Serenity window type:
 | Applet | top layer surface; a desktop's compositor lays it out in the applet area |
 | Popup, Autocomplete, Tooltip, Menu, Notification | overlay layer surface at the client's position |
 
+**Interactive resize.** Dragging a statusbar `ResizeCorner` sends
+`start_window_resize`; LibWM maps the direction to `xdg_toplevel.resize` with the
+seat serial of the press that started it, and the compositor takes over. Its
+configures carry `RESIZING`, so LibWM stretches the last frame through
+`wp_viewport` instead of re-rendering for every step. A request without a recent
+input serial, from a non-resizable window, or for `ResizeDirection::None` is
+ignored rather than sent.
+
 State that is presented on Wayland (title, minimum size, alpha, maximized) is
 owned by the `WindowSurface`; `WindowServerConnection::Window` keeps only the
 protocol view (the client-visible rect, the modified flag, the last backing

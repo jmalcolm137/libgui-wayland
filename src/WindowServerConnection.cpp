@@ -629,6 +629,15 @@ void WindowServerConnection::set_window_parent_from_client(i32, i32 parent_id, i
     WaylandClient::the().set_window_parent(child_id, parent_id);
 }
 
+void WindowServerConnection::start_window_resize(i32 window_id, i32 resize_direction)
+{
+    // LibGUI's statusbar ResizeCorner sends this when dragged. The compositor
+    // drives the resize from here (xdg_toplevel.resize): it takes the pointer and
+    // sends RESIZING configures until the button is released.
+    trace("LibWM: start_window_resize({}, {})", window_id, resize_direction);
+    WaylandClient::the().start_window_resize(window_id, resize_direction);
+}
+
 void WindowServerConnection::set_always_on_top(i32 window_id, bool always_on_top)
 {
     WaylandClient::the().set_always_on_top(window_id, always_on_top);

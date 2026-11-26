@@ -66,9 +66,12 @@ on every run of the test suites.
   server-rendered **menubar and dropdown menus** with hover highlighting (clicking `File → Quit`
   works; `Help → About` opens the dialog), **nested submenus**, **menu item icons**, **long-menu
   scrolling**, and full keyboard navigation (`F10`/`Alt`+accelerator, arrows, `Enter`, `Escape`).
-  Window state (`fullscreen`/`maximize`/`minimize`), Config INI persistence, and SerenityOS
-  `/res/...` path redirection are in. The menubar is rendered on the LibWM server thread and
-  handed to the Wayland side as an image, so it is never drawn from under the menu model.
+  Window state (`fullscreen`/`maximize`/`minimize`) is in, including **interactive resize**:
+  dragging a statusbar `ResizeCorner` becomes `xdg_toplevel.resize`, so the compositor takes the
+  pointer and drives the resize (`RESIZING` configures stretch the last frame while the client
+  re-renders). Config INI persistence and SerenityOS `/res/...` path redirection are in too. The
+  menubar is rendered on the LibWM server thread and handed to the Wayland side as an image, so
+  it is never drawn from under the menu model.
 - **M7** — testing and CI: done. Nine CTest suites (input and drag-and-drop, window state and
   portals, clipboard, menus, PDFViewer, 3DFileViewer/GL, patch series, triage tooling, upstream
   LibGfx) run against a headless Wayland compositor with scripted input and frame capture.
@@ -110,12 +113,6 @@ detail is in [docs/protocol-mapping.md](docs/protocol-mapping.md).
 
 ### In LibWM (affects the SerenityDE session too)
 
-- **Interactive resize.** Dragging LibGUI's statusbar resize corner sends
-  `start_window_resize`, which LibWM does not implement, so the corner does nothing. The fix is to
-  map it to `xdg_toplevel.resize` and let the compositor drive the resize;
-  `set_window_base_size_and_size_increment` and `set_window_resize_aspect_ratio` could constrain
-  the resulting configures. `patches/libgui/0093` lets an application hide the corner in the
-  meantime, but nothing calls it yet.
 - **GPU presentation and shaders.** `EGLGPU` renders on the GPU but reads the result back with
   `glReadPixels` into a `Gfx::Bitmap` and presents over `wl_shm`; zero-copy
   `zwp_linux_dmabuf_v1` is not implemented, and a compositor cannot render GL for a client.
@@ -126,9 +123,11 @@ detail is in [docs/protocol-mapping.md](docs/protocol-mapping.md).
   repository's CI skips the GL suite. A small in-repo LibGL program that renders into a bitmap
   would exercise `EGLGPU` here.
 - **The remaining WindowServer stubs:** `set_forced_shadow` (no CSD drop shadow),
-  `set_global_mouse_tracking`, `set_global_cursor_position`, `refresh_system_theme`,
-  `show_screen_numbers`, `set_flash_flush`, and the window-stealing calls (which have no meaning
-  when each application is its own Wayland client). `is_minimized` is LibWM's own record, set by
+  `set_window_base_size_and_size_increment` and `set_window_resize_aspect_ratio` (they would
+  constrain `xdg_toplevel` configures), `set_global_mouse_tracking`,
+  `set_global_cursor_position`, `refresh_system_theme`, `show_screen_numbers`,
+  `set_flash_flush`, and the window-stealing calls (which have no meaning when each application
+  is its own Wayland client). `is_minimized` is LibWM's own record, set by
   `set_minimized` and cleared when the compositor activates the window.
 - **Test gaps.** The PDFViewer suite opens, renders and resizes but does not assert scrolling or
   zooming.

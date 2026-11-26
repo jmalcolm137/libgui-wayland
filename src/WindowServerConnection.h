@@ -183,6 +183,7 @@ private:
     void set_maximized(i32 window_id, bool maximized) override;
     Messages::WindowServer::IsMaximizedResponse is_maximized(i32 window_id) override;
     void set_minimized(i32 window_id, bool minimized) override;
+    void start_window_resize(i32 window_id, i32 resize_direction) override;
     void set_always_on_top(i32 window_id, bool always_on_top) override;
     void move_window_to_front(i32 window_id) override;
     Messages::WindowServer::GetGlobalCursorPositionResponse get_global_cursor_position() override;

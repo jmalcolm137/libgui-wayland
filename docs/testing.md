@@ -25,7 +25,7 @@ invoke ninja on the build tree, so CTest runs them one at a time.
 
 | CTest name | Script | Labels | Covers |
 |---|---|---|---|
-| `libwm.headless` | `run-headless-tests.sh` | integration | presentation, input (pointer, wheel, XKB keys, double-click), cursors, min size, alpha regions, opaque region, outgoing and incoming drag-and-drop (including bad and stalled peers), long titles, IME, connection loss |
+| `libwm.headless` | `run-headless-tests.sh` | integration | presentation, input (pointer, wheel, XKB keys, double-click), cursors, min size, alpha regions, opaque region, interactive resize (`xdg_toplevel.resize`, and the no-serial/none cases), outgoing and incoming drag-and-drop (including bad and stalled peers), long titles, IME, connection loss |
 | `libwm.window-and-portal` | `run-window-and-portal-tests.sh` | integration | `libwm-unit-test` (MenuController, clipboard image transcoding, Config persistence, thread safety, scale inference), fullscreen/maximize/resize, HiDPI at 1x and 2x, CSD, launching through `Desktop::AppFile`, the Calculator |
 | `libwm.clipboard` | `run-clipboard-test.sh` | integration | clipboard in both directions with a native peer: text aliases, HTML, URI lists, PNG ↔ Serenity images |
 | `libwm.menu` | `run-menu-test.sh` | integration | menubar, popups, submenus, keyboard navigation, item activation, the About dialog; menubar pixels at 1x, 2x and after a resize |

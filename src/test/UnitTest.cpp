@@ -212,6 +212,25 @@ void test_menu_controller()
     controller.close_open_menus();
 }
 
+void test_resize_direction_edges()
+{
+    // Serenity ResizeDirection -> xdg_toplevel resize edges (top 1, bottom 2,
+    // left 4, right 8). Values from WindowServer/ResizeDirection.h: None 0,
+    // Left 1, UpLeft 2, Up 3, UpRight 4, Right 5, DownRight 6, Down 7,
+    // DownLeft 8.
+    using Edges = LibWM::WaylandClient;
+    check(Edges::resize_edges_for_direction(1) == 4, "resize: Left -> left edge"sv);
+    check(Edges::resize_edges_for_direction(2) == 5, "resize: UpLeft -> top|left"sv);
+    check(Edges::resize_edges_for_direction(3) == 1, "resize: Up -> top edge"sv);
+    check(Edges::resize_edges_for_direction(4) == 9, "resize: UpRight -> top|right"sv);
+    check(Edges::resize_edges_for_direction(5) == 8, "resize: Right -> right edge"sv);
+    check(Edges::resize_edges_for_direction(6) == 10, "resize: DownRight -> bottom|right"sv);
+    check(Edges::resize_edges_for_direction(7) == 2, "resize: Down -> bottom edge"sv);
+    check(Edges::resize_edges_for_direction(8) == 6, "resize: DownLeft -> bottom|left"sv);
+    check(Edges::resize_edges_for_direction(0) == 0, "resize: None sends no request"sv);
+    check(Edges::resize_edges_for_direction(99) == 0, "resize: unknown direction sends no request"sv);
+}
+
 void test_clipboard_image_transcoding()
 {
     auto bitmap = MUST(Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, { 5, 4 }));
@@ -379,6 +398,7 @@ ErrorOr<int> serenity_main(Main::Arguments)
     test_clipboard_image_transcoding();
     test_config_server_portal();
     test_wayland_client_thread_safety();
+    test_resize_direction_edges();
 
     outln("==> libwm-unit-test: {} passed, {} failed", s_passed, s_failed);
     return s_failed == 0 ? 0 : 1;

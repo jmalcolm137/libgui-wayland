@@ -28,7 +28,7 @@ required; without the others LibWM falls back as noted.
 ## WindowServer requests (client → LibWM)
 
 `WindowServerConnection` (`src/WindowServerConnection.cpp`,
-`src/WindowServerSettings.cpp`) implements 96 of the 109 requests in
+`src/WindowServerSettings.cpp`) implements 97 of the 109 requests in
 `WindowServer.ipc`. The rest fall through to the generated
 `WindowServerDefaultStub` (`tools/gen-default-stub.py`), which ignores
 asynchronous requests and answers synchronous ones with a valid default
@@ -37,7 +37,7 @@ then sends no reply, and the client's `send_sync()` blocks forever.
 
 | Group | Implemented | Notes |
 |---|---|---|
-| Window lifecycle | `create_window`, `destroy_window`, `set_window_title`, `get_window_title`, `set_window_rect`, `get_window_rect`, `get_window_floating_rect`, `get_window_rect_from_client`, `set_window_minimum_size`, `get_window_minimum_size`, `move_window_to_front`, `set_always_on_top` | the compositor owns placement; layer-surface sizes follow `set_window_rect` |
+| Window lifecycle | `create_window`, `destroy_window`, `set_window_title`, `get_window_title`, `set_window_rect`, `get_window_rect`, `get_window_floating_rect`, `get_window_rect_from_client`, `set_window_minimum_size`, `get_window_minimum_size`, `move_window_to_front`, `set_always_on_top`, `start_window_resize` | the compositor owns placement; layer-surface sizes follow `set_window_rect`; a resize request becomes `xdg_toplevel.resize` |
 | Window state | `set_fullscreen`, `set_maximized`, `is_maximized`, `set_minimized`, `is_minimized`, `set_window_parent_from_client`, `set_frameless`, `set_window_modified`, `is_window_modified`, `set_window_has_alpha_channel`, `set_window_alpha_hit_threshold`, `set_window_icon_bitmap`, `set_window_progress` | progress is accepted and ignored |
 | Painting | `set_window_backing_store`, `invalidate_rect`, `did_finish_painting`, `enable_display_link`, `disable_display_link` | frame-callback paced |
 | Cursor | `set_window_cursor`, `set_window_custom_cursor`, `get_global_cursor_position` | position reconstructed from the surface under the pointer |
@@ -48,7 +48,7 @@ then sends no reply, and the client's `send_sync()` blocks forever.
 | Wallpaper and desktop | `set_wallpaper`, `get_wallpaper`, `set_wallpaper_mode`, `set_background_color`, `apply_workspace_settings`, `get_workspace_settings` | stored by the desktop; `get_wallpaper` reads the `wallpaper.file` it names |
 | Input settings | `get/set_mouse_acceleration` (+ min/max), `get/set_scroll_step_size` (+ min), `get/set_double_click_speed` (+ min/max), `are/set_mouse_buttons_switched`, `is/set_natural_scroll`, `get/set_keyboard_layout`, `get_keyboard_layout_names`, `get/apply_cursor_theme`, `get/set_cursor_highlight_color`, `get/set_cursor_highlight_radius` | applied by the desktop's compositor where available |
 
-**Not implemented** (default stub): `start_window_resize`,
+**Not implemented** (default stub):
 `set_window_base_size_and_size_increment`, `set_window_resize_aspect_ratio`,
 `set_forced_shadow`, `set_global_cursor_position`, `set_global_mouse_tracking`,
 `refresh_system_theme`, `show_screen_numbers`, `set_flash_flush`, `pong`,
@@ -61,13 +61,10 @@ compositor (DESIGN.md §1.2); window stealing lets another process's windows
 parent ours, which has no meaning when every application is its own Wayland
 client.
 
-The one that is felt day to day is `start_window_resize`: LibGUI's statusbar
-`ResizeCorner` sends it when dragged, so the corner currently does nothing. It
-maps directly to `xdg_toplevel.resize`, with the compositor driving the resize;
-`set_window_base_size_and_size_increment` and
-`set_window_resize_aspect_ratio` could constrain the resulting configures.
-`patches/libgui/0093` lets an application hide the corner in the meantime, but
-nothing calls it yet.
+`set_window_base_size_and_size_increment` and `set_window_resize_aspect_ratio`
+would constrain the sizes a resize can produce; both are still defaults.
+`patches/libgui/0093` lets an application hide the statusbar resize corner if it
+does not want one; the corner is functional without it.
 
 `is_minimized` is LibWM's own record, since `xdg_toplevel` never reports
 minimization: set by `set_minimized`, cleared when the compositor activates the
