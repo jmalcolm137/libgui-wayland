@@ -32,8 +32,9 @@ required; without the others LibWM falls back as noted.
 
 `WindowServerConnection` (`src/WindowServerConnection.cpp`,
 `src/WindowServerSettings.cpp`) overrides 108 of the 109 requests in
-`WindowServer.ipc`; eight of those are deliberate no-ops with no Wayland
-equivalent (the table below). Only `pong` still falls through to the generated
+`WindowServer.ipc`; seven of those are deliberate no-ops with no Wayland
+equivalent, and the rest map as far as the protocol goes (the table below).
+Only `pong` still falls through to the generated
 `WindowServerDefaultStub` (`tools/gen-default-stub.py`), which ignores
 asynchronous requests and answers synchronous ones with a valid default
 (false, zero, empty). It must never answer with an invalid response: LibIPC
