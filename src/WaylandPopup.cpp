@@ -285,6 +285,18 @@ void WaylandClient::create_popup(i32 popup_id, i32 parent_window_id, i32 parent_
     }
 
     if (layer_parent) {
+        create_layer_popup(popup_id, layer_position, anchor, size, is_submenu);
+        return;
+    }
+    if (!parent_xdg)
+        return;
+    create_xdg_popup(popup_id, parent_xdg, anchor, size, is_submenu);
+}
+
+// A menu of a layer-surface parent (Desktop, Taskbar, applet): an overlay layer
+// surface positioned at the anchor, kept on-screen by hand.
+void WaylandClient::create_layer_popup(i32 popup_id, Gfx::IntPoint layer_position, Gfx::IntRect anchor, Gfx::IntSize size, bool is_submenu)
+{
         if (!m_layer_shell)
             return;
         auto* surface = wl_compositor_create_surface(m_compositor);
@@ -322,11 +334,12 @@ void WaylandClient::create_popup(i32 popup_id, i32 parent_window_id, i32 parent_
         wl_display_flush(m_display);
         trace("LibWM/Wayland: menu layer {} created ({}x{}) at {},{} submenu={}", popup_id, size.width(), size.height(), layer_position.x(), layer_position.y(), is_submenu);
         return;
-    }
+}
 
-    if (!parent_xdg)
-        return;
-
+// A menu of an ordinary toplevel: xdg_popup with a positioner; the root popup
+// grabs the seat, nested ones inherit the grab.
+void WaylandClient::create_xdg_popup(i32 popup_id, xdg_surface* parent_xdg, Gfx::IntRect anchor, Gfx::IntSize size, bool is_submenu)
+{
     auto* surface = wl_compositor_create_surface(m_compositor);
     auto* xdg_surface = xdg_wm_base_get_xdg_surface(m_wm_base, surface);
     xdg_surface_add_listener(xdg_surface, &s_popup_xdg_surface_listener, this);
@@ -355,6 +368,7 @@ void WaylandClient::create_popup(i32 popup_id, i32 parent_window_id, i32 parent_
     wl_display_flush(m_display);
     trace("LibWM/Wayland: popup {} created ({}x{}) at {},{} submenu={}", popup_id, size.width(), size.height(), anchor.x(), anchor.y(), is_submenu);
 }
+
 
 void WaylandClient::present_popup(i32 popup_id, Gfx::Bitmap const& source)
 {

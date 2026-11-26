@@ -533,11 +533,23 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::In
     if (!m_compositor || !m_wm_base)
         return;
 
-    // Serenity shell window types map directly onto wlr-layer-shell roles: the
-    // Taskbar is a bottom panel, the Desktop is a background surface, and
-    // applets are top-layer surfaces. This replaces the earlier app_id hint.
     auto type = static_cast<WindowServer::WindowType>(window_type);
     if (m_layer_shell && (type == WindowServer::WindowType::Taskbar || type == WindowServer::WindowType::Desktop || type == WindowServer::WindowType::Applet)) {
+        create_layer_window(window_id, window_type, position, size, title, has_alpha, resizable);
+        return;
+    }
+    if (m_layer_shell && (type == WindowServer::WindowType::Popup || type == WindowServer::WindowType::Autocomplete || type == WindowServer::WindowType::Tooltip || type == WindowServer::WindowType::Menu || type == WindowServer::WindowType::Notification)) {
+        create_overlay_window(window_id, window_type, position, size, title, has_alpha, resizable);
+        return;
+    }
+    create_toplevel_window(window_id, size, title, has_alpha, resizable, frameless, window_mode, parent_window_id, launch_origin);
+}
+
+// The Taskbar, Desktop and applets: anchored layer-shell surfaces whose size and
+// placement the compositor controls.
+void WaylandClient::create_layer_window(i32 window_id, i32 window_type, Gfx::IntPoint position, Gfx::IntSize size, ByteString const& title, bool has_alpha, bool resizable)
+{
+    auto type = static_cast<WindowServer::WindowType>(window_type);
         uint32_t layer = ZWLR_LAYER_SHELL_V1_LAYER_TOP;
         uint32_t anchor = 0;
         uint32_t width = size.width();
@@ -630,11 +642,13 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::In
         m_windows.set(window_id, move(window_surface));
         wl_display_flush(m_display);
         return;
-    }
+}
 
-    // Popup windows (ComboBox dropdowns, autocomplete, tooltips, menus opened as
-    // windows) are frameless overlays the client positions itself.
-    if (m_layer_shell && (type == WindowServer::WindowType::Popup || type == WindowServer::WindowType::Autocomplete || type == WindowServer::WindowType::Tooltip || type == WindowServer::WindowType::Menu || type == WindowServer::WindowType::Notification)) {
+// ComboBox dropdowns, autocomplete, tooltips, menus opened as windows and
+// notifications: frameless overlay layer surfaces the client positions itself.
+void WaylandClient::create_overlay_window(i32 window_id, i32 window_type, Gfx::IntPoint position, Gfx::IntSize size, ByteString const& title, bool has_alpha, bool resizable)
+{
+    auto type = static_cast<WindowServer::WindowType>(window_type);
         bool const is_notification = type == WindowServer::WindowType::Notification;
         bool const is_tooltip = type == WindowServer::WindowType::Tooltip;
         bool const takes_focus = !is_notification && !is_tooltip;
@@ -670,8 +684,12 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::In
         wl_display_flush(m_display);
         trace("LibWM/Wayland: popup window {} ({}x{}) at {},{}", window_id, size.width(), size.height(), position.x(), position.y());
         return;
-    }
+}
 
+// An ordinary xdg_toplevel (window, dialog, ...): title, app_id, transient
+// parent, decorations and HiDPI objects.
+void WaylandClient::create_toplevel_window(i32 window_id, Gfx::IntSize size, ByteString const& title, bool has_alpha, bool resizable, bool frameless, i32 window_mode, i32 parent_window_id, Gfx::IntRect const& launch_origin)
+{
     auto* surface = wl_compositor_create_surface(m_compositor);
     auto* xdg_surface_object = xdg_wm_base_get_xdg_surface(m_wm_base, surface);
     xdg_surface_add_listener(xdg_surface_object, &s_xdg_surface_listener, this);
@@ -733,6 +751,7 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::In
     m_windows.set(window_id, move(window_surface));
     wl_display_flush(m_display);
 }
+
 
 void WaylandClient::destroy_window(i32 window_id)
 {

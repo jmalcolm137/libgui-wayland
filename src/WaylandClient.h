@@ -507,6 +507,11 @@ private:
     void update_input_region(WindowSurface&, u8 const* client_pixels, size_t pitch, Gfx::IntSize visible_size, int scale, int total_inset);
     void present_menubar(WindowSurface&, Gfx::IntSize visible_size);
     void render_csd_titlebar(WindowSurface const&, Gfx::Bitmap&, int width);
+    void create_layer_window(i32 window_id, i32 window_type, Gfx::IntPoint position, Gfx::IntSize size, ByteString const& title, bool has_alpha, bool resizable);
+    void create_overlay_window(i32 window_id, i32 window_type, Gfx::IntPoint position, Gfx::IntSize size, ByteString const& title, bool has_alpha, bool resizable);
+    void create_toplevel_window(i32 window_id, Gfx::IntSize size, ByteString const& title, bool has_alpha, bool resizable, bool frameless, i32 window_mode, i32 parent_window_id, Gfx::IntRect const& launch_origin);
+    void create_layer_popup(i32 popup_id, Gfx::IntPoint layer_position, Gfx::IntRect anchor, Gfx::IntSize size, bool is_submenu);
+    void create_xdg_popup(i32 popup_id, xdg_surface* parent_xdg, Gfx::IntRect anchor, Gfx::IntSize size, bool is_submenu);
     // Publish (or clear) the window's icon with xdg-toplevel-icon-v1; false when
     // the compositor has no such manager, so the caller falls back.
     bool publish_xdg_toplevel_icon(WindowSurface&, Gfx::Bitmap const*);

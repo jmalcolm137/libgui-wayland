@@ -153,9 +153,11 @@ detail is in [docs/protocol-mapping.md](docs/protocol-mapping.md).
   window.
 - **Clean-ups.** SerenityDE's file handling now lives in the desktop (the shim only reads the
   host settings and `serenity-window`), and `WaylandClient`'s C protocol handlers are private
-  behind the `WaylandEvents` friend, leaving only the API its callers use public. The three
-  long presentation/lifecycle functions (`commit_window_content`, `create_window`,
-  `create_popup`) still carry their per-role branches inline.
+  behind the `WaylandEvents` friend, leaving only the API its callers use public. `create_window`
+  and `create_popup` are split into their role-specific helpers
+  (`create_layer_window`/`create_overlay_window`/`create_toplevel_window`, and
+  `create_layer_popup`/`create_xdg_popup`). `commit_window_content` still interleaves its three
+  presentation paths (composed inset, fractional resample, direct shm).
 
 ### Provided by the desktop, not implemented portably
 
