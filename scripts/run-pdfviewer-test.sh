@@ -231,7 +231,7 @@ pdf_frame() {
     env XDG_RUNTIME_DIR="$RUNTIME" WAYLAND_DISPLAY="pdf-$name" \
         SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
         LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-        LIBWM_DUMP="$RUNTIME/$name.png" \
+        LIBWM_DUMP="$RUNTIME/$name.png" LIBWM_AXIS_DEBUG=1 \
         timeout 15 "$APP" "$PDF" > "$RUNTIME/$name.app.log" 2>&1 || true
     wait "$HC_PID" 2>/dev/null || true
     HC_PID=""
@@ -308,6 +308,8 @@ check "scroll & zoom: runs did not crash"          "! grep -l 'VERIFICATION FAIL
 if [[ $failures -ne 0 ]]; then
     echo "==> $failures PDFViewer check(s) failed; measurements:"
     cat "$RUNTIME/pdf-view.log" 2>/dev/null || true
+    echo "--- wheel events seen by the app (scroll run) ---"
+    grep -h 'axis delta' "$RUNTIME"/pdf-*.app.log 2>/dev/null | tail -20 || true
     echo "--- app log ---"
     cat "$RUNTIME/app.log"
     echo "--- picker run log ---"
