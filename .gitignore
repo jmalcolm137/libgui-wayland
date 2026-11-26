@@ -6,6 +6,8 @@
 
 # Build outputs
 /build/
+# The headless compositor's default screenshot when no --output is given.
+/frame.png
 *.o
 *.so
 *.a

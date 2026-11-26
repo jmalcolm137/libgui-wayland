@@ -129,7 +129,7 @@ sleep 1500
 EOF
 
 "$HC" --socket libwm-resize --size 800x600 --timeout 3 \
-    --input "$RUNTIME/resize-input.txt" > "$RUNTIME/resize-hc.log" 2>&1 &
+    --output "$RUNTIME/resize-frame.png" --input "$RUNTIME/resize-input.txt" > "$RUNTIME/resize-hc.log" 2>&1 &
 HC_PID=$!
 for _ in $(seq 1 100); do [[ -e "$RUNTIME/libwm-resize" ]] && break; sleep 0.1; done
 
@@ -148,7 +148,7 @@ sleep 1500
 EOF
 
 "$HC" --socket libwm-resize-noserial --size 800x600 --timeout 3 \
-    --input "$RUNTIME/resize-noserial-input.txt" > "$RUNTIME/resize-noserial-hc.log" 2>&1 &
+    --output "$RUNTIME/resize-noserial-frame.png" --input "$RUNTIME/resize-noserial-input.txt" > "$RUNTIME/resize-noserial-hc.log" 2>&1 &
 HC_PID=$!
 for _ in $(seq 1 100); do [[ -e "$RUNTIME/libwm-resize-noserial" ]] && break; sleep 0.1; done
 
