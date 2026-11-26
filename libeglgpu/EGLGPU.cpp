@@ -480,14 +480,24 @@ Device::~Device()
 
 ErrorOr<NonnullOwnPtr<Device>> Device::try_create(Gfx::IntSize size)
 {
-    auto display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-    if (display == EGL_NO_DISPLAY)
-        return Error::from_string_literal("eglGetDisplay() failed");
-
     EGLint major = 0;
     EGLint minor = 0;
-    if (eglInitialize(display, &major, &minor) == EGL_FALSE)
-        return Error::from_string_literal("eglInitialize() failed");
+
+    // A compositor-less host (CI, a headless test) has no default EGL display;
+    // Mesa's surfaceless platform still provides an llvmpipe-backed context.
+    auto display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+    bool initialized = display != EGL_NO_DISPLAY && eglInitialize(display, &major, &minor) == EGL_TRUE;
+    if (!initialized) {
+        using GetPlatformDisplay = EGLDisplay (*)(EGLenum, void*, EGLint const*);
+        auto get_platform_display = reinterpret_cast<GetPlatformDisplay>(eglGetProcAddress("eglGetPlatformDisplay"));
+        if (!get_platform_display)
+            get_platform_display = reinterpret_cast<GetPlatformDisplay>(eglGetProcAddress("eglGetPlatformDisplayEXT"));
+        if (get_platform_display)
+            display = get_platform_display(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr);
+        if (display == EGL_NO_DISPLAY || eglInitialize(display, &major, &minor) == EGL_FALSE)
+            return Error::from_string_literal("eglInitialize() failed");
+        dbgln("EGLGPU: no default EGL display; using the surfaceless platform");
+    }
 
     if (eglBindAPI(EGL_OPENGL_API) == EGL_FALSE)
         return Error::from_string_literal("eglBindAPI(EGL_OPENGL_API) failed");
