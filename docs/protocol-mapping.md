@@ -59,10 +59,15 @@ All are asynchronous or have an empty reply, which LibIPC sends itself, so none
 can block the caller. Most are global window-manager duties that belong to the
 compositor (DESIGN.md §1.2); window stealing lets another process's windows
 parent ours, which has no meaning when every application is its own Wayland
-client. Two have direct Wayland equivalents and are worth adding:
-`start_window_resize` (LibGUI's `ResizeCorner`) maps to `xdg_toplevel.resize`,
-and `set_window_base_size_and_size_increment` /
-`set_window_resize_aspect_ratio` could constrain `xdg_toplevel` configures.
+client.
+
+The one that is felt day to day is `start_window_resize`: LibGUI's statusbar
+`ResizeCorner` sends it when dragged, so the corner currently does nothing. It
+maps directly to `xdg_toplevel.resize`, with the compositor driving the resize;
+`set_window_base_size_and_size_increment` and
+`set_window_resize_aspect_ratio` could constrain the resulting configures.
+`patches/libgui/0093` lets an application hide the corner in the meantime, but
+nothing calls it yet.
 
 `is_minimized` is LibWM's own record, since `xdg_toplevel` never reports
 minimization: set by `set_minimized`, cleared when the compositor activates the
