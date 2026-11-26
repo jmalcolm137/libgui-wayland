@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Build the full LibGfx + LibGUI (plus LibWeb/LibWebView, LibAudio, and the
-# applications) from SerenityOS source on the host, using Lagom as the build
-# system.
+# Build the full LibGfx + LibGUI (plus LibWeb/LibWebView and LibAudio) from
+# SerenityOS source on the host, using Lagom as the build system.
 #
 # The changes to upstream are small, documented patches (see patches/): teach
 # Lagom to compile the full LibGUI and to generate the IPC endpoint headers for
-# the SERENITYOS-gated services it needs; host seams in LibCore/AK/LibThreading;
-# host tuning in LibAudio; a couple of library source fixes; and a few
-# application include fixes. Application sources are otherwise unmodified.
+# the SERENITYOS-gated services it needs, plus host seams in LibCore/AK/
+# LibThreading and host tuning in LibAudio. The applications are not built here:
+# they belong to the desktop, whose build defines their targets
+# (EXCLUDE_FROM_ALL in this tree) and names them.
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
