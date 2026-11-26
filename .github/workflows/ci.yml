@@ -61,14 +61,17 @@ jobs:
           ./scripts/check.sh 2>&1 | tee check.log
           status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ]; then
-            # The job log needs a login to read; the step summary is public, so
-            # put the failing checks there for anyone looking at the run.
+            # The job log needs a login to read; annotations and the step
+            # summary are visible to anyone looking at the run.
+            while IFS= read -r line; do
+              echo "::error::${line}"
+            done < <(grep -E 'FAIL$|\*\*\*Failed' check.log | tail -10)
             {
               echo "## LibWM checks failed (ctest exit $status)"
               echo
               echo 'Failed checks:'
               echo '```'
-              grep -E 'FAIL$' check.log | tail -40 || true
+              grep -E 'FAIL$|\*\*\*Failed' check.log | tail -40 || true
               echo '```'
               echo 'Tail of the log:'
               echo '```'
