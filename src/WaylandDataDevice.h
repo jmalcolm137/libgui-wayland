@@ -77,6 +77,8 @@ public:
     void maybe_create_data_device();
     void on_data_offer(wl_data_offer*);
     void on_data_offer_mime(wl_data_offer*, char const* mime_type);
+    void on_data_offer_source_actions(wl_data_offer*, u32 actions);
+    void on_data_offer_action(wl_data_offer*, u32 action);
     void on_selection(wl_data_offer*);
     void on_source_send(wl_data_source*, char const* mime_type, int fd);
     void on_source_cancelled(wl_data_source*);
@@ -101,6 +103,9 @@ private:
     // Drop an offer we are about to destroy from the selection state (the drag
     // and the selection share the pending-offer list).
     void forget_offer(wl_data_offer*);
+    // Tell the compositor which of the source's actions this drop target
+    // supports, and remember the one it selects.
+    void apply_drag_actions();
     void maybe_create_primary_device();
     void write_primary_offers(HashMap<ByteString, ByteBuffer> const&);
     ByteBuffer receive_primary_offer_data(zwp_primary_selection_offer_v1*, ByteString const& mime);
@@ -112,6 +117,7 @@ private:
         wl_data_offer* current_offer { nullptr };
         Vector<wl_data_offer*> pending_offers;
         HashMap<u64, Vector<ByteString>> offer_mime_types;
+        HashMap<u64, u32> offer_source_actions;
         wl_data_source* selection_source { nullptr };
         HashMap<ByteString, ByteBuffer> clipboard_offers;
         Function<void(ByteString const&)> on_clipboard_changed;
@@ -123,6 +129,9 @@ private:
         wl_buffer* drag_icon_buffer { nullptr };
         Optional<Core::AnonymousBuffer> drag_icon_anon;
         wl_data_offer* drag_offer { nullptr };
+        u32 drag_source_actions { 0 };
+        u32 drag_selected_action { 0 };
+        bool drag_accepted { false };
         i32 drag_window { -1 };
         Gfx::IntPoint drag_position;
         u32 drag_serial { 0 };

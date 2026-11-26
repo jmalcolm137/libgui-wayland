@@ -218,6 +218,8 @@ check "XKB Shift+A translated to 'A' (65)"       "grep -q 'TestWindow: key down 
 check "XKB Ctrl+C translated to ETX (3)"         "grep -q 'TestWindow: key down code_point=3 .* modifiers=2' '$RUNTIME/app.log'"
 check "outgoing drag started on Wayland"         "grep -q 'started drag (' '$RUNTIME/app.log'"
 check "outgoing drag finished cleanly"           "grep -q 'TestWindow: outgoing drag finished' '$RUNTIME/app.log'"
+check "drag target negotiated the source's actions" "grep -q 'drag actions: supported 0x3' '$RUNTIME/app.log'"
+check "no Wayland protocol error during the run"  "! grep -q 'unknown object .* message error' '$RUNTIME/app.log' && ! grep -q 'error in client communication' '$RUNTIME/hc.log' && ! grep -q 'error in client communication' '$RUNTIME/dnd-hc.log'"
 check "oversized UTF-8 window title survived"    "grep -q 'TestWindow: oversized UTF-8 title clamped and sent' '$RUNTIME/app.log'"
 check "shim keeps the full title (6600 bytes)"    "grep -q 'TestWindow: shim state title_bytes=6600 ' '$RUNTIME/app.log'"
 check "shim owns min size; alpha from store"     "grep -q 'TestWindow: shim state .* min_size=120x90 alpha=true' '$RUNTIME/app.log'"

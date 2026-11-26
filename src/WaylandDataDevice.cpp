@@ -76,8 +76,15 @@ static void data_offer_offer(void* data, wl_data_offer* offer, char const* mime_
     static_cast<WaylandDataDevice*>(data)->on_data_offer_mime(offer, mime_type);
 }
 
-static void data_offer_source_actions(void*, wl_data_offer*, uint32_t) { }
-static void data_offer_action(void*, wl_data_offer*, uint32_t) { }
+static void data_offer_source_actions(void* data, wl_data_offer* offer, uint32_t actions)
+{
+    static_cast<WaylandDataDevice*>(data)->on_data_offer_source_actions(offer, actions);
+}
+
+static void data_offer_action(void* data, wl_data_offer* offer, uint32_t action)
+{
+    static_cast<WaylandDataDevice*>(data)->on_data_offer_action(offer, action);
+}
 
 static wl_data_offer_listener const s_data_offer_listener = {
     .offer = data_offer_offer,
@@ -468,6 +475,49 @@ void WaylandDataDevice::on_data_offer_mime(wl_data_offer* offer, char const* mim
         it->value.append(ByteString(mime_type));
 }
 
+void WaylandDataDevice::on_data_offer_source_actions(wl_data_offer* offer, u32 actions)
+{
+    MutexLocker locker(m_client.m_mutex);
+    trace("LibWM/Wayland: drag offer source actions 0x{:x} (offer {})", actions, static_cast<void*>(offer));
+    m_state.offer_source_actions.set(reinterpret_cast<u64>(offer), actions);
+    if (offer == m_state.drag_offer) {
+        m_state.drag_source_actions = actions;
+        apply_drag_actions();
+    }
+}
+
+void WaylandDataDevice::on_data_offer_action(wl_data_offer* offer, u32 action)
+{
+    MutexLocker locker(m_client.m_mutex);
+    if (offer == m_state.drag_offer)
+        m_state.drag_selected_action = action;
+}
+
+// `set_actions` is what makes the drop action part of the negotiation: without
+// it the compositor has no action to match, and `finish` is a protocol error.
+// Serenity's drag operation is a copy, so prefer copy when the source allows it.
+void WaylandDataDevice::apply_drag_actions()
+{
+    auto* offer = m_state.drag_offer;
+    if (!offer) {
+        trace("LibWM/Wayland: no drag offer yet for actions 0x{:x}", m_state.drag_source_actions);
+        return;
+    }
+    if (wl_data_offer_get_version(offer) < 3) {
+        trace("LibWM/Wayland: drag offer v{} cannot negotiate actions", wl_data_offer_get_version(offer));
+        return;
+    }
+    uint32_t const supported = m_state.drag_source_actions
+        & (WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY | WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE);
+    if (!supported)
+        return;
+    trace("LibWM/Wayland: drag actions: supported 0x{:x} (source 0x{:x})", supported, m_state.drag_source_actions);
+    uint32_t const preferred = (supported & WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY)
+        ? static_cast<uint32_t>(WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY)
+        : supported;
+    wl_data_offer_set_actions(offer, supported, preferred);
+}
+
 void WaylandDataDevice::on_selection(wl_data_offer* offer)
 {
     MutexLocker locker(m_client.m_mutex);
@@ -721,6 +771,13 @@ void WaylandDataDevice::on_drag_enter(u32 serial, wl_data_offer* offer, wl_surfa
     m_state.drag_received.clear();
     // Each drag starts undecided; the target widget accepts (or not).
     m_state.accepts_drag = false;
+    m_state.drag_accepted = false;
+    m_state.drag_selected_action = 0;
+    m_state.drag_source_actions = offer
+        ? m_state.offer_source_actions.get(reinterpret_cast<u64>(offer)).value_or(0)
+        : 0;
+    if (offer)
+        apply_drag_actions();
     // Fetch the offered data (the source writes it on demand). Skipped while this
     // process is itself the source: reading would block the same event loop that
     // would answer the request.
@@ -736,8 +793,10 @@ void WaylandDataDevice::on_drag_enter(u32 serial, wl_data_offer* offer, wl_surfa
     }
     // The widget decides whether it accepts; Application replies with
     // set_accepts_drag() after the dispatched event, which accepts the offer.
-    if (m_state.accepts_drag && offer && !m_state.drag_mime.is_empty())
+    if (m_state.accepts_drag && offer && !m_state.drag_mime.is_empty()) {
         wl_data_offer_accept(offer, serial, m_state.drag_mime.characters());
+        m_state.drag_accepted = true;
+    }
     if (m_state.drag_window >= 0 && m_client.m_input.drag_moved)
         m_client.m_input.drag_moved(m_state.drag_window, adjusted_drag_position(), m_client.m_seat->pointer_buttons(), m_client.m_seat->current_modifiers(), copy_for_other_thread(m_state.drag_received));
 }
@@ -746,8 +805,10 @@ void WaylandDataDevice::on_drag_motion(Gfx::IntPoint position)
 {
     MutexLocker locker(m_client.m_mutex);
     m_state.drag_position = position;
-    if (m_state.drag_offer && m_state.accepts_drag && !m_state.drag_mime.is_empty())
+    if (m_state.drag_offer && m_state.accepts_drag && !m_state.drag_mime.is_empty()) {
         wl_data_offer_accept(m_state.drag_offer, m_state.drag_serial, m_state.drag_mime.characters());
+        m_state.drag_accepted = true;
+    }
     if (m_state.drag_window >= 0 && m_client.m_input.drag_moved)
         m_client.m_input.drag_moved(m_state.drag_window, adjusted_drag_position(), m_client.m_seat->pointer_buttons(), m_client.m_seat->current_modifiers(), copy_for_other_thread(m_state.drag_received));
 }
@@ -756,8 +817,10 @@ void WaylandDataDevice::set_accepts_drag(bool accepts)
 {
     MutexLocker locker(m_client.m_mutex);
     m_state.accepts_drag = accepts;
-    if (accepts && m_state.drag_offer && !m_state.drag_mime.is_empty())
+    if (accepts && m_state.drag_offer && !m_state.drag_mime.is_empty()) {
         wl_data_offer_accept(m_state.drag_offer, m_state.drag_serial, m_state.drag_mime.characters());
+        m_state.drag_accepted = true;
+    }
 }
 
 void WaylandDataDevice::on_drag_drop()
@@ -766,12 +829,16 @@ void WaylandDataDevice::on_drag_drop()
     if (m_state.drag_window >= 0 && m_client.m_input.drag_dropped)
         m_client.m_input.drag_dropped(m_state.drag_window, adjusted_drag_position(), m_client.m_seat->pointer_buttons(), m_client.m_seat->current_modifiers(), copy_for_other_thread(m_state.drag_received));
     if (m_state.drag_offer) {
-        wl_data_offer_finish(m_state.drag_offer);
+        // `finish` says this client took the drop; without an accepted type the
+        // offer is simply destroyed (the source sees the drag end instead).
+        if (m_state.drag_accepted)
+            wl_data_offer_finish(m_state.drag_offer);
         forget_offer(m_state.drag_offer);
         wl_data_offer_destroy(m_state.drag_offer);
         m_state.drag_offer = nullptr;
     }
     m_state.drag_window = -1;
+    m_state.drag_accepted = false;
     m_state.drag_received.clear();
 }
 
@@ -793,6 +860,7 @@ void WaylandDataDevice::forget_offer(wl_data_offer* offer)
 {
     MutexLocker locker(m_client.m_mutex);
     m_state.offer_mime_types.remove(reinterpret_cast<u64>(offer));
+    m_state.offer_source_actions.remove(reinterpret_cast<u64>(offer));
     if (m_state.current_offer == offer)
         m_state.current_offer = nullptr;
     for (size_t i = m_state.pending_offers.size(); i > 0; --i) {
