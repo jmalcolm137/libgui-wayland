@@ -32,7 +32,7 @@ jobs:
           pacman -Syu --noconfirm --needed \
             base-devel git cmake ninja meson python ccache \
             wayland wayland-protocols libxkbcommon \
-            mesa libglvnd systemd-libs elfutils libunwind \
+            mesa libglvnd systemd-libs systemd elfutils libunwind dbus \
             cairo freetype2 fontconfig pixman libxrender
 
       - uses: actions/checkout@v4

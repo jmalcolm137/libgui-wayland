@@ -20,6 +20,7 @@
 #include <WindowServer/WindowClientEndpoint.h>
 #include <WindowServer/WindowServerEndpoint.h>
 
+#include "DesktopSettings.h"
 #include "MainThreadInvoker.h"
 #include "MenuController.h"
 #include "SerenityShell.h"
@@ -87,6 +88,12 @@ private:
         (void)this->socket().set_blocking(false);
         set_send_timeout(1000);
 
+        // The desktop's appearance, from the standard Settings portal. It only
+        // applies when no desktop sends a theme over serenity-window, and its
+        // changes arrive on this thread's event loop.
+        m_desktop_settings = make<DesktopSettings>();
+        m_desktop_settings->set_changed_callback([this] { apply_portal_appearance(); });
+
         // The theme and fonts come from the desktop's host settings, which may arrive
         // after this constructor runs and are re-sent whenever they change.
         //
@@ -152,6 +159,9 @@ private:
     void install_input_callbacks();
     void install_menu_callbacks();
     void update_window_menubar(i32 window_id);
+    // Follow the desktop's appearance (org.freedesktop.portal.Settings) when no
+    // desktop sends a theme over serenity-window.
+    void apply_portal_appearance();
     void present_window_menubar(i32 window_id);
     void present_menu_popup(i32 menu_id);
 
@@ -283,6 +293,8 @@ private:
     // `fonts`). The applied values are kept to skip re-sends of unchanged ones.
     void apply_host_settings();
     ByteString m_theme_name { "Default" };
+    OwnPtr<DesktopSettings> m_desktop_settings;
+    ByteString m_applied_portal_theme;
     ByteString m_applied_theme_path;
     // ThemeEditor's live preview. It restyles this application only: other
     // applications are separate processes with their own LibWM.

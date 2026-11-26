@@ -47,6 +47,14 @@ libwm_gui_executable(libwm-appfile-test
     INCLUDES ${LIBWM_TEST_INCLUDES}
     LIBS LibMain LibGUI LibGfx LibCore LibIPC LibDesktop LibURL)
 
+# Client-side GL through LibWM: LibGL renders a solid colour (EGLGPU or
+# LibSoftGPU, forced by the suite), LibGUI paints the bitmap, LibWM presents it.
+# This is what gives CI GL coverage without the desktop's 3DFileViewer.
+libwm_gui_executable(libwm-gl-test
+    SOURCES GlTest.cpp
+    INCLUDES ${LIBWM_TEST_INCLUDES}
+    LIBS LibMain LibGUI LibGfx LibCore LibIPC LibGL LibGPU)
+
 # Interactive resize: asks for a bottom-right resize as the ResizeCorner does.
 libwm_gui_executable(libwm-resize-test
     SOURCES ResizeTest.cpp
@@ -95,6 +103,10 @@ libwm_add_script_test(window-and-portal run-window-and-portal-tests.sh "integrat
 libwm_add_script_test(clipboard run-clipboard-test.sh "integration")
 libwm_add_script_test(menu run-menu-test.sh "integration")
 libwm_add_script_test(pdfviewer run-pdfviewer-test.sh "integration;apps")
+libwm_add_script_test(gl run-gl-test.sh "integration;gl")
+libwm_add_script_test(settings-portal run-settings-portal-test.sh "integration")
+# No libsystemd in the build: the portal bridge is not compiled in.
+set_tests_properties(libwm.settings-portal PROPERTIES SKIP_RETURN_CODE 77)
 libwm_add_script_test(3dfileviewer run-3dfileviewer-test.sh "integration;apps;gl")
 # 3DFileViewer comes from a desktop's application set; without it the suite
 # exits 77 and is reported as skipped.

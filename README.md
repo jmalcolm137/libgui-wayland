@@ -76,13 +76,14 @@ on every run of the test suites.
   re-renders). Config INI persistence and SerenityOS `/res/...` path redirection are in too. The
   menubar is rendered on the LibWM server thread and handed to the Wayland side as an image, so
   it is never drawn from under the menu model.
-- **M7** — testing and CI: done. Nine CTest suites (input and drag-and-drop, window state and
-  portals, clipboard, menus, PDFViewer, 3DFileViewer/GL, patch series, triage tooling, upstream
-  LibGfx) run against a headless Wayland compositor with scripted input and frame capture.
+- **M7** — testing and CI: done. Eleven CTest suites (input and drag-and-drop, window state and
+  portals, clipboard and primary selection, menus, PDFViewer, **client-side GL**, the desktop
+  appearance portal, patch series, triage tooling, upstream LibGfx) run against a headless
+  Wayland compositor with scripted input and frame capture.
   `.github/workflows/ci.yml` builds and runs them in an Arch container on every push, with a
-  compiler cache and log artifacts on failure. The GL suite is skipped in CI because
-  `3DFileViewer` is added to the build by the desktop's application set, not by this repository
-  (see Remaining work).
+  compiler cache and log artifacts on failure. The GL suite uses LibWM's own test program, so the
+  `EGLGPU` backend is covered here; `3DFileViewer` (desktop-provided) remains the full-application
+  check.
 - **M8** — HiDPI and fractional scaling: done. LibWM binds `wp_fractional_scale_v1`
   (`preferred_scale` in `1/120` units), infers fractional ratios from `wl_output` physical mode +
   `zxdg_output_v1` logical size, and supports explicit integer or fractional overrides via
@@ -97,7 +98,8 @@ on every run of the test suites.
   **AudioServer / AudioManager protocols** directly (Piano, SoundPlayer, `aplay`, the Audio
   applet) are served by an out-of-process **`AudioServer`** that the desktop provides; LibWM
   spawns it on demand from `LIBWM_APP_BIN_DIR`.
-- **M10** — GPU/OpenGL: done for the client-side stack. `LibGL` → `LibGPU`/`LibGLSL` builds on the
+- **M10** — GPU/OpenGL: done for the client-side stack. `EGLGPU` uses Mesa's surfaceless
+  platform when there is no default EGL display, so it also runs headless (CI). `LibGL` → `LibGPU`/`LibGLSL` builds on the
   host unchanged, with two `GPU::Device` backends: **`EGLGPU`** (Mesa through EGL, the default)
   and **`LibSoftGPU`** (CPU). `EGLGPU` falls back to `LibSoftGPU` when no EGL context can be
   created, so GL always works. GL renders into an **offscreen `Gfx::Bitmap`** which LibGUI paints
@@ -114,6 +116,11 @@ on every run of the test suites.
   its scale), falling back to `serenity_toplevel.set_icon` on compositors without it. Verified
   against the SerenityDE compositor, whose Taskbar draws the icon from its WindowManagerServer
   updates.
+- **M13** — desktop appearance: done. When no desktop sends a theme over `serenity-window`,
+  LibWM reads `org.freedesktop.appearance color-scheme` from the standard
+  `org.freedesktop.portal.Settings` and applies the bundled `Dark`, `Light` or `Default` theme,
+  following live changes; a desktop-provided theme still wins. Fonts, pointer/keyboard settings
+  and the display layout have no portable API and remain the desktop's own.
 - **Applications** — the framework builds and tests **Calculator**, **PDFViewer** and **Piano**
   from unmodified source. The rest of `Userland/Applications` is built by the desktop that ships
   it (see [Desktops](#desktops)), with GML, icons, menus, dialogs and syntax highlighting intact.
@@ -133,9 +140,6 @@ detail is in [docs/protocol-mapping.md](docs/protocol-mapping.md).
   `EGLGPU` also cannot run shader programs (`create_shader` returns an error), so programs that
   need GLSL must use `LibSoftGPU`. See [docs/development-history.md](docs/development-history.md)
   §4.11.
-- **No GL coverage in CI.** `3DFileViewer` is added by the desktop's application set, so this
-  repository's CI skips the GL suite. A small in-repo LibGL program that renders into a bitmap
-  would exercise `EGLGPU` here.
 - **The remaining WindowServer stubs:** `set_forced_shadow` (no CSD drop shadow),
   `set_window_base_size_and_size_increment` and `set_window_resize_aspect_ratio` (they would
   constrain `xdg_toplevel` configures), `set_global_mouse_tracking`,
@@ -157,9 +161,12 @@ where the portable protocol or portal is not implemented:
 - **Screenshots and the Magnifier.** `get_screen_bitmap` and `get_screen_bitmap_around_*` ask the
   compositor for a capture over `serenity-window`; elsewhere they return an empty image
   (`org.freedesktop.portal.Screenshot` would be the portable route).
-- **Theme, fonts, input and display settings, wallpaper, applet layout.** Desktop-owned values
-  arrive as `serenity-window` host settings; elsewhere the bundled defaults apply, and there is
-  no `org.freedesktop.portal.Settings` bridge.
+- **Fonts, pointer/keyboard and display settings, wallpaper, applet layout.** There is no
+  portable API for any of these: the Settings portal exposes appearance only (handled above),
+  and input/display configuration is compositor-specific (KDE's KScreen, GNOME's Mutter
+  settings, wlroots' output-management protocol). They arrive as `serenity-window` host settings
+  in a SerenityDE session; elsewhere the bundled fonts, default input behaviour and
+  compositor-owned layout apply. Wallpaper and applet layout are desktop features by design.
 - **Raising a window on launch.** `xdg-activation-v1` is not bound. SerenityDE's focus policy
   covers the session; elsewhere a launcher-spawned window may not be raised.
 - **Pointer lock** (`pointer-constraints`/`relative-pointer`, for mouse-look games) and **idle
@@ -190,11 +197,13 @@ desktop adds is its own business, built on the same pinned SerenityOS source:
   [`serenity-window`](src/protocol/serenity-window.xml) protocol, which this repository owns. A
   compositor that implements it keeps a copy; without it, applications run with defaults.
 * **Standard protocols the desktop only has to advertise.** Window icons
-  (`xdg-toplevel-icon-v1`), primary selection (`zwp_primary_selection_v1`) and the usual
-  `xdg-shell`/`wl_data_device`/`wl_seat` surfaces mean a desktop's taskbar, window switcher and
-  middle-click paste work with Serenity applications exactly as with native ones. SerenityDE's
-  compositor turns the standard icon into its Taskbar button; `serenity-window`'s icon event is
-  only used where `xdg-toplevel-icon-v1` is absent.
+  (`xdg-toplevel-icon-v1`), primary selection (`zwp_primary_selection_v1`), the appearance
+  preference (`org.freedesktop.portal.Settings`, via `xdg-desktop-portal`) and the usual
+  `xdg-shell`/`wl_data_device`/`wl_seat` surfaces mean a desktop's taskbar, window switcher,
+  middle-click paste and light/dark mode work with Serenity applications exactly as with native
+  ones. SerenityDE's compositor turns the standard icon into its Taskbar button and sends its
+  theme directly (which takes precedence); `serenity-window`'s icon event is only used where
+  `xdg-toplevel-icon-v1` is absent, and the portal only where no theme is sent at all.
 
 The [Serenity Desktop Environment](https://github.com/jmalcolm137/serenity-desktop-environment)
 is that desktop and the reference session: its compositor, Taskbar/Desktop/applets and session

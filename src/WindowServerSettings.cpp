@@ -163,12 +163,42 @@ Messages::WindowServer::SetSystemThemeResponse WindowServerConnection::set_syste
     return true;
 }
 
+void WindowServerConnection::apply_portal_appearance()
+{
+    verify_on_server_thread();
+    if (!m_desktop_settings || !m_desktop_settings->available())
+        return;
+    // SerenityDE (or any desktop that implements serenity-window) owns the theme;
+    // the portal is the portable fallback for desktops that do not.
+    if (!WaylandClient::the().serenity_shell().host_setting("theme.path"sv).is_empty())
+        return;
+
+    // color-scheme: 1 prefer dark, 2 prefer light, 0 no preference.
+    u32 const scheme = m_desktop_settings->color_scheme();
+    ByteString const name = scheme == 1 ? ByteString { "Dark" }
+        : scheme == 2                    ? ByteString { "Light" }
+                                         : ByteString { "Default" };
+    if (name == m_applied_portal_theme)
+        return;
+
+    auto path = ByteString::formatted("{}/themes/{}.ini", Environment::resource_root(), name);
+    auto buffer = load_theme_with_bundled_fallback(path);
+    if (buffer.is_error())
+        return;
+    m_applied_portal_theme = name;
+    m_theme_name = name;
+    trace("LibWM: system theme is '{}' (from the settings portal)", name);
+    async_update_system_theme(buffer.value());
+}
+
 void WindowServerConnection::apply_host_settings()
 {
     // Every settings change re-sends the whole set, so act only on what changed:
     // reloading a theme or relayouting for fonts on, say, a mouse-speed change
     // would restyle every window for nothing.
     auto theme_path = WaylandClient::the().serenity_shell().host_setting("theme.path"sv);
+    if (!theme_path.is_empty())
+        m_applied_portal_theme = {};
     if (!theme_path.is_empty() && theme_path != m_applied_theme_path) {
         if (auto buffer = load_theme_with_bundled_fallback(theme_path); !buffer.is_error()) {
             m_applied_theme_path = theme_path;
@@ -188,6 +218,10 @@ void WindowServerConnection::apply_host_settings()
             apply_fonts(queries.default_query, queries.fixed_width_query, queries.window_title_query);
         }
     }
+
+    // Without a desktop-provided theme, follow the portable appearance
+    // preference (dark/light) from the Settings portal.
+    apply_portal_appearance();
 
     // The cursor theme is part of these settings, so this is the right moment to
     // decode the cursors a first interaction will ask for.
@@ -236,6 +270,19 @@ void WindowServerConnection::clear_system_theme_override()
 
 Messages::WindowServer::GetPreferredColorSchemeResponse WindowServerConnection::get_preferred_color_scheme()
 {
+    // The desktop that sends a theme also picks its colour scheme. Otherwise
+    // follow the portable appearance preference, in the naming SerenityOS uses
+    // for its bundled schemes.
+    auto const theme = WaylandClient::the().serenity_shell().host_setting("theme.name"sv);
+    if (!theme.is_empty())
+        return theme;
+    if (m_desktop_settings && m_desktop_settings->available()) {
+        u32 const scheme = m_desktop_settings->color_scheme();
+        if (scheme == 1)
+            return ByteString { "Base16 Dark" };
+        if (scheme == 2)
+            return ByteString { "Base16 Light" };
+    }
     return ByteString { "Default" };
 }
 

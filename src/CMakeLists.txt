@@ -15,6 +15,9 @@ include("${LIBGUI_WAYLAND_ROOT}/cmake/LibWMHelpers.cmake")
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(WAYLAND_CLIENT REQUIRED wayland-client)
 pkg_check_modules(XKBCOMMON REQUIRED xkbcommon)
+# Optional: the org.freedesktop.portal.Settings bridge (appearance preference).
+# Without it LibWM simply has no desktop appearance to follow.
+pkg_check_modules(SDBUS libsystemd)
 pkg_get_variable(WAYLAND_PROTOCOLS_DIR wayland-protocols pkgdatadir)
 find_program(WAYLAND_SCANNER wayland-scanner REQUIRED)
 
@@ -32,6 +35,7 @@ add_custom_target(libwm_default_stubs DEPENDS ${LIBWM_STUB_OUTPUTS})
 add_library(LibWM SHARED
     ClipboardServerConnection.cpp
     ConfigServerConnection.cpp
+    DesktopSettings.cpp
     Environment.cpp
     FileSystemAccessServerConnection.cpp
     LaunchServerConnection.cpp
@@ -98,6 +102,11 @@ target_include_directories(LibWM PRIVATE
     ${XKBCOMMON_INCLUDE_DIRS}
 )
 target_compile_definitions(LibWM PRIVATE "LIBWM_DEFAULT_RES=\"${SERENITY_PROJECT_ROOT}/Base/res\"")
+if (SDBUS_FOUND)
+    target_compile_definitions(LibWM PRIVATE LIBWM_HAVE_SDBUS=1)
+    target_include_directories(LibWM PRIVATE ${SDBUS_INCLUDE_DIRS})
+    target_link_libraries(LibWM PRIVATE ${SDBUS_LIBRARIES})
+endif()
 # The generated Wayland protocol code drops const in its listener trampolines.
 target_compile_options(LibWM PRIVATE -Wno-cast-qual)
 # A shared library may otherwise link with undefined symbols, which then only

@@ -171,9 +171,30 @@ for lossless LibWM-to-LibWM copies). SerenityOS has one clipboard and native
 toolkits two selections, so the same representations are also published as the
 **primary selection** (`zwp_primary_selection_v1`), and reads fall back to PRIMARY
 when nothing owns CLIPBOARD: a copy in either world can be pasted in the other
-(middle-click into a native application, Ctrl+V in a Serenity one). Drag-and-drop works in both directions; the
+(middle-click into a native application, Ctrl+V in a Serenity one).
+
+Two wlroots/SDE specifics shape this. wlroots delivers PRIMARY only to the
+**keyboard-focused** client (`wlr_primary_selection_v1` filters by
+`seat->keyboard_state.focused_client`), so a Serenity application sees the native
+selection while it is focused — which is when a paste happens — but not in the
+background. And `set_selection` there is checked against a serial from a recent
+input event (`wlr_seat_client_validate_event_serial`), so a client without focus
+or without a seat cannot publish; the SDE's headless tests therefore give the
+application a keyboard (see the SDE's `run-primary-selection-test.sh`). Drag-and-drop works in both directions; the
 drop target's widget decides acceptance. Offers from other clients are read with
 timeouts, so a stuck source cannot freeze the application.
+
+## Desktop appearance
+
+A desktop that speaks `serenity-window` sends its theme (`theme.path`,
+`theme.name`), and that wins. Without one, LibWM follows the standard
+`org.freedesktop.portal.Settings` on the session bus:
+`org.freedesktop.appearance color-scheme` (0 no preference, 1 prefer dark,
+2 prefer light) selects the bundled `Default`, `Dark` or `Light` theme, and the
+portal's `SettingChanged` signal re-applies when the user switches. Only the
+appearance preference has a standard API; fonts, pointer/keyboard settings and
+the display layout have none, so outside a SerenityDE session those stay at the
+bundled defaults and the compositor's own configuration.
 
 ## Other in-process portals
 

@@ -21,7 +21,7 @@ required; without the others LibWM falls back as noted.
 | `wp_viewporter` | 1 | fractional presentation, interactive-resize stretch | integer scale only |
 | `zxdg_decoration_manager_v1` | 1 | server-side decorations | client-side titlebar |
 | `wl_data_device_manager` | ≤ 3 | clipboard and drag-and-drop | no clipboard or DnD |
-| `zwp_primary_selection_device_manager_v1` | 1 | the middle-click selection, bridged both ways with the clipboard | no primary selection; clipboard only |
+| `zwp_primary_selection_device_manager_v1` | 1 | the middle-click selection, bridged both ways with the clipboard | no primary selection; clipboard only. wlroots only delivers it to the focused client, and validates `set_selection` serials, so a paste (focused) works and background polling does not |
 | `xdg_toplevel_icon_manager_v1` | 1 | the standard window icon (taskbars, switchers) | icons only through `serenity-window`, if present |
 | `zwp_text_input_manager_v3` | 1 | input methods (preedit, commit) | no IME |
 | `zwlr_layer_shell_v1` | ≤ 4 | Taskbar, Desktop, applets, popup-style windows, menus of layer surfaces | those become ordinary toplevels |
