@@ -188,6 +188,17 @@ private:
     void set_window_cursor(i32 window_id, i32 cursor_type) override;
     void set_window_custom_cursor(i32 window_id, Gfx::ShareableBitmap const& cursor) override;
     void set_window_progress(i32 window_id, Optional<i32> const& progress) override;
+    void set_window_base_size_and_size_increment(i32 window_id, Gfx::IntSize base_size, Gfx::IntSize size_increment) override;
+    void set_window_resize_aspect_ratio(i32 window_id, Optional<Gfx::IntSize> const& ratio) override;
+    void set_forced_shadow(i32 window_id, bool shadow) override;
+    void set_flash_flush(bool enabled) override;
+    void set_global_mouse_tracking(bool enabled) override;
+    void set_global_cursor_position(Gfx::IntPoint position) override;
+    void refresh_system_theme() override;
+    void show_screen_numbers(bool show) override;
+    void add_window_stealing_for_client(i32 client_id, i32 window_id) override;
+    void remove_window_stealing_for_client(i32 client_id, i32 window_id) override;
+    void remove_window_stealing(i32 window_id) override;
     void set_fullscreen(i32 window_id, bool fullscreen) override;
     void set_frameless(i32 window_id, bool frameless) override;
     void set_maximized(i32 window_id, bool maximized) override;

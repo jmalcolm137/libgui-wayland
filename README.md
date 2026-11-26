@@ -140,17 +140,22 @@ detail is in [docs/protocol-mapping.md](docs/protocol-mapping.md).
   `EGLGPU` also cannot run shader programs (`create_shader` returns an error), so programs that
   need GLSL must use `LibSoftGPU`. See [docs/development-history.md](docs/development-history.md)
   §4.11.
-- **The remaining WindowServer stubs:** `set_forced_shadow` (no CSD drop shadow),
-  `set_window_base_size_and_size_increment` and `set_window_resize_aspect_ratio` (they would
-  constrain `xdg_toplevel` configures), `set_global_mouse_tracking`,
-  `set_global_cursor_position`, `refresh_system_theme`, `show_screen_numbers`,
-  `set_flash_flush`, and the window-stealing calls (which have no meaning when each application
-  is its own Wayland client). `is_minimized` is LibWM's own record, set by
-  `set_minimized` and cleared when the compositor activates the window.
-- **Clean-ups.** SerenityDE's file handling (the theme and font broker files, the wallpaper
-  store) still lives in `src/WindowServerSettings.cpp` rather than `SerenityShell`;
-  `commit_window_content`, `create_window` and `create_popup` are long; the protocol event
-  handlers remain public on `WaylandClient`.
+- **WindowServer requests with no Wayland equivalent.** All of them are handled explicitly
+  rather than silently dropped: `refresh_system_theme` reloads the theme, base size becomes the
+  window's minimum size, and `show_screen_numbers` is forwarded to the desktop as
+  `effects.show_screen_numbers` (the compositor owns output overlays). Size increments, aspect
+  ratios, forced shadows, global mouse tracking, cursor warping and window stealing have **no**
+  Wayland protocol: `xdg-shell` has no increments or aspect constraints, a shadow is drawn outside
+  the surface, `wl_pointer` only reports over the client's own surfaces, clients cannot warp the
+  pointer, and a client owns its surfaces while the compositor owns stacking. The per-request
+  rationale is in [docs/protocol-mapping.md](docs/protocol-mapping.md). `is_minimized` remains
+  LibWM's own record, set by `set_minimized` and cleared when the compositor activates the
+  window.
+- **Clean-ups.** SerenityDE's file handling now lives in the desktop (the shim only reads the
+  host settings and `serenity-window`), and `WaylandClient`'s C protocol handlers are private
+  behind the `WaylandEvents` friend, leaving only the API its callers use public. The three
+  long presentation/lifecycle functions (`commit_window_content`, `create_window`,
+  `create_popup`) still carry their per-role branches inline.
 
 ### Provided by the desktop, not implemented portably
 
@@ -196,6 +201,10 @@ desktop adds is its own business, built on the same pinned SerenityOS source:
   and wallpaper settings, and compositor-drawn window chrome, travel over the optional
   [`serenity-window`](src/protocol/serenity-window.xml) protocol, which this repository owns. A
   compositor that implements it keeps a copy; without it, applications run with defaults.
+* **Requests with no client protocol.** Screen-number overlays (`show_screen_numbers`), global
+  mouse tracking, pointer warping and shadows around a surface are compositor features; the shim
+  forwards the screen-number request as the `effects.show_screen_numbers` host setting, and the
+  desktop is the right place to draw it.
 * **Standard protocols the desktop only has to advertise.** Window icons
   (`xdg-toplevel-icon-v1`), primary selection (`zwp_primary_selection_v1`), the appearance
   preference (`org.freedesktop.portal.Settings`, via `xdg-desktop-portal`) and the usual

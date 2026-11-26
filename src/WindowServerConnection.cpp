@@ -638,6 +638,74 @@ void WindowServerConnection::start_window_resize(i32 window_id, i32 resize_direc
     WaylandClient::the().start_window_resize(window_id, resize_direction);
 }
 
+void WindowServerConnection::set_window_base_size_and_size_increment(i32 window_id, Gfx::IntSize base_size, Gfx::IntSize size_increment)
+{
+    WaylandClient::the().set_base_size_and_size_increment(window_id, base_size, size_increment);
+}
+
+void WindowServerConnection::set_window_resize_aspect_ratio(i32 window_id, Optional<Gfx::IntSize> const& ratio)
+{
+    // xdg-toplevel has no aspect-ratio constraint; the client's own resize logic
+    // keeps the aspect, as the compositor cannot enforce it.
+    trace("LibWM: set_window_resize_aspect_ratio({}, {}) has no Wayland equivalent", window_id,
+        ratio.has_value() ? ByteString::formatted("{}x{}", ratio->width(), ratio->height()) : ByteString { "none" });
+}
+
+void WindowServerConnection::set_forced_shadow(i32 window_id, bool)
+{
+    // A shadow is drawn outside the surface; only the compositor can, and
+    // xdg-decoration offers no "shadow" request. Server-side decorations bring
+    // the compositor's own shadow; client-side ones cannot ask for another.
+    trace("LibWM: set_forced_shadow({}) has no Wayland equivalent", window_id);
+}
+
+void WindowServerConnection::set_flash_flush(bool)
+{
+    // Serenity's window server could defer flushing frames; LibWM flushes every
+    // commit (and the compositor paces with frame callbacks), so there is
+    // nothing to turn on or off.
+}
+
+void WindowServerConnection::set_global_mouse_tracking(bool enabled)
+{
+    // Wayland delivers pointer events only over this client's own surfaces. The
+    // relative-pointer and pointer-constraints protocols are about locking the
+    // pointer to one, not tracking it globally; a compositor-side feature (the
+    // Magnifier's follow mode) would need a desktop protocol.
+    trace("LibWM: set_global_mouse_tracking({}) has no Wayland equivalent", enabled);
+}
+
+void WindowServerConnection::set_global_cursor_position(Gfx::IntPoint position)
+{
+    // Clients cannot warp the pointer on Wayland (wl_pointer has no request for
+    // it; the compositor owns the cursor).
+    trace("LibWM: set_global_cursor_position({}, {}) has no Wayland equivalent", position.x(), position.y());
+}
+
+void WindowServerConnection::show_screen_numbers(bool show)
+{
+    // The output-identification overlay is the compositor's: it owns the outputs
+    // and can draw on them. Forward the request as a desktop setting (SerenityDE
+    // reads it); there is no client protocol for it.
+    WaylandClient::the().serenity_shell().set_host_setting("effects.show_screen_numbers"sv, show ? "true"sv : "false"sv);
+    trace("LibWM: show_screen_numbers({}) forwarded to the desktop", show);
+}
+
+void WindowServerConnection::add_window_stealing_for_client(i32, i32)
+{
+    // Under Wayland a client owns its surfaces and the compositor owns stacking;
+    // one application cannot parent another's windows. `set_window_parent_from_client`
+    // covers legitimate transients within this client.
+}
+
+void WindowServerConnection::remove_window_stealing_for_client(i32, i32)
+{
+}
+
+void WindowServerConnection::remove_window_stealing(i32)
+{
+}
+
 void WindowServerConnection::set_always_on_top(i32 window_id, bool always_on_top)
 {
     WaylandClient::the().set_always_on_top(window_id, always_on_top);

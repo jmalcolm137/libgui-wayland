@@ -5,6 +5,7 @@
  */
 
 #include "WaylandClient.h"
+#include "WaylandEvents.h"
 #include "SerenityShell.h"
 #include "WaylandOutputs.h"
 #include "WaylandSeat.h"
@@ -72,19 +73,19 @@ static ByteString const& application_id()
 
 // --- xdg_surface_object -------------------------------------------------------
 
-static void xdg_surface_configure(void* data, xdg_surface* surface, uint32_t serial)
+void WaylandEvents::xdg_surface_configure(void* data, xdg_surface* surface, uint32_t serial)
 {
     xdg_surface_ack_configure(surface, serial);
     static_cast<WaylandClient*>(data)->on_surface_configured(surface);
 }
 
 static xdg_surface_listener const s_xdg_surface_listener = {
-    .configure = xdg_surface_configure,
+    .configure = WaylandEvents::xdg_surface_configure,
 };
 
 // --- xdg_toplevel -------------------------------------------------------------
 
-static void toplevel_configure(void* data, xdg_toplevel* toplevel, int32_t width, int32_t height, wl_array* states)
+void WaylandEvents::toplevel_configure(void* data, xdg_toplevel* toplevel, int32_t width, int32_t height, wl_array* states)
 {
     auto& self = *static_cast<WaylandClient*>(data);
     bool activated = false;
@@ -113,48 +114,48 @@ static void toplevel_configure(void* data, xdg_toplevel* toplevel, int32_t width
     self.on_toplevel_configure(toplevel, { width, height }, activated, fullscreen, maximized, resizing);
 }
 
-static void toplevel_close(void* data, xdg_toplevel* toplevel)
+void WaylandEvents::toplevel_close(void* data, xdg_toplevel* toplevel)
 {
     static_cast<WaylandClient*>(data)->on_toplevel_close(toplevel);
 }
 
-static void toplevel_configure_bounds(void*, xdg_toplevel*, int32_t, int32_t) { }
-static void toplevel_wm_capabilities(void*, xdg_toplevel*, wl_array*) { }
+void WaylandEvents::toplevel_configure_bounds(void*, xdg_toplevel*, int32_t, int32_t) { }
+void WaylandEvents::toplevel_wm_capabilities(void*, xdg_toplevel*, wl_array*) { }
 
 static xdg_toplevel_listener const s_toplevel_listener = {
-    .configure = toplevel_configure,
-    .close = toplevel_close,
-    .configure_bounds = toplevel_configure_bounds,
-    .wm_capabilities = toplevel_wm_capabilities,
+    .configure = WaylandEvents::toplevel_configure,
+    .close = WaylandEvents::toplevel_close,
+    .configure_bounds = WaylandEvents::toplevel_configure_bounds,
+    .wm_capabilities = WaylandEvents::toplevel_wm_capabilities,
 };
 
 // --- zwlr_layer_surface_v1 (panels, the desktop, applets) ---------------------
 
-static void layer_surface_configure(void* data, zwlr_layer_surface_v1* layer_surface, uint32_t serial, uint32_t width, uint32_t height)
+void WaylandEvents::layer_surface_configure(void* data, zwlr_layer_surface_v1* layer_surface, uint32_t serial, uint32_t width, uint32_t height)
 {
     zwlr_layer_surface_v1_ack_configure(layer_surface, serial);
     static_cast<WaylandClient*>(data)->on_layer_configure(layer_surface, { static_cast<int>(width), static_cast<int>(height) });
 }
 
-static void layer_surface_closed(void* data, zwlr_layer_surface_v1* layer_surface)
+void WaylandEvents::layer_surface_closed(void* data, zwlr_layer_surface_v1* layer_surface)
 {
     static_cast<WaylandClient*>(data)->on_layer_closed(layer_surface);
 }
 
 static zwlr_layer_surface_v1_listener const s_layer_surface_listener = {
-    .configure = layer_surface_configure,
-    .closed = layer_surface_closed,
+    .configure = WaylandEvents::layer_surface_configure,
+    .closed = WaylandEvents::layer_surface_closed,
 };
 
 // --- wp_fractional_scale_v1 ---------------------------------------------------
 
-static void fractional_scale_preferred_scale(void* data, wp_fractional_scale_v1* fractional, uint32_t scale_v120)
+void WaylandEvents::fractional_scale_preferred_scale(void* data, wp_fractional_scale_v1* fractional, uint32_t scale_v120)
 {
     static_cast<WaylandClient*>(data)->on_preferred_scale(fractional, scale_v120);
 }
 
 static wp_fractional_scale_v1_listener const s_fractional_scale_listener = {
-    .preferred_scale = fractional_scale_preferred_scale,
+    .preferred_scale = WaylandEvents::fractional_scale_preferred_scale,
 };
 
 void WaylandClient::on_preferred_scale(wp_fractional_scale_v1* fractional, u32 scale_v120)
@@ -190,14 +191,14 @@ void WaylandClient::on_preferred_scale(wp_fractional_scale_v1* fractional, u32 s
 
 // --- zxdg_toplevel_decoration_v1 ----------------------------------------------
 
-static void decoration_configure(void* data, zxdg_toplevel_decoration_v1* decoration, uint32_t mode)
+void WaylandEvents::decoration_configure(void* data, zxdg_toplevel_decoration_v1* decoration, uint32_t mode)
 {
     trace("LibWM/Wayland: server-side decoration mode {}", mode);
     static_cast<WaylandClient*>(data)->on_decoration_configure(decoration, mode);
 }
 
 static zxdg_toplevel_decoration_v1_listener const s_decoration_listener = {
-    .configure = decoration_configure,
+    .configure = WaylandEvents::decoration_configure,
 };
 
 // --- wl_buffer ----------------------------------------------------------------
@@ -213,13 +214,13 @@ static wl_buffer_listener const s_buffer_listener = {
 
 // --- wl_callback (frame pacing) ----------------------------------------------
 
-static void frame_done(void* data, wl_callback* callback, uint32_t)
+void WaylandEvents::frame_done(void* data, wl_callback* callback, uint32_t)
 {
     static_cast<WaylandClient*>(data)->on_frame_done(callback);
 }
 
 static wl_callback_listener const s_frame_listener = {
-    .done = frame_done,
+    .done = WaylandEvents::frame_done,
 };
 
 // --- surface & window lookups -------------------------------------------------
@@ -914,6 +915,32 @@ void WaylandClient::set_minimum_size(i32 window_id, Gfx::IntSize size)
             trace("LibWM/Wayland: set_min_size window {} -> {}x{}", window_id, min_w, min_h);
         }
     }
+}
+
+void WaylandClient::set_base_size_and_size_increment(i32 window_id, Gfx::IntSize base_size, Gfx::IntSize size_increment)
+{
+    MutexLocker locker(m_mutex);
+    auto* window_surface = find(window_id);
+    if (!window_surface)
+        return;
+    SurfaceLocker surface_locker(window_surface->mutex);
+    window_surface->base_size = base_size;
+    window_surface->size_increment = size_increment;
+
+    // Wayland's xdg_toplevel has min/max size, not X11's base+increment hints, so
+    // a compositor cannot snap a resize to `increment`. Honour what can be
+    // expressed: the window may not shrink below its base size.
+    if (base_size.is_empty() || !window_surface->toplevel || !window_surface->resizable)
+        return;
+    auto effective = Gfx::IntSize {
+        max(window_surface->minimum_size.width(), base_size.width()),
+        max(window_surface->minimum_size.height(), base_size.height()),
+    };
+    int const min_h = effective.height() + window_surface->total_top_inset();
+    xdg_toplevel_set_min_size(window_surface->toplevel, effective.width(), max(0, min_h));
+    wl_display_flush(m_display);
+    trace("LibWM/Wayland: set base size window {} -> {}x{} (size increments {}x{} have no Wayland equivalent)",
+        window_id, effective.width(), effective.height(), size_increment.width(), size_increment.height());
 }
 
 void WaylandClient::set_frameless(i32 window_id, bool frameless)

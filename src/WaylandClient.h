@@ -63,6 +63,7 @@ class Notifier;
 namespace LibWM {
 
 class SerenityShell;
+struct WaylandEvents;
 
 // AK reference counts are not atomic, so a refcounted object (a long String, a
 // Gfx::Bitmap) must never be reachable from both the main thread and the LibWM
@@ -209,6 +210,10 @@ public:
     void set_window_parent(i32 child_window_id, i32 parent_window_id);
     void set_always_on_top(i32 window_id, bool always_on_top);
     void set_minimum_size(i32 window_id, Gfx::IntSize size);
+    // Serenity's base size and size increment (X11 WM_NORMAL_HINTS). Wayland
+    // has no increments, so the base size becomes the minimum; the increment is
+    // only recorded (see docs/protocol-mapping.md).
+    void set_base_size_and_size_increment(i32 window_id, Gfx::IntSize base_size, Gfx::IntSize size_increment);
     void set_frameless(i32 window_id, bool frameless);
     void set_window_has_alpha_channel(i32 window_id, bool has_alpha);
     void set_window_alpha_hit_threshold(i32 window_id, float threshold);
@@ -245,6 +250,13 @@ public:
     void present_popup(i32 popup_id, Gfx::Bitmap const& bitmap);
     void destroy_popup(i32 popup_id);
 
+    // A wl_buffer presented from a shared bitmap, tracked until the compositor
+    // releases it.
+    struct BufferRecord {
+        wl_buffer* buffer { nullptr };
+        bool released { false };
+    };
+
     // Wayland event dispatch (registered on the owning event loop).
     void dispatch();
     // Dispatch Wayland events on the calling thread until `done()` holds or
@@ -253,11 +265,30 @@ public:
     // dispatches, is blocked waiting for that very request. Returns done().
     bool dispatch_until(Function<bool()> done, int timeout_ms);
 
+    // --- the SerenityDE integration and the display link (public API) ---
+    // The serenity-window protocol: desktop-owned settings, wallpaper, capture,
+    // and compositor-driven window chrome. Inert on compositors without it.
+    SerenityShell& serenity_shell() { return *m_serenity_shell; }
+
+    // GUI::DisplayLink. SerenityOS drives it from the window server's frame loop;
+    // here it is paced by a window surface's frame callbacks: the callback runs
+    // once per compositor frame while enabled. The callback belongs to `owner`:
+    // it is installed only if none is set, and only its owner can clear it.
+    void set_display_link_callback(void* owner, Function<void()> callback);
+    void clear_display_link_callback(void* owner);
+    void enable_display_link();
+    void disable_display_link();
+
+
+private:
+    // The C listeners' entry points; a friend so the handlers below stay private.
+    friend struct WaylandEvents;
+    friend class SerenityShell;
+    friend class WaylandDataDevice;
+    friend class WaylandOutputs;
+    friend class WaylandSeat;
+
     // --- registry globals and protocol events (called by the C listeners) ---
-    struct BufferRecord {
-        wl_buffer* buffer { nullptr };
-        bool released { false };
-    };
     void set_compositor(wl_compositor* compositor)
     {
         MutexLocker locker(m_mutex);
@@ -300,19 +331,6 @@ public:
         MutexLocker locker(m_mutex);
         m_layer_shell = shell;
     }
-    // The serenity-window protocol: desktop-owned settings, wallpaper, capture,
-    // and compositor-driven window chrome. Inert on compositors without it.
-    SerenityShell& serenity_shell() { return *m_serenity_shell; }
-
-    // GUI::DisplayLink. SerenityOS drives it from the window server's frame loop;
-    // here it is paced by a window surface's frame callbacks: the callback runs
-    // once per compositor frame while enabled. The callback belongs to `owner`:
-    // it is installed only if none is set, and only its owner can clear it.
-    void set_display_link_callback(void* owner, Function<void()> callback);
-    void clear_display_link_callback(void* owner);
-    void enable_display_link();
-    void disable_display_link();
-
     i32 window_id_for_surface(wl_surface*) const;
     void on_toplevel_configure(xdg_toplevel*, Gfx::IntSize size, bool activated, bool fullscreen, bool maximized, bool resizing);
     void on_decoration_configure(zxdg_toplevel_decoration_v1*, u32 mode);
@@ -326,12 +344,6 @@ public:
     void on_surface_configured(xdg_surface*);
     void on_frame_done(wl_callback*);
     void on_display_link_frame_done(wl_callback*);
-
-private:
-    friend class SerenityShell;
-    friend class WaylandDataDevice;
-    friend class WaylandOutputs;
-    friend class WaylandSeat;
 
     WaylandClient();
     ~WaylandClient();
@@ -394,6 +406,8 @@ private:
         ByteString title;
         Gfx::IntSize size;
         Gfx::IntSize minimum_size;
+        Gfx::IntSize base_size;
+        Gfx::IntSize size_increment;
         bool has_alpha { false };
         float alpha_hit_threshold { 0.0f };
         bool input_region_active { false };

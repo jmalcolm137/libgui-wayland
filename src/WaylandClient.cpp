@@ -5,6 +5,7 @@
  */
 
 #include "WaylandClient.h"
+#include "WaylandEvents.h"
 #include <AK/Time.h>
 #include <LibGfx/Bitmap.h>
 #include "Environment.h"
@@ -35,7 +36,7 @@ namespace LibWM {
 
 // --- registry -----------------------------------------------------------------
 
-static void registry_global(void* data, wl_registry* registry, uint32_t name, char const* interface, uint32_t version)
+void WaylandEvents::registry_global(void* data, wl_registry* registry, uint32_t name, char const* interface, uint32_t version)
 {
     auto& self = *static_cast<WaylandClient*>(data);
 
@@ -81,20 +82,20 @@ static void registry_global(void* data, wl_registry* registry, uint32_t name, ch
 static void registry_global_remove(void*, wl_registry*, uint32_t) { }
 
 static wl_registry_listener const s_registry_listener = {
-    .global = registry_global,
+    .global = WaylandEvents::registry_global,
     .global_remove = registry_global_remove,
 };
 
 // --- xdg_wm_base --------------------------------------------------------------
 
-static void wm_base_ping(void*, xdg_wm_base* base, uint32_t serial)
+void WaylandEvents::wm_base_ping(void*, xdg_wm_base* base, uint32_t serial)
 {
     trace("LibWM/Wayland: xdg_wm_base ping serial={} -> pong", serial);
     xdg_wm_base_pong(base, serial);
 }
 
 static xdg_wm_base_listener const s_wm_base_listener = {
-    .ping = wm_base_ping,
+    .ping = WaylandEvents::wm_base_ping,
 };
 
 // --- connection & output lifecycle --------------------------------------------
@@ -271,13 +272,13 @@ void WaylandClient::add_wm_base(xdg_wm_base* wm_base)
 
 // --- display link -------------------------------------------------------------
 
-static void display_link_frame_done(void* data, wl_callback* callback, uint32_t)
+void WaylandEvents::display_link_frame_done(void* data, wl_callback* callback, uint32_t)
 {
     static_cast<WaylandClient*>(data)->on_display_link_frame_done(callback);
 }
 
 static wl_callback_listener const s_display_link_listener = {
-    .done = display_link_frame_done,
+    .done = WaylandEvents::display_link_frame_done,
 };
 
 void WaylandClient::set_display_link_callback(void* owner, Function<void()> callback)

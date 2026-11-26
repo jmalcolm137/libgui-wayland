@@ -191,6 +191,38 @@ void WindowServerConnection::apply_portal_appearance()
     async_update_system_theme(buffer.value());
 }
 
+void WindowServerConnection::refresh_system_theme()
+{
+    verify_on_server_thread();
+    // Reload the theme in effect even though its path has not changed: the file
+    // may have been rewritten (Theme Editor, a desktop theme update). Host
+    // settings win, then the Settings portal, then the bundled default.
+    auto theme_path = WaylandClient::the().serenity_shell().host_setting("theme.path"sv);
+    if (!theme_path.is_empty()) {
+        if (auto buffer = load_theme_with_bundled_fallback(theme_path); !buffer.is_error()) {
+            auto name = WaylandClient::the().serenity_shell().host_setting("theme.name"sv);
+            m_theme_name = name.is_empty() ? ByteString { LexicalPath(theme_path).title() } : name;
+            async_update_system_theme(buffer.value());
+            trace("LibWM: system theme refreshed: '{}'", m_theme_name);
+            return;
+        }
+    }
+
+    if (m_desktop_settings && m_desktop_settings->available()) {
+        m_applied_portal_theme = {};
+        apply_portal_appearance();
+        trace("LibWM: system theme refreshed from the settings portal");
+        return;
+    }
+
+    auto bundled = ByteString::formatted("{}/themes/Default.ini", Environment::resource_root());
+    if (auto buffer = load_theme_with_bundled_fallback(bundled); !buffer.is_error()) {
+        m_theme_name = "Default"sv;
+        async_update_system_theme(buffer.value());
+        trace("LibWM: system theme refreshed: 'Default' (bundled)");
+    }
+}
+
 void WindowServerConnection::apply_host_settings()
 {
     // Every settings change re-sends the whole set, so act only on what changed:

@@ -50,27 +50,30 @@ then sends no reply, and the client's `send_sync()` blocks forever.
 | Wallpaper and desktop | `set_wallpaper`, `get_wallpaper`, `set_wallpaper_mode`, `set_background_color`, `apply_workspace_settings`, `get_workspace_settings` | stored by the desktop; `get_wallpaper` reads the `wallpaper.file` it names |
 | Input settings | `get/set_mouse_acceleration` (+ min/max), `get/set_scroll_step_size` (+ min), `get/set_double_click_speed` (+ min/max), `are/set_mouse_buttons_switched`, `is/set_natural_scroll`, `get/set_keyboard_layout`, `get_keyboard_layout_names`, `get/apply_cursor_theme`, `get/set_cursor_highlight_color`, `get/set_cursor_highlight_radius` | applied by the desktop's compositor where available |
 
-**Not implemented** (default stub):
-`set_window_base_size_and_size_increment`, `set_window_resize_aspect_ratio`,
-`set_forced_shadow`, `set_global_cursor_position`, `set_global_mouse_tracking`,
-`refresh_system_theme`, `show_screen_numbers`, `set_flash_flush`, `pong`,
-`add_window_stealing_for_client`, `remove_window_stealing_for_client`,
-`remove_window_stealing`.
+**Handled as far as Wayland can, otherwise deliberately ignored.** Each of these
+is implemented on the LibWM side (so the caller never blocks), but several have
+no Wayland equivalent; the table says why, and which protocol would be needed if
+one existed.
 
-All are asynchronous or have an empty reply, which LibIPC sends itself, so none
-can block the caller. Most are global window-manager duties that belong to the
-compositor (DESIGN.md §1.2); window stealing lets another process's windows
-parent ours, which has no meaning when every application is its own Wayland
-client.
+| Request | What LibWM does | Wayland equivalent |
+|---|---|---|
+| `set_window_base_size_and_size_increment` | base size becomes the window's minimum size (via `xdg_toplevel.set_min_size`); the increment is recorded | **none**: `xdg_toplevel` has min/max size but no X11 resize increments, so a compositor cannot snap to cell-sized steps |
+| `set_window_resize_aspect_ratio` | ignored (traced) | **none**: no aspect-ratio constraint in `xdg-shell`; the client keeps its own aspect |
+| `set_forced_shadow` | ignored (traced) | **none**: a shadow is drawn outside the surface; `xdg-decoration` exposes only SSD/CSD, and server-side decorations bring the compositor's own shadow |
+| `set_global_mouse_tracking` | ignored (traced) | **none**: `wl_pointer` reports only over this client's surfaces. `pointer-constraints`/`relative-pointer` lock the pointer to a surface; they do not track it globally |
+| `set_global_cursor_position` | ignored (traced) | **none**: clients cannot warp the pointer; `wl_pointer.warp` is a compositor→client event |
+| `refresh_system_theme` | reloads the theme in effect (host settings, then the Settings portal, then bundled) and notifies clients | n/a (local) |
+| `show_screen_numbers` | forwarded to the desktop as `effects.show_screen_numbers` | **compositor-owned**: it owns the outputs and can draw an identification overlay; there is no client protocol for it (SerenityDE's compositor is the right place) |
+| `set_flash_flush` | no-op | n/a: LibWM flushes every commit, and frame callbacks pace presentation |
+| `add/remove_window_stealing*` | no-op | **none**: a client owns its surfaces and the compositor owns stacking, so one application cannot parent another's windows. Legitimate transients within a client use `set_window_parent_from_client` (`xdg_toplevel.set_parent`) |
 
-`set_window_base_size_and_size_increment` and `set_window_resize_aspect_ratio`
-would constrain the sizes a resize can produce; both are still defaults.
-`patches/libgui/0093` lets an application hide the statusbar resize corner if it
-does not want one; the corner is functional without it.
-
+`pong` remains a default stub (the connection is in-process; nothing pings it).
 `is_minimized` is LibWM's own record, since `xdg_toplevel` never reports
 minimization: set by `set_minimized`, cleared when the compositor activates the
 window again.
+
+`patches/libgui/0093` lets an application hide the statusbar resize corner if it
+does not want one; the corner is functional without it.
 
 ## WindowClient events (LibWM → client)
 

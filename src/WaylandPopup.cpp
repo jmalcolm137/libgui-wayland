@@ -5,6 +5,7 @@
  */
 
 #include "WaylandClient.h"
+#include "WaylandEvents.h"
 #include <LibGfx/Painter.h>
 #include "Environment.h"
 #include "SerenityShell.h"
@@ -24,50 +25,50 @@ using SurfaceLocker = WaylandClient::MutexLocker;
 }
 
 // A menu shown from a layer-surface window is itself an overlay layer surface.
-static void menu_layer_configure(void* data, zwlr_layer_surface_v1* layer_surface, uint32_t serial, uint32_t width, uint32_t height)
+void WaylandEvents::menu_layer_configure(void* data, zwlr_layer_surface_v1* layer_surface, uint32_t serial, uint32_t width, uint32_t height)
 {
     zwlr_layer_surface_v1_ack_configure(layer_surface, serial);
     static_cast<WaylandClient*>(data)->on_menu_layer_configure(layer_surface, { static_cast<int>(width), static_cast<int>(height) });
 }
 
-static void menu_layer_closed(void* data, zwlr_layer_surface_v1* layer_surface)
+void WaylandEvents::menu_layer_closed(void* data, zwlr_layer_surface_v1* layer_surface)
 {
     static_cast<WaylandClient*>(data)->on_menu_layer_closed(layer_surface);
 }
 
 static zwlr_layer_surface_v1_listener const s_menu_layer_listener = {
-    .configure = menu_layer_configure,
-    .closed = menu_layer_closed,
+    .configure = WaylandEvents::menu_layer_configure,
+    .closed = WaylandEvents::menu_layer_closed,
 };
 
 // --- xdg_popup ----------------------------------------------------------------
 
-static void popup_xdg_surface_configure(void* data, xdg_surface* surface, uint32_t serial)
+void WaylandEvents::popup_xdg_surface_configure(void* data, xdg_surface* surface, uint32_t serial)
 {
     xdg_surface_ack_configure(surface, serial);
     static_cast<WaylandClient*>(data)->on_surface_configured(surface);
 }
 
 static xdg_surface_listener const s_popup_xdg_surface_listener = {
-    .configure = popup_xdg_surface_configure,
+    .configure = WaylandEvents::popup_xdg_surface_configure,
 };
 
-static void popup_configure(void*, xdg_popup*, int32_t x, int32_t y, int32_t width, int32_t height)
+void WaylandEvents::popup_configure(void*, xdg_popup*, int32_t x, int32_t y, int32_t width, int32_t height)
 {
     trace("LibWM/Wayland: popup configure at {},{} size {}x{}", x, y, width, height);
 }
 
-static void popup_done(void* data, xdg_popup* popup)
+void WaylandEvents::popup_done(void* data, xdg_popup* popup)
 {
     static_cast<WaylandClient*>(data)->on_popup_done(popup);
 }
 
-static void popup_repositioned(void*, xdg_popup*, uint32_t) { }
+void WaylandEvents::popup_repositioned(void*, xdg_popup*, uint32_t) { }
 
 static xdg_popup_listener const s_popup_listener = {
-    .configure = popup_configure,
-    .popup_done = popup_done,
-    .repositioned = popup_repositioned,
+    .configure = WaylandEvents::popup_configure,
+    .popup_done = WaylandEvents::popup_done,
+    .repositioned = WaylandEvents::popup_repositioned,
 };
 
 WaylandClient::Popup* WaylandClient::find_popup(i32 popup_id)
