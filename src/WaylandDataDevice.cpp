@@ -528,6 +528,7 @@ void WaylandDataDevice::on_selection(wl_data_offer* offer)
         if (pending == offer || pending == m_state.drag_offer)
             continue;
         m_state.offer_mime_types.remove(reinterpret_cast<u64>(pending));
+        m_state.offer_source_actions.remove(reinterpret_cast<u64>(pending));
         wl_data_offer_destroy(pending);
     }
     m_state.pending_offers.clear();
@@ -817,7 +818,12 @@ void WaylandDataDevice::set_accepts_drag(bool accepts)
 {
     MutexLocker locker(m_client.m_mutex);
     m_state.accepts_drag = accepts;
-    if (accepts && m_state.drag_offer && !m_state.drag_mime.is_empty()) {
+    if (!accepts) {
+        // Withdraw the acceptance too: a drop after this must not finish.
+        m_state.drag_accepted = false;
+        return;
+    }
+    if (m_state.drag_offer && !m_state.drag_mime.is_empty()) {
         wl_data_offer_accept(m_state.drag_offer, m_state.drag_serial, m_state.drag_mime.characters());
         m_state.drag_accepted = true;
     }
