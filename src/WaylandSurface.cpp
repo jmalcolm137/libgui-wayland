@@ -5,6 +5,7 @@
  */
 
 #include "WaylandClient.h"
+#include "WaylandGeometry.h"
 #include "WaylandEvents.h"
 #include "SerenityShell.h"
 #include "WaylandOutputs.h"
@@ -1160,6 +1161,45 @@ void WaylandClient::set_window_icon_bitmap(i32 window_id, Gfx::ShareableBitmap c
         trace("LibWM/Wayland: no xdg-toplevel-icon manager; window {} icon via serenity-window", window_id);
         m_serenity_shell->set_icon(window_surface->chrome, window_surface->icon_bitmap.ptr());
     }
+}
+
+void WaylandClient::set_global_cursor_position(Gfx::IntPoint position)
+{
+    MutexLocker locker(m_mutex);
+    if (!m_pointer_warp || !m_seat->wayland_seat()) {
+        trace("LibWM/Wayland: no wp_pointer_warp_v1; cannot move the pointer to {},{}", position.x(), position.y());
+        return;
+    }
+    auto* pointer = m_seat->wayland_pointer();
+    auto const serial = m_seat->pointer_enter_serial();
+    if (!pointer || serial == 0) {
+        trace("LibWM/Wayland: no pointer enter serial; cannot move the pointer");
+        return;
+    }
+
+    // The protocol moves the pointer within one of this client's surfaces, so
+    // find the surface that contains the requested output position. Layer
+    // surfaces (the Taskbar, which asks for this after a workspace switch) know
+    // their output origin; toplevels get theirs from the compositor.
+    auto warp_within = [&](wl_surface* surface, Gfx::IntPoint origin, Gfx::IntSize size) {
+        auto local = surface_local_point(position, origin, size);
+        if (!local.has_value())
+            return false;
+        wp_pointer_warp_v1_warp_pointer(m_pointer_warp, surface, pointer, wl_fixed_from_int(local->x()), wl_fixed_from_int(local->y()), serial);
+        wl_display_flush(m_display);
+        trace("LibWM/Wayland: moved the pointer to {},{} (surface-local {},{} on {})", position.x(), position.y(), local->x(), local->y(), static_cast<void*>(surface));
+        return true;
+    };
+
+    for (auto const& it : m_windows) {
+        auto& w = *it.value;
+        if (!w.surface || w.size.is_empty())
+            continue;
+        auto const origin = w.is_layer ? w.layer_output_position : w.global_position;
+        if (warp_within(w.surface, origin, w.size))
+            return;
+    }
+    trace("LibWM/Wayland: {},{} is not on one of this client's surfaces", position.x(), position.y());
 }
 
 void WaylandClient::set_window_cursor(i32 window_id, i32 cursor_type)

@@ -39,6 +39,7 @@ struct wl_subcompositor;
 struct wl_subsurface;
 struct wl_surface;
 struct wp_fractional_scale_manager_v1;
+struct wp_pointer_warp_v1;
 struct wp_fractional_scale_v1;
 struct wp_viewporter;
 struct wp_viewport;
@@ -217,6 +218,10 @@ public:
     void set_frameless(i32 window_id, bool frameless);
     void set_window_has_alpha_channel(i32 window_id, bool has_alpha);
     void set_window_alpha_hit_threshold(i32 window_id, float threshold);
+    // Move the pointer to a surface-local position on one of our own surfaces
+    // (wp_pointer_warp_v1); ignored when the point is not on one of them or the
+    // compositor does not implement the protocol.
+    void set_global_cursor_position(Gfx::IntPoint position);
     void set_window_cursor(i32 window_id, i32 cursor_type);
     void set_window_custom_cursor(i32 window_id, Gfx::ShareableBitmap const& cursor);
 
@@ -325,6 +330,11 @@ private:
     {
         MutexLocker locker(m_mutex);
         m_toplevel_icon_manager = manager;
+    }
+    void set_pointer_warp(wp_pointer_warp_v1* warp)
+    {
+        MutexLocker locker(m_mutex);
+        m_pointer_warp = warp;
     }
     void set_layer_shell(zwlr_layer_shell_v1* shell)
     {
@@ -538,6 +548,7 @@ private:
     wp_viewporter* m_viewporter { nullptr };
     wp_fractional_scale_manager_v1* m_fractional_scale_manager { nullptr };
     zwlr_layer_shell_v1* m_layer_shell { nullptr };
+    wp_pointer_warp_v1* m_pointer_warp { nullptr };
     xdg_toplevel_icon_manager_v1* m_toplevel_icon_manager { nullptr };
     RefPtr<Core::Notifier> m_notifier;
 

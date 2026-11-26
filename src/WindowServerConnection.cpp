@@ -659,11 +659,12 @@ void WindowServerConnection::set_forced_shadow(i32 window_id, bool)
     trace("LibWM: set_forced_shadow({}) has no Wayland equivalent", window_id);
 }
 
-void WindowServerConnection::set_flash_flush(bool)
+void WindowServerConnection::set_flash_flush(bool enabled)
 {
     // Serenity's window server could defer flushing frames; LibWM flushes every
     // commit (and the compositor paces with frame callbacks), so there is
     // nothing to turn on or off.
+    trace("LibWM: set_flash_flush({}) is a no-op (every commit is flushed)", enabled);
 }
 
 void WindowServerConnection::set_global_mouse_tracking(bool enabled)
@@ -677,9 +678,10 @@ void WindowServerConnection::set_global_mouse_tracking(bool enabled)
 
 void WindowServerConnection::set_global_cursor_position(Gfx::IntPoint position)
 {
-    // Clients cannot warp the pointer on Wayland (wl_pointer has no request for
-    // it; the compositor owns the cursor).
-    trace("LibWM: set_global_cursor_position({}, {}) has no Wayland equivalent", position.x(), position.y());
+    // wp_pointer_warp_v1 moves the pointer within one of this client's surfaces;
+    // the Taskbar uses it to put the cursor back on itself after a workspace
+    // switch. Compositors without it simply do not move the pointer.
+    WaylandClient::the().set_global_cursor_position(position);
 }
 
 void WindowServerConnection::show_screen_numbers(bool show)

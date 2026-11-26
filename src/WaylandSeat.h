@@ -22,6 +22,7 @@
 
 struct wl_keyboard;
 struct wl_pointer;
+struct wl_pointer;
 struct wl_seat;
 struct wl_surface;
 struct zwp_text_input_manager_v3;
@@ -67,9 +68,12 @@ public:
 
     // --- for the other Wayland components ---
     wl_seat* wayland_seat() const;
+    wl_pointer* wayland_pointer() const;
     // The serial of the most recent input event: required by requests that need
     // user intent (set_selection, start_drag, popup grabs, interactive move).
     u32 last_serial() const;
+    // The serial of the last wl_pointer.enter: wp_pointer_warp_v1 validates it.
+    u32 pointer_enter_serial() const;
     i32 pointer_window() const;
     u32 pointer_buttons() const;
     u32 current_modifiers() const;

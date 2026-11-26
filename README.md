@@ -77,9 +77,10 @@ on every run of the test suites.
   menubar is rendered on the LibWM server thread and handed to the Wayland side as an image, so
   it is never drawn from under the menu model.
 - **M7** — testing and CI: done. Eleven CTest suites (input and drag-and-drop, window state and
-  portals, clipboard and primary selection, menus, PDFViewer, **client-side GL**, the desktop
-  appearance portal, patch series, triage tooling, upstream LibGfx) run against a headless
-  Wayland compositor with scripted input and frame capture.
+  portals, cursor warping over `wp_pointer_warp_v1`, clipboard and primary selection, menus,
+  PDFViewer, **client-side GL**, the desktop appearance portal, patch series, triage tooling,
+  upstream LibGfx) run against a headless Wayland compositor with scripted input and frame
+  capture.
   `.github/workflows/ci.yml` builds and runs them in an Arch container on every push, with a
   compiler cache and log artifacts on failure. The GL suite uses LibWM's own test program, so the
   `EGLGPU` backend is covered here; `3DFileViewer` (desktop-provided) remains the full-application
@@ -140,24 +141,26 @@ detail is in [docs/protocol-mapping.md](docs/protocol-mapping.md).
   `EGLGPU` also cannot run shader programs (`create_shader` returns an error), so programs that
   need GLSL must use `LibSoftGPU`. See [docs/development-history.md](docs/development-history.md)
   §4.11.
-- **WindowServer requests with no Wayland equivalent.** All of them are handled explicitly
-  rather than silently dropped: `refresh_system_theme` reloads the theme, base size becomes the
-  window's minimum size, and `show_screen_numbers` is forwarded to the desktop as
-  `effects.show_screen_numbers` (the compositor owns output overlays). Size increments, aspect
-  ratios, forced shadows, global mouse tracking, cursor warping and window stealing have **no**
+- **WindowServer requests Wayland cannot express.** All of them are handled explicitly rather
+  than silently dropped: `refresh_system_theme` reloads the theme, base size becomes the window's
+  minimum size, `set_global_cursor_position` goes through `wp_pointer_warp_v1` (the staging
+  protocol KDE co-authored and SerenityDE implements), and `show_screen_numbers` is forwarded to
+  the desktop as `effects.show_screen_numbers` (the compositor owns output overlays). Size
+  increments, aspect ratios, forced shadows, global mouse tracking and window stealing have **no**
   Wayland protocol: `xdg-shell` has no increments or aspect constraints, a shadow is drawn outside
-  the surface, `wl_pointer` only reports over the client's own surfaces, clients cannot warp the
-  pointer, and a client owns its surfaces while the compositor owns stacking. The per-request
-  rationale is in [docs/protocol-mapping.md](docs/protocol-mapping.md). `is_minimized` remains
-  LibWM's own record, set by `set_minimized` and cleared when the compositor activates the
+  the surface, `wl_pointer` only reports over the client's own surfaces (Plasma and other
+  compositors solve window dragging with compositor-driven `xdg_toplevel.move`/`resize`, which
+  LibWM already uses), and a client owns its surfaces while the compositor owns stacking. The
+  per-request rationale is in [docs/protocol-mapping.md](docs/protocol-mapping.md). `is_minimized`
+  remains LibWM's own record, set by `set_minimized` and cleared when the compositor activates the
   window.
 - **Clean-ups.** SerenityDE's file handling now lives in the desktop (the shim only reads the
   host settings and `serenity-window`), and `WaylandClient`'s C protocol handlers are private
   behind the `WaylandEvents` friend, leaving only the API its callers use public. `create_window`
   and `create_popup` are split into their role-specific helpers
   (`create_layer_window`/`create_overlay_window`/`create_toplevel_window`, and
-  `create_layer_popup`/`create_xdg_popup`). `commit_window_content` still interleaves its three
-  presentation paths (composed inset, fractional resample, direct shm).
+  `create_layer_popup`/`create_xdg_popup`), and `commit_window_content` is now a short
+  coordinator over `present_composed`, `present_fractional` and `present_direct`.
 
 ### Provided by the desktop, not implemented portably
 
@@ -204,9 +207,10 @@ desktop adds is its own business, built on the same pinned SerenityOS source:
   [`serenity-window`](src/protocol/serenity-window.xml) protocol, which this repository owns. A
   compositor that implements it keeps a copy; without it, applications run with defaults.
 * **Requests with no client protocol.** Screen-number overlays (`show_screen_numbers`), global
-  mouse tracking, pointer warping and shadows around a surface are compositor features; the shim
-  forwards the screen-number request as the `effects.show_screen_numbers` host setting, and the
-  desktop is the right place to draw it.
+  mouse tracking and shadows around a surface are compositor features; the shim forwards the
+  screen-number request as the `effects.show_screen_numbers` host setting, and the desktop is the
+  right place to draw it. Pointer warping is the exception: it has a protocol
+  (`wp_pointer_warp_v1`), implemented by SerenityDE, and the shim uses it.
 * **Standard protocols the desktop only has to advertise.** Window icons
   (`xdg-toplevel-icon-v1`), primary selection (`zwp_primary_selection_v1`), the appearance
   preference (`org.freedesktop.portal.Settings`, via `xdg-desktop-portal`) and the usual

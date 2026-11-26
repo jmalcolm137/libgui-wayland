@@ -26,7 +26,7 @@ invoke ninja on the build tree, so CTest runs them one at a time.
 | CTest name | Script | Labels | Covers |
 |---|---|---|---|
 | `libwm.headless` | `run-headless-tests.sh` | integration | presentation, input (pointer, wheel, XKB keys, double-click, held-key repeat), cursors, min size, alpha regions, opaque region, interactive resize (`xdg_toplevel.resize`, and the no-serial/none cases), outgoing and incoming drag-and-drop (including bad and stalled peers), long titles, IME, connection loss |
-| `libwm.window-and-portal` | `run-window-and-portal-tests.sh` | integration | `libwm-unit-test` (MenuController, clipboard image transcoding, Config persistence, thread safety, scale inference), fullscreen/maximize/resize, HiDPI at 1x and 2x, CSD, launching through `Desktop::AppFile`, the Calculator |
+| `libwm.window-and-portal` | `run-window-and-portal-tests.sh` | integration | `libwm-unit-test` (MenuController, clipboard image transcoding, Config persistence, thread safety, scale inference, cursor-warp surface geometry), fullscreen/maximize/resize, HiDPI at 1x and 2x (including a CSD titlebar composed through the fractional path), CSD, `set_global_cursor_position` end to end over `wp_pointer_warp_v1`, every WindowServer request with no Wayland equivalent (each is traced, including the base-size→minimum-size mapping, aspect/shadow/tracking no-ops, screen-number forwarding and a theme refresh), launching through `Desktop::AppFile`, the Calculator |
 | `libwm.clipboard` | `run-clipboard-test.sh` | integration | clipboard and primary selection in both directions with a native peer: text aliases, HTML, URI lists, PNG ↔ Serenity images |
 | `libwm.menu` | `run-menu-test.sh` | integration | menubar, popups, submenus, keyboard navigation, item activation, the About dialog; menubar pixels at 1x, 2x and after a resize |
 | `libwm.pdfviewer` | `run-pdfviewer-test.sh` | integration, apps | the unmodified PDFViewer: rendering, toolbar, Config and FileSystemAccess portals, opening a file, and zooming and wheel scrolling (measured from window dumps: the page grows, then moves) |
@@ -47,7 +47,12 @@ It gives the tests:
 
 * a script of pointer and keyboard input, resizes and IME events (`--input`);
 * frame capture to PNG (`--output`);
-* deterministic configures.
+* deterministic configures;
+* `wp_pointer_warp_v1` (with the enter-serial validation a real compositor
+  does), so `set_global_cursor_position` has an end-to-end test: the pointer
+  enters the window, the request warps it, and the client receives the
+  resulting motion (the compositor logs `HC: pointer warp to X,Y` with
+  `HC_TRACE=1`).
 
 It offers no `xdg-decoration` (so LibWM draws client-side decorations) and no
 fractional scale; HiDPI is tested with `LIBWM_CLIENT_SCALE`. Native peers for

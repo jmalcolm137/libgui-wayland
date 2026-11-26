@@ -23,6 +23,7 @@ required; without the others LibWM falls back as noted.
 | `wl_data_device_manager` | ≤ 3 | clipboard and drag-and-drop | no clipboard or DnD |
 | `zwp_primary_selection_device_manager_v1` | 1 | the middle-click selection, bridged both ways with the clipboard | no primary selection; clipboard only. wlroots only delivers it to the focused client, and validates `set_selection` serials, so a paste (focused) works and background polling does not |
 | `xdg_toplevel_icon_manager_v1` | 1 | the standard window icon (taskbars, switchers) | icons only through `serenity-window`, if present |
+| `wp_pointer_warp_v1` | 1 | `set_global_cursor_position` (the Taskbar puts the cursor back on itself) | the request is traced and dropped; the pointer does not move |
 | `zwp_text_input_manager_v3` | 1 | input methods (preedit, commit) | no IME |
 | `zwlr_layer_shell_v1` | ≤ 4 | Taskbar, Desktop, applets, popup-style windows, menus of layer surfaces | those become ordinary toplevels |
 | `serenity_window_manager` (`src/protocol/serenity-window.xml`) | ≤ 4 | a desktop's compositor: host settings, wallpaper, capture, menubar control, placement, icons | defaults; no compositor-driven chrome |
@@ -30,8 +31,9 @@ required; without the others LibWM falls back as noted.
 ## WindowServer requests (client → LibWM)
 
 `WindowServerConnection` (`src/WindowServerConnection.cpp`,
-`src/WindowServerSettings.cpp`) implements 97 of the 109 requests in
-`WindowServer.ipc`. The rest fall through to the generated
+`src/WindowServerSettings.cpp`) overrides 108 of the 109 requests in
+`WindowServer.ipc`; eight of those are deliberate no-ops with no Wayland
+equivalent (the table below). Only `pong` still falls through to the generated
 `WindowServerDefaultStub` (`tools/gen-default-stub.py`), which ignores
 asynchronous requests and answers synchronous ones with a valid default
 (false, zero, empty). It must never answer with an invalid response: LibIPC
@@ -42,7 +44,7 @@ then sends no reply, and the client's `send_sync()` blocks forever.
 | Window lifecycle | `create_window`, `destroy_window`, `set_window_title`, `get_window_title`, `set_window_rect`, `get_window_rect`, `get_window_floating_rect`, `get_window_rect_from_client`, `set_window_minimum_size`, `get_window_minimum_size`, `move_window_to_front`, `set_always_on_top`, `start_window_resize` | the compositor owns placement; layer-surface sizes follow `set_window_rect`; a resize request becomes `xdg_toplevel.resize` |
 | Window state | `set_fullscreen`, `set_maximized`, `is_maximized`, `set_minimized`, `is_minimized`, `set_window_parent_from_client`, `set_frameless`, `set_window_modified`, `is_window_modified`, `set_window_has_alpha_channel`, `set_window_alpha_hit_threshold`, `set_window_icon_bitmap`, `set_window_progress` | progress is accepted and ignored |
 | Painting | `set_window_backing_store`, `invalidate_rect`, `did_finish_painting`, `enable_display_link`, `disable_display_link` | frame-callback paced |
-| Cursor | `set_window_cursor`, `set_window_custom_cursor`, `get_global_cursor_position` | position reconstructed from the surface under the pointer |
+| Cursor | `set_window_cursor`, `set_window_custom_cursor`, `get_global_cursor_position`, `set_global_cursor_position` | position reconstructed from the surface under the pointer; warps go through `wp_pointer_warp_v1` |
 | Menus | `create_menu`, `destroy_menu`, `set_menu_name`, `set_menu_minimum_width`, `add_menu`, `add_menu_item`, `add_menu_separator`, `update_menu_item`, `remove_menu_item`, `flash_menubar_menu`, `popup_menu`, `dismiss_menu` | rendered by `MenuController` |
 | Drag and drop | `start_drag`, `set_accepts_drag` | `wl_data_device` |
 | Screen and capture | `get_screen_layout`, `set_screen_layout`, `save_screen_layout`, `get_desktop_display_scale`, `set_output_scale`, `get_screen_bitmap`, `get_screen_bitmap_around_cursor`, `get_screen_bitmap_around_location`, `get_color_under_cursor`, `get_applet_rect_on_screen` | layout and capture come from the desktop where available; `get_screen_bitmap` waits up to 2 s for the capture, the Magnifier's calls return the latest one |
@@ -60,8 +62,8 @@ one existed.
 | `set_window_base_size_and_size_increment` | base size becomes the window's minimum size (via `xdg_toplevel.set_min_size`); the increment is recorded | **none**: `xdg_toplevel` has min/max size but no X11 resize increments, so a compositor cannot snap to cell-sized steps |
 | `set_window_resize_aspect_ratio` | ignored (traced) | **none**: no aspect-ratio constraint in `xdg-shell`; the client keeps its own aspect |
 | `set_forced_shadow` | ignored (traced) | **none**: a shadow is drawn outside the surface; `xdg-decoration` exposes only SSD/CSD, and server-side decorations bring the compositor's own shadow |
-| `set_global_mouse_tracking` | ignored (traced) | **none**: `wl_pointer` reports only over this client's surfaces. `pointer-constraints`/`relative-pointer` lock the pointer to a surface; they do not track it globally |
-| `set_global_cursor_position` | ignored (traced) | **none**: clients cannot warp the pointer; `wl_pointer.warp` is a compositor→client event |
+| `set_global_mouse_tracking` | ignored (traced) | **none**: `wl_pointer` reports only over this client's surfaces. `pointer-constraints` locks the pointer *within* a surface and `relative-pointer` reports deltas, but neither reports where the pointer is when it is elsewhere. Serenity's only users are the Eyes/CatDog demos; window moves and resizes already use compositor-driven `xdg_toplevel.move`/`resize`, which track the pointer for us |
+| `set_global_cursor_position` | maps the output position onto one of this client's surfaces and calls `wp_pointer_warp_v1.warp_pointer` | **`wp_pointer_warp_v1`** (staging, co-authored by KDE and implemented by SerenityDE). It only moves the pointer within the client's own surfaces and validates the `wl_pointer.enter` serial; a position on another client's window cannot be requested, by design |
 | `refresh_system_theme` | reloads the theme in effect (host settings, then the Settings portal, then bundled) and notifies clients | n/a (local) |
 | `show_screen_numbers` | forwarded to the desktop as `effects.show_screen_numbers` | **compositor-owned**: it owns the outputs and can draw an identification overlay; there is no client protocol for it (SerenityDE's compositor is the right place) |
 | `set_flash_flush` | no-op | n/a: LibWM flushes every commit, and frame callbacks pace presentation |

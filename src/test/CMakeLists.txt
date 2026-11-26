@@ -55,6 +55,21 @@ libwm_gui_executable(libwm-gl-test
     INCLUDES ${LIBWM_TEST_INCLUDES}
     LIBS LibMain LibGUI LibGfx LibCore LibIPC LibGL LibGPU)
 
+# The WindowServer requests with no Wayland equivalent (base size/increment,
+# aspect ratio, forced shadow, flash flush, global mouse tracking, screen
+# numbers, theme refresh): each is sent once, so the suite can check the trace.
+libwm_gui_executable(libwm-wm-requests-test
+    SOURCES WmRequestsTest.cpp
+    INCLUDES ${LIBWM_TEST_INCLUDES}
+    LIBS LibMain LibGUI LibGfx LibCore LibIPC)
+
+# set_global_cursor_position through wp_pointer_warp_v1: asks for the cursor to
+# be moved to an output position on this window.
+libwm_gui_executable(libwm-warp-test
+    SOURCES WarpTest.cpp
+    INCLUDES ${LIBWM_TEST_INCLUDES}
+    LIBS LibMain LibGUI LibGfx LibCore LibIPC)
+
 # Interactive resize: asks for a bottom-right resize as the ResizeCorner does.
 libwm_gui_executable(libwm-resize-test
     SOURCES ResizeTest.cpp

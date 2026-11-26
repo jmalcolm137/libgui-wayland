@@ -21,6 +21,8 @@ ninja -C "$BUILD_DIR" \
     libwm-fullscreen-test \
     libwm-hidpi-detail-test \
     libwm-appfile-test \
+    libwm-warp-test \
+    libwm-wm-requests-test \
     Calculator >/dev/null
 
 RUNTIME="$(mktemp -d "${TMPDIR:-/tmp}/libwm-winportal.XXXXXX")"
@@ -123,6 +125,53 @@ check "csd: titlebar drag initiated xdg_toplevel.move" "grep -q 'CSD titlebar dr
 check "csd: maximize button toggled maximize"          "grep -q 'CSD maximize button clicked on window' '$RUNTIME/csd.app.log'"
 check "csd: close button closed the window"            "grep -q 'CSD close button clicked on window' '$RUNTIME/csd.app.log'"
 
+# --- 2c. Global cursor position via wp_pointer_warp_v1 ----------------------
+# The pointer enters the window (a serial the shim can quote), the widget asks
+# for the cursor at output (190,140), and the compositor must apply the warp and
+# report a motion there.
+cat > "$RUNTIME/warp.input" <<'WARPEOF'
+sleep 900
+motion 120 90
+sleep 1200
+WARPEOF
+HC_TRACE=1 "$HC" --socket libwm-warp --size 800x600 --timeout 4 \
+    --output "$RUNTIME/warp.png" --input "$RUNTIME/warp.input" > "$RUNTIME/warp.hc.log" 2>&1 &
+HC_PID=$!
+for _ in $(seq 1 100); do [[ -e "$RUNTIME/libwm-warp" ]] && break; sleep 0.1; done
+
+env XDG_RUNTIME_DIR="$RUNTIME" LIBWM_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY=libwm-warp \
+    SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
+    LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    timeout 5 "$BUILD_DIR/bin/libwm-warp-test" > "$RUNTIME/warp.app.log" 2>&1 || true
+wait "$HC_PID" 2>/dev/null || true
+HC_PID=""
+
+check "warp: request recorded"                          "grep -q 'WARP-TEST: requesting warp to 190,140' '$RUNTIME/warp.app.log'"
+check "warp: mapped to surface-local (190,140)"         "grep -q 'moved the pointer to 190,140 (surface-local 190,140' '$RUNTIME/warp.app.log'"
+check "warp: compositor applied wp_pointer_warp_v1"     "grep -q 'HC: pointer warp to 190,140' '$RUNTIME/warp.hc.log'"
+check "warp: client received motion at the new position" "grep -q 'WARP-TEST: mouse at 190,140' '$RUNTIME/warp.app.log'"
+
+# --- 2d. WindowServer requests with no Wayland equivalent --------------------
+"$HC" --socket libwm-wmreq --size 800x600 --timeout 3 \
+    --output "$RUNTIME/wmreq.png" > "$RUNTIME/wmreq.hc.log" 2>&1 &
+HC_PID=$!
+for _ in $(seq 1 100); do [[ -e "$RUNTIME/libwm-wmreq" ]] && break; sleep 0.1; done
+
+env XDG_RUNTIME_DIR="$RUNTIME" LIBWM_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY=libwm-wmreq \
+    SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
+    LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    timeout 4 "$BUILD_DIR/bin/libwm-wm-requests-test" > "$RUNTIME/wmreq.app.log" 2>&1 || true
+wait "$HC_PID" 2>/dev/null || true
+HC_PID=""
+
+check "wm requests: base size becomes the minimum size" "grep -q 'set base size window .* -> 250x150 (size increments 10x10 have no Wayland equivalent)' '$RUNTIME/wmreq.app.log'"
+check "wm requests: aspect ratio traced as unrepresentable" "grep -q 'set_window_resize_aspect_ratio(.*4x3) has no Wayland equivalent' '$RUNTIME/wmreq.app.log'"
+check "wm requests: forced shadow traced as unrepresentable" "grep -q 'set_forced_shadow(.*) has no Wayland equivalent' '$RUNTIME/wmreq.app.log'"
+check "wm requests: flash flush is an explicit no-op"      "grep -q 'set_flash_flush(true) is a no-op' '$RUNTIME/wmreq.app.log'"
+check "wm requests: global mouse tracking traced and released" "grep -q 'set_global_mouse_tracking(true) has no Wayland equivalent' '$RUNTIME/wmreq.app.log' && grep -q 'set_global_mouse_tracking(false) has no Wayland equivalent' '$RUNTIME/wmreq.app.log'"
+check "wm requests: screen numbers forwarded to the desktop" "grep -q 'show_screen_numbers(true) forwarded to the desktop' '$RUNTIME/wmreq.app.log'"
+check "wm requests: theme refreshed"                       "grep -q 'system theme refreshed' '$RUNTIME/wmreq.app.log'"
+
 # --- 3. HiDPI output scale (1x vs 2x wl_output.scale & backing store) --------
 "$HC" --socket libwm-hidpi-1x --size 800x600 --scale 1 --timeout 2 \
     --output "$RUNTIME/hc-1x.png" > "$RUNTIME/hidpi-1x.hc.log" 2>&1 &
@@ -175,6 +224,24 @@ HC_PID=""
 check "hidpi: 1.5x backing store rendered at 2x (400x192)" "grep -q 'dumped window .* (400x192)' '$RUNTIME/hidpi-15x.app.log'"
 check "hidpi: 1.5x presented 300x144 fractional buffer"    "grep -q '@1.50x -> 300x144px' '$RUNTIME/hidpi-15x.app.log'"
 check "hidpi: compositor captured 300x144 @1.5x buffer"    "grep -q 'captured 300x144' '$RUNTIME/hidpi-15x.hc.log'"
+
+# Fractional HiDPI through the composed path: a CSD titlebar (22px) resampled
+# with the content, so present_composed hands off to present_fractional.
+"$HC" --socket libwm-hidpi-csd --size 800x600 --scale 1 --timeout 2 \
+    --output "$RUNTIME/hc-hidpi-csd.png" > "$RUNTIME/hidpi-csd.hc.log" 2>&1 &
+HC_PID=$!
+for _ in $(seq 1 100); do [[ -e "$RUNTIME/libwm-hidpi-csd" ]] && break; sleep 0.1; done
+
+env XDG_RUNTIME_DIR="$RUNTIME" LIBWM_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY=libwm-hidpi-csd \
+    LIBWM_CLIENT_SCALE=1.5 LIBWM_FORCE_CSD=1 \
+    SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
+    LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    timeout 4 "$BUILD_DIR/bin/libwm-hidpi-detail-test" > "$RUNTIME/hidpi-csd.app.log" 2>&1 || true
+wait "$HC_PID" 2>/dev/null || true
+HC_PID=""
+
+check "hidpi: 1.5x CSD composed buffer resampled (300x177)" "grep -q '@1.50x -> 300x177px incl. 22px csd' '$RUNTIME/hidpi-csd.app.log'"
+check "hidpi: compositor captured the CSD fractional buffer" "grep -q 'captured 300x177' '$RUNTIME/hidpi-csd.hc.log'"
 
 PROJECT_ROOT="$PROJECT_ROOT" python3 - "$RUNTIME/dump-1x.png" "$RUNTIME/dump-2x.png" "$RUNTIME/hc-15x.png" <<'PY' > "$RUNTIME/hidpi-pixels.log" 2>&1
 import os, sys

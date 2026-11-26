@@ -420,10 +420,22 @@ void WaylandSeat::note_pointer_enter_serial(u32 serial)
     m_state.pointer_enter_serial = serial;
 }
 
+u32 WaylandSeat::pointer_enter_serial() const
+{
+    MutexLocker locker(m_client.m_mutex);
+    return m_state.pointer_enter_serial;
+}
+
 u32 WaylandSeat::last_serial() const
 {
     MutexLocker locker(m_client.m_mutex);
     return m_state.last_serial;
+}
+
+wl_pointer* WaylandSeat::wayland_pointer() const
+{
+    MutexLocker locker(m_client.m_mutex);
+    return m_state.pointer;
 }
 
 wl_seat* WaylandSeat::wayland_seat() const

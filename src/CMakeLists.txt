@@ -86,6 +86,9 @@ libwm_wayland_protocol(LibWM xdg-decoration "${WAYLAND_PROTOCOLS_DIR}/unstable/x
 libwm_wayland_protocol(LibWM xdg-output "${WAYLAND_PROTOCOLS_DIR}/unstable/xdg-output/xdg-output-unstable-v1.xml")
 # xdg_toplevel_icon_v1: the standard window icon (instead of serenity-window's).
 libwm_wayland_protocol(LibWM xdg-toplevel-icon-v1 "${WAYLAND_PROTOCOLS_DIR}/staging/xdg-toplevel-icon/xdg-toplevel-icon-v1.xml")
+# wp_pointer_warp_v1: move the pointer to a location on one of our surfaces
+# (Serenity's set_global_cursor_position, e.g. the Taskbar).
+libwm_wayland_protocol(LibWM pointer-warp-v1 "${WAYLAND_PROTOCOLS_DIR}/staging/pointer-warp/pointer-warp-v1.xml")
 # zwp_primary_selection_v1: the middle-click selection shared with other toolkits.
 libwm_wayland_protocol(LibWM primary-selection-unstable-v1 "${WAYLAND_PROTOCOLS_DIR}/unstable/primary-selection/primary-selection-unstable-v1.xml")
 # wlr-layer-shell: the Serenity Taskbar/Desktop/applets map to layer surfaces.

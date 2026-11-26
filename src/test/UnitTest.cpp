@@ -13,6 +13,7 @@
 #include "WaylandSeat.h"
 #include "WaylandSeat.h"
 #include "WaylandDataDevice.h"
+#include "WaylandGeometry.h"
 #include "WaylandOutputs.h"
 #include <AK/Format.h>
 #include <Kernel/API/KeyCode.h>
@@ -334,6 +335,30 @@ void test_config_server_portal()
     check(client.list_config_groups("TestDomain"sv).is_empty(), "Config portal removes group entry"sv);
 }
 
+void test_surface_local_point()
+{
+    using LibWM::surface_local_point;
+    Gfx::IntPoint const origin { 10, 20 };
+    Gfx::IntSize const size { 100, 50 };
+
+    check(surface_local_point({ 10, 20 }, origin, size) == Gfx::IntPoint { 0, 0 },
+        "cursor warp: the surface origin maps to (0,0)"sv);
+    check(surface_local_point({ 109, 69 }, origin, size) == Gfx::IntPoint { 99, 49 },
+        "cursor warp: the last pixel inside maps to size - 1"sv);
+    check(!surface_local_point({ 110, 20 }, origin, size).has_value(),
+        "cursor warp: the right edge is outside the surface"sv);
+    check(!surface_local_point({ 10, 70 }, origin, size).has_value(),
+        "cursor warp: the bottom edge is outside the surface"sv);
+    check(!surface_local_point({ 9, 20 }, origin, size).has_value(),
+        "cursor warp: a point left of the origin is outside"sv);
+    check(!surface_local_point({ 10, 19 }, origin, size).has_value(),
+        "cursor warp: a point above the origin is outside"sv);
+    check(!surface_local_point({ 10, 20 }, origin, { 0, 0 }).has_value(),
+        "cursor warp: an empty surface has no inside point"sv);
+    check(surface_local_point({ -100, -50 }, { -100, -50 }, size) == Gfx::IntPoint { 0, 0 },
+        "cursor warp: a surface at a negative output origin still maps (0,0)"sv);
+}
+
 void test_wayland_client_thread_safety()
 {
     auto& client = LibWM::WaylandClient::the();
@@ -400,6 +425,7 @@ ErrorOr<int> serenity_main(Main::Arguments)
     test_config_server_portal();
     test_wayland_client_thread_safety();
     test_resize_direction_edges();
+    test_surface_local_point();
 
     outln("==> libwm-unit-test: {} passed, {} failed", s_passed, s_failed);
     return s_failed == 0 ? 0 : 1;
