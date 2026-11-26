@@ -224,7 +224,7 @@ check "plain resize still resizes the client"   "[[ \$(grep -c 'window_resized' 
 pdf_frame() {
     local name="$1" input="$2"
     printf '%b' "$input" > "$RUNTIME/$name.input"
-    "$HC" --socket "pdf-$name" --size 1024x768 --timeout 6 \
+    "$HC" --socket "pdf-$name" --size 1024x768 --timeout 10 \
         --output "$RUNTIME/$name.screen.png" --input "$RUNTIME/$name.input" > "$RUNTIME/$name.hc.log" 2>&1 &
     HC_PID=$!
     for _ in $(seq 1 100); do [[ -e "$RUNTIME/pdf-$name" ]] && break; sleep 0.1; done
@@ -232,7 +232,7 @@ pdf_frame() {
         SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
         LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
         LIBWM_DUMP="$RUNTIME/$name.png" \
-        timeout 7 "$APP" "$PDF" > "$RUNTIME/$name.app.log" 2>&1 || true
+        timeout 11 "$APP" "$PDF" > "$RUNTIME/$name.app.log" 2>&1 || true
     wait "$HC_PID" 2>/dev/null || true
     HC_PID=""
 }
@@ -240,9 +240,12 @@ pdf_frame() {
 # Ctrl+= (KEY_LEFTCTRL 29, KEY_EQUAL 13), twice.
 ZOOM_IN='key PRESS 29\nkey PRESS 13\nkey RELEASE 13\nkey RELEASE 29\nsleep 200\n'
 FOCUS='motion 320 200\nbutton PRESS left\nbutton RELEASE left\nsleep 300\n'
-pdf_frame pdf-base 'sleep 2500\n'
-pdf_frame pdf-zoom "sleep 1200\n${FOCUS}${ZOOM_IN}${ZOOM_IN}sleep 1500\n"
-pdf_frame pdf-scroll "sleep 1200\n${FOCUS}${ZOOM_IN}${ZOOM_IN}sleep 800\nmotion 320 200\nsleep 150\naxis vertical 1\nsleep 1500\n"
+# The sleeps are generous because a loaded CI runner starts the app and renders
+# the first page far slower than a developer machine; the compositor and app
+# timeouts above leave room for them.
+pdf_frame pdf-base 'sleep 4000\n'
+pdf_frame pdf-zoom "sleep 3500\n${FOCUS}${ZOOM_IN}${ZOOM_IN}sleep 2000\n"
+pdf_frame pdf-scroll "sleep 3500\n${FOCUS}${ZOOM_IN}${ZOOM_IN}sleep 1000\nmotion 320 200\nsleep 150\naxis vertical 1\nsleep 2000\n"
 
 PROJECT_ROOT="$PROJECT_ROOT" python3 - "$RUNTIME/pdf-base.png" "$RUNTIME/pdf-zoom.png" "$RUNTIME/pdf-scroll.png" <<'PY' > "$RUNTIME/pdf-view.log" 2>&1 || true
 import os, sys
@@ -300,7 +303,9 @@ check "scroll: wheel moves the view, same page"    "grep -q '^scroll: ok' '$RUNT
 check "scroll & zoom: runs did not crash"          "! grep -l 'VERIFICATION FAILED' '$RUNTIME'/pdf-*.app.log >/dev/null"
 
 if [[ $failures -ne 0 ]]; then
-    echo "==> $failures PDFViewer check(s) failed; app log:"
+    echo "==> $failures PDFViewer check(s) failed; measurements:"
+    cat "$RUNTIME/pdf-view.log" 2>/dev/null || true
+    echo "--- app log ---"
     cat "$RUNTIME/app.log"
     echo "--- picker run log ---"
     cat "$RUNTIME/open.app.log"
