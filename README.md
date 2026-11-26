@@ -144,8 +144,9 @@ gaps in that session, but applications lose them on a third-party compositor (KD
 where the portable protocol or portal is not implemented:
 
 - **Key repeat.** SerenityDE's compositor repeats a held key itself (wlroots 0.20 stopped doing
-  it). LibWM does no client-side repeat, so holding a key types once under KDE/GNOME/sway;
-  implementing it in LibWM would double up under SerenityDE, so it needs a switch.
+  it). LibWM does no client-side repeat, so holding a key types once under compositors that leave
+  repeat to the client (KDE, GNOME, and wlroots 0.20+); implementing it in LibWM would double up
+  under SerenityDE, so it needs a switch.
 - **Window icons.** Sent with `serenity_toplevel.set_icon`; `xdg-toplevel-icon-v1` is not bound.
 - **Screenshots and the Magnifier.** `get_screen_bitmap` and `get_screen_bitmap_around_*` ask the
   compositor for a capture over `serenity-window`; elsewhere they return an empty image
