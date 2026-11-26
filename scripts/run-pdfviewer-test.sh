@@ -216,6 +216,89 @@ wait "$HC_PID" 2>/dev/null || true
 
 check "plain resize still resizes the client"   "[[ \$(grep -c 'window_resized' '$RUNTIME/live.app.log') -ge 3 ]]"
 
+# --- Scroll and zoom -------------------------------------------------------
+# Three runs of the same PDF: untouched, zoomed in twice (Ctrl+=), and zoomed
+# then wheel-scrolled. The window dumps are measured: the page must grow when
+# zoomed, and the wheel must move the view without flipping to another page.
+# (Clicking the page first is what gives the window keyboard focus here.)
+pdf_frame() {
+    local name="$1" input="$2"
+    printf '%b' "$input" > "$RUNTIME/$name.input"
+    "$HC" --socket "pdf-$name" --size 1024x768 --timeout 6 \
+        --output "$RUNTIME/$name.screen.png" --input "$RUNTIME/$name.input" > "$RUNTIME/$name.hc.log" 2>&1 &
+    HC_PID=$!
+    for _ in $(seq 1 100); do [[ -e "$RUNTIME/pdf-$name" ]] && break; sleep 0.1; done
+    env XDG_RUNTIME_DIR="$RUNTIME" WAYLAND_DISPLAY="pdf-$name" \
+        SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
+        LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        LIBWM_DUMP="$RUNTIME/$name.png" \
+        timeout 7 "$APP" "$PDF" > "$RUNTIME/$name.app.log" 2>&1 || true
+    wait "$HC_PID" 2>/dev/null || true
+    HC_PID=""
+}
+
+# Ctrl+= (KEY_LEFTCTRL 29, KEY_EQUAL 13), twice.
+ZOOM_IN='key PRESS 29\nkey PRESS 13\nkey RELEASE 13\nkey RELEASE 29\nsleep 200\n'
+FOCUS='motion 320 200\nbutton PRESS left\nbutton RELEASE left\nsleep 300\n'
+pdf_frame pdf-base 'sleep 2500\n'
+pdf_frame pdf-zoom "sleep 1200\n${FOCUS}${ZOOM_IN}${ZOOM_IN}sleep 1500\n"
+pdf_frame pdf-scroll "sleep 1200\n${FOCUS}${ZOOM_IN}${ZOOM_IN}sleep 800\nmotion 320 200\nsleep 150\naxis vertical 1\nsleep 1500\n"
+
+PROJECT_ROOT="$PROJECT_ROOT" python3 - "$RUNTIME/pdf-base.png" "$RUNTIME/pdf-zoom.png" "$RUNTIME/pdf-scroll.png" <<'PY' > "$RUNTIME/pdf-view.log" 2>&1 || true
+import os, sys
+sys.path.insert(0, os.path.join(os.environ["PROJECT_ROOT"], "scripts", "lib"))
+from png import read_png_rgba, pixel_rgb
+
+def page_width(rows, w, y):
+    mid = w // 2
+    if min(pixel_rgb(rows, mid, y)) <= 235:
+        return 0
+    left = mid
+    while left > 0 and min(pixel_rgb(rows, left - 1, y)) > 235:
+        left -= 1
+    right = mid
+    while right < w - 1 and min(pixel_rgb(rows, right + 1, y)) > 235:
+        right += 1
+    return right - left + 1
+
+def changed_pixels(a, b, w, h, first_row):
+    changed = 0
+    for y in range(first_row, h):
+        for x in range(w):
+            p, q = pixel_rgb(a, x, y), pixel_rgb(b, x, y)
+            if abs(p[0] - q[0]) + abs(p[1] - q[1]) + abs(p[2] - q[2]) > 30:
+                changed += 1
+    return changed
+
+w, h, base = read_png_rgba(sys.argv[1])
+wz, hz, zoom = read_png_rgba(sys.argv[2])
+ws, hs, scroll = read_png_rgba(sys.argv[3])
+assert (w, h) == (wz, hz) == (ws, hs), "window dumps differ in size"
+
+base_width = page_width(base, w, 200)
+zoom_width = page_width(zoom, w, 200)
+zoom_ok = base_width > 100 and zoom_width >= base_width * 1.15
+print(f"zoom: {'ok' if zoom_ok else 'BAD'} (page width {base_width} -> {zoom_width})")
+
+# The page-number box in the toolbar: a wheel that flips pages changes it, a
+# wheel that scrolls does not.
+number_box = (56, 2, 90, 24)
+number_same = all(
+    pixel_rgb(zoom, x, y) == pixel_rgb(scroll, x, y)
+    for y in range(number_box[1], number_box[3])
+    for x in range(number_box[0], number_box[2]))
+centroid = 0  # unused; kept for clarity of the intent above
+scrolled = changed_pixels(zoom, scroll, w, h, 30)
+scroll_ok = number_same and scrolled > 5000
+print(f"scroll: {'ok' if scroll_ok else 'BAD'} (page number unchanged={number_same}, changed pixels={scrolled})")
+
+sys.exit(0 if (zoom_ok and scroll_ok) else 1)
+PY
+
+check "zoom: page grows when zoomed in"            "grep -q '^zoom: ok' '$RUNTIME/pdf-view.log'"
+check "scroll: wheel moves the view, same page"    "grep -q '^scroll: ok' '$RUNTIME/pdf-view.log'"
+check "scroll & zoom: runs did not crash"          "! grep -l 'VERIFICATION FAILED' '$RUNTIME'/pdf-*.app.log >/dev/null"
+
 if [[ $failures -ne 0 ]]; then
     echo "==> $failures PDFViewer check(s) failed; app log:"
     cat "$RUNTIME/app.log"

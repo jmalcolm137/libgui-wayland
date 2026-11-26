@@ -59,7 +59,8 @@ on every run of the test suites.
   **Config** portal; both are served by LibWM without touching library source. Verified
   headlessly against `Tests/LibPDF/*.pdf` (window, menubar, page toolbar, the rendered page,
   a typed-path picker open, double-clicking to traverse a directory and open a file, and an
-  interactive resize; `scripts/run-pdfviewer-test.sh`).
+  interactive resize; `scripts/run-pdfviewer-test.sh`). Zooming and wheel scrolling are asserted
+  from window dumps: the page grows when zoomed in, and moves under the wheel.
 - **M6** — clipboard and menus: done for `text/plain`, `text/html`, `text/uri-list`, and
   `image/png` ↔ `image/x-serenityos`, including multiple representations on one clipboard item
   (all verified headlessly in both directions), plus a
@@ -129,8 +130,6 @@ detail is in [docs/protocol-mapping.md](docs/protocol-mapping.md).
   `set_flash_flush`, and the window-stealing calls (which have no meaning when each application
   is its own Wayland client). `is_minimized` is LibWM's own record, set by
   `set_minimized` and cleared when the compositor activates the window.
-- **Test gaps.** The PDFViewer suite opens, renders and resizes but does not assert scrolling or
-  zooming.
 - **Clean-ups.** SerenityDE's file handling (the theme and font broker files, the wallpaper
   store) still lives in `src/WindowServerSettings.cpp` rather than `SerenityShell`;
   `commit_window_content`, `create_window` and `create_popup` are long; the protocol event
