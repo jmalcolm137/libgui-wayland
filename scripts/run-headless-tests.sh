@@ -158,6 +158,38 @@ env XDG_RUNTIME_DIR="$RUNTIME" LIBWM_SESSION_DIR="$RUNTIME/session" WAYLAND_DISP
 wait "$HC_PID" 2>/dev/null || true
 HC_PID=""
 
+# Scenario 5: key repeat. wl_keyboard only advertises the rate (repeat_info);
+# the client repeats the held key. Hold "a" past the 400 ms delay, then release
+# it; a modifier must not repeat.
+cat > "$RUNTIME/repeat-input.txt" <<'EOF'
+sleep 400
+motion 160 120
+button PRESS left
+button RELEASE left
+sleep 300
+key PRESS 30
+sleep 1200
+key RELEASE 30
+sleep 300
+key PRESS 42
+sleep 800
+key RELEASE 42
+sleep 300
+EOF
+
+"$HC" --socket libwm-repeat --size 800x600 --timeout 5 \
+    --output "$RUNTIME/repeat-frame.png" --input "$RUNTIME/repeat-input.txt" > "$RUNTIME/repeat-hc.log" 2>&1 &
+HC_PID=$!
+for _ in $(seq 1 100); do [[ -e "$RUNTIME/libwm-repeat" ]] && break; sleep 0.1; done
+
+env XDG_RUNTIME_DIR="$RUNTIME" LIBWM_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY=libwm-repeat \
+    SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
+    LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    timeout 6 "$APP" > "$RUNTIME/repeat-app.log" 2>&1 || true
+
+wait "$HC_PID" 2>/dev/null || true
+HC_PID=""
+
 failures=0
 check() {
     if eval "$2"; then
@@ -199,6 +231,9 @@ check "resize: corner request became xdg_toplevel.resize" "grep -q 'started inte
 check "resize: no request for direction None"     "[ \$(grep -c 'started interactive resize' '$RUNTIME/resize-app.log') -eq 1 ]"
 check "resize: no seat serial declines the request" "grep -q 'no input serial; not resizing window' '$RUNTIME/resize-noserial-app.log'"
 check "resize: nothing sent without a serial"     "! grep -q 'started interactive resize' '$RUNTIME/resize-noserial-app.log'"
+check "key repeat: held key repeats (>= 5)"       "[ \$(grep -c 'key down code_point=97' '$RUNTIME/repeat-app.log') -ge 5 ]"
+check "key repeat: modifiers do not repeat"       "[ \$(grep -c 'key down code_point=0 .*key=.*modifiers=4' '$RUNTIME/repeat-app.log') -eq 1 ]"
+check "key repeat: stops at key release"          "! awk '/key up code_point=97/{up=1} up && /key down code_point=97/{found=1} END{exit found?0:1}' '$RUNTIME/repeat-app.log'"
 check "frame captured to PNG"                    "[[ -s '$FRAME_OUT' ]]"
 
 if grep -q 'captured' "$RUNTIME/hc.log"; then

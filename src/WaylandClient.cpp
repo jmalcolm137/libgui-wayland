@@ -44,7 +44,10 @@ static void registry_global(void* data, wl_registry* registry, uint32_t name, ch
     else if (!strcmp(interface, wl_shm_interface.name))
         self.set_shm(reinterpret_cast<wl_shm*>(wl_registry_bind(registry, name, &wl_shm_interface, 1)));
     else if (!strcmp(interface, wl_seat_interface.name))
-        self.seat().bind(reinterpret_cast<wl_seat*>(wl_registry_bind(registry, name, &wl_seat_interface, 1)));
+        // Version 4 is where wl_keyboard.repeat_info appears; a lower seat
+        // version means a compliant compositor sends no repeat info, and the
+        // client cannot repeat held keys.
+        self.seat().bind(reinterpret_cast<wl_seat*>(wl_registry_bind(registry, name, &wl_seat_interface, min(version, 4u))));
     else if (!strcmp(interface, wl_output_interface.name))
         self.outputs().add_output(reinterpret_cast<wl_output*>(wl_registry_bind(registry, name, &wl_output_interface, min(version, 2u))));
     else if (!strcmp(interface, xdg_wm_base_interface.name))

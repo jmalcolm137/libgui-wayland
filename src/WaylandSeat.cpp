@@ -7,6 +7,7 @@
 #include "WaylandSeat.h"
 #include "WaylandClient.h"
 #include "SerenityShell.h"
+#include <LibCore/Timer.h>
 #include <AK/Time.h>
 #include "WaylandDataDevice.h"
 #include "Environment.h"
@@ -387,7 +388,10 @@ static void keyboard_modifiers(void* data, wl_keyboard*, uint32_t serial, uint32
     static_cast<WaylandSeat*>(data)->on_keyboard_modifiers(depressed, latched, locked, group, serial);
 }
 
-static void keyboard_repeat_info(void*, wl_keyboard*, int32_t, int32_t) { }
+static void keyboard_repeat_info(void* data, wl_keyboard*, int32_t rate, int32_t delay)
+{
+    static_cast<WaylandSeat*>(data)->on_keyboard_repeat_info(rate, delay);
+}
 
 static wl_keyboard_listener const s_keyboard_listener = {
     .keymap = keyboard_keymap,
@@ -462,6 +466,76 @@ void WaylandSeat::forget_popup(i32 popup_id)
     MutexLocker locker(m_client.m_mutex);
     if (m_state.pointer_popup == popup_id)
         m_state.pointer_popup = -1;
+}
+
+bool WaylandSeat::client_side_repeat(StringView host_setting)
+{
+    // A compositor that repeats a held key itself says so; everything else
+    // follows the protocol and leaves repeat to the client.
+    return host_setting != "compositor"sv;
+}
+
+void WaylandSeat::on_keyboard_repeat_info(i32 rate, i32 delay)
+{
+    MutexLocker locker(m_client.m_mutex);
+    m_state.repeat_rate = max(0, rate);
+    m_state.repeat_delay_ms = max(0, delay);
+    trace("LibWM/Wayland: repeat_info rate={}/s delay={}ms", m_state.repeat_rate, m_state.repeat_delay_ms);
+    if (m_state.repeat_rate == 0)
+        stop_key_repeat();
+}
+
+void WaylandSeat::start_key_repeat(u32 key)
+{
+    if (m_state.repeat_rate <= 0 || !m_state.xkb_keymap)
+        return;
+    if (!xkb_keymap_key_repeats(m_state.xkb_keymap, key + 8)) {
+        // Modifiers and other non-repeating keys (the keymap decides).
+        stop_key_repeat();
+        return;
+    }
+    if (!client_side_repeat(m_client.m_serenity_shell->host_setting("keyboard.repeat"sv, "client"sv)))
+        return;
+
+    // A press for the key already repeating is another source's repeat (this
+    // client generates one stream; the compositor may generate another). Do not
+    // restart our delay on it, or a compositor that repeats server-side without
+    // declaring it would silently suppress ours instead of doubling.
+    if (m_state.repeating_key == key && m_state.repeat_timer_running)
+        return;
+
+    if (!m_state.repeat_timer)
+        m_state.repeat_timer = Core::Timer::create_single_shot(max(m_state.repeat_delay_ms, 1), [this] { repeat_tick(); });
+    m_state.repeating_key = key;
+    m_state.repeat_timer_running = true;
+    m_state.repeat_timer->restart(max(m_state.repeat_delay_ms, 1));
+}
+
+void WaylandSeat::stop_key_repeat()
+{
+    m_state.repeating_key = 0;
+    if (m_state.repeat_timer)
+        m_state.repeat_timer->stop();
+    m_state.repeat_timer_running = false;
+}
+
+void WaylandSeat::repeat_tick()
+{
+    MutexLocker locker(m_client.m_mutex);
+    m_state.repeat_timer_running = false;
+    if (m_state.repeating_key == 0 || !m_state.xkb_state || m_state.repeat_rate <= 0) {
+        stop_key_repeat();
+        return;
+    }
+    // Still the focused window's key: a focus change or capability loss stops
+    // repeat from its event handler, but re-check in case that was missed.
+    if (m_state.focused_window < 0) {
+        stop_key_repeat();
+        return;
+    }
+    deliver_key(m_state.repeating_key, true);
+    m_state.repeat_timer_running = true;
+    m_state.repeat_timer->restart(max(1000 / m_state.repeat_rate, 1));
 }
 
 void WaylandSeat::bind(wl_seat* seat)
@@ -548,6 +622,7 @@ void WaylandSeat::on_seat_capabilities(u32 capabilities)
         m_state.pointer_window = -1;
     }
     if (!(capabilities & WL_SEAT_CAPABILITY_KEYBOARD) && m_state.keyboard) {
+        stop_key_repeat();
         wl_keyboard_destroy(m_state.keyboard);
         m_state.keyboard = nullptr;
         m_state.focused_window = -1;
@@ -891,6 +966,26 @@ static u32 modifier_bit_for_evdev(u32 key)
     }
 }
 
+void WaylandSeat::deliver_key(u32 key, bool pressed)
+{
+    if (!m_state.xkb_state)
+        return;
+
+    xkb_keycode_t code = key + 8;
+    u32 code_point = xkb_state_key_get_utf32(m_state.xkb_state, code);
+    u32 key_code = static_cast<u32>(serenity_key_code_from_evdev(key));
+
+    // Serenity's WindowServer turned Ctrl+<letter> into the control character
+    // itself, so a client sees Ctrl-C as code point 3 rather than 'c' with a ctrl
+    // flag; LibVT relies on that, and so does every terminal program that expects a
+    // SIGINT.
+    if ((current_modifiers() & Mod_Ctrl) && code_point >= '@' && code_point < 0x7f)
+        code_point &= 0x1f;
+
+    if (m_client.m_input.key)
+        m_client.m_input.key(m_state.focused_window, code_point, key_code, 0, current_modifiers(), key, pressed);
+}
+
 void WaylandSeat::on_keyboard_key(u32 key, bool pressed)
 {
     MutexLocker locker(m_client.m_mutex);
@@ -902,16 +997,6 @@ void WaylandSeat::on_keyboard_key(u32 key, bool pressed)
     // Shift/CapsLock/etc. even without modifier events.
     xkb_state_update_key(m_state.xkb_state, code, pressed ? XKB_KEY_DOWN : XKB_KEY_UP);
 
-    u32 code_point = xkb_state_key_get_utf32(m_state.xkb_state, code);
-    u32 key_code = static_cast<u32>(serenity_key_code_from_evdev(key));
-
-    // Serenity's WindowServer turned Ctrl+<letter> into the control character
-    // itself, so a client sees Ctrl-C as code point 3 rather than 'c' with a ctrl
-    // flag; LibVT relies on that, and so does every terminal program that expects a
-    // SIGINT.
-    if ((current_modifiers() & Mod_Ctrl) && code_point >= '@' && code_point < 0x7f)
-        code_point &= 0x1f;
-
     if (u32 bit = modifier_bit_for_evdev(key); bit != 0) {
         if (pressed)
             m_state.modifiers |= bit;
@@ -919,14 +1004,19 @@ void WaylandSeat::on_keyboard_key(u32 key, bool pressed)
             m_state.modifiers &= ~bit;
     }
 
-    if (m_client.m_input.key)
-        m_client.m_input.key(m_state.focused_window, code_point, key_code, 0, current_modifiers(), key, pressed);
+    deliver_key(key, pressed);
+
+    if (pressed)
+        start_key_repeat(key);
+    else if (m_state.repeating_key == key)
+        stop_key_repeat();
 }
 
 void WaylandSeat::on_keyboard_focus(wl_surface* surface, bool entered)
 {
     MutexLocker locker(m_client.m_mutex);
     m_state.focused_window = entered ? m_client.window_id_for_surface(surface) : -1;
+    stop_key_repeat();
 }
 
 Gfx::IntPoint WaylandSeat::global_pointer_position()

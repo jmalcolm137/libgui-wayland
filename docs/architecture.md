@@ -143,8 +143,11 @@ axis deltas (accumulated into whole steps), XKB key codes, code points
 (Ctrl+letter becomes the control character, as Serenity's WindowServer did) and
 modifiers are translated. Double-clicks are synthesised in
 `WindowServerConnection`. `zwp_text_input_v3` relays preedit and commit text to
-the application. Cursors are the bundled SerenityOS cursor theme (decoded once
-and cached) or a custom bitmap, set with `wl_pointer.set_cursor`.
+the application. Held keys repeat: Wayland leaves repeat to the client, so LibWM arms a timer
+from `wl_keyboard.repeat_info` (delay, then 1/rate) and re-sends the press, unless the desktop
+declares that its compositor repeats (`keyboard.repeat=compositor` in the host settings).
+Cursors are the bundled SerenityOS cursor theme (decoded once and cached) or a custom bitmap,
+set with `wl_pointer.set_cursor`.
 
 ## Menus
 

@@ -46,7 +46,10 @@ on every run of the test suites.
 - **M3** — input + Calculator: done. Pointer/keyboard come from `wl_seat` (xkbcommon →
   Serenity `KeyCode`/modifiers), focus/activation/close handled, and the full input path is
   verified headlessly (the compositor injects a click; the widget receives it). The
-  **unmodified Calculator** builds and runs, decorated and movable, on KDE Plasma.
+  **unmodified Calculator** builds and runs, decorated and movable, on KDE Plasma. Held keys
+  repeat where the compositor leaves repeat to the client (the protocol default, and what KDE,
+  GNOME and wlroots 0.20+ do); SerenityDE repeats them itself and says so, and LibWM stands
+  down (`keyboard.repeat`).
 - **M4** — theme, fonts, decorations, icons, alpha: done. The system theme and fonts come from
   the bundled `Base/res` or the desktop's broker; windows get server-side decorations
   (`zxdg_decoration_manager_v1`) or LibWM's own 22px client-side titlebar with
@@ -141,10 +144,6 @@ The SerenityDE session supplies these over `serenity-window` or in its composito
 gaps in that session, but applications lose them on a third-party compositor (KDE, GNOME, sway),
 where the portable protocol or portal is not implemented:
 
-- **Key repeat.** SerenityDE's compositor repeats a held key itself (wlroots 0.20 stopped doing
-  it). LibWM does no client-side repeat, so holding a key types once under compositors that leave
-  repeat to the client (KDE, GNOME, and wlroots 0.20+); implementing it in LibWM would double up
-  under SerenityDE, so it needs a switch.
 - **Window icons.** Sent with `serenity_toplevel.set_icon`; `xdg-toplevel-icon-v1` is not bound.
 - **Screenshots and the Magnifier.** `get_screen_bitmap` and `get_screen_bitmap_around_*` ask the
   compositor for a capture over `serenity-window`; elsewhere they return an empty image

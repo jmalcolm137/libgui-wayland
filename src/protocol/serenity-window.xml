@@ -58,6 +58,12 @@
         keyboard.layouts, keyboard.variant, keyboard.model, keyboard.options:
         the XKB keymap.
 
+        keyboard.repeat: who repeats a held key. "compositor" when the
+        compositor does it itself (it then ignores wl_keyboard's client-side
+        repeat), "client" or absent when clients repeat from repeat_info. A
+        client must not repeat when the compositor does, or the key repeats
+        twice as fast.
+
         cursor.theme, cursor.highlight_radius, cursor.highlight_color: the
         cursor theme name and the highlight (a radius in pixels, a #rrggbb
         colour).

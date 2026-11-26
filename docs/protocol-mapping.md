@@ -14,7 +14,7 @@ required; without the others LibWM falls back as noted.
 | `xdg_wm_base` | 1 | toplevels and popups | required |
 | `wl_shm` | 1 | buffers (zero-copy over the client's memfd) | required |
 | `wl_subcompositor` | 1 | menubar subsurface | menubar composed into the window buffer |
-| `wl_seat` | 1 | pointer and keyboard | no input |
+| `wl_seat` | ≤ 4 | pointer, keyboard, and the repeat rate (`repeat_info`, since v4) | no input, and no key repeat |
 | `wl_output` | ≤ 2 | screen size and integer scale | default size, scale 1 |
 | `zxdg_output_manager_v1` | ≤ 3 | logical size, hence fractional scale | integer scale only |
 | `wp_fractional_scale_manager_v1` | 1 | per-surface preferred scale | scale inferred from outputs |

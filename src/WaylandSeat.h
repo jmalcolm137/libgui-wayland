@@ -17,6 +17,7 @@
 #include <AK/Vector.h>
 #include <LibGfx/Bitmap.h>
 #include <LibGfx/Point.h>
+#include <LibCore/Timer.h>
 #include <LibGfx/Rect.h>
 
 struct wl_keyboard;
@@ -72,6 +73,13 @@ public:
     i32 pointer_window() const;
     u32 pointer_buttons() const;
     u32 current_modifiers() const;
+    // Whether LibWM must generate key repeat itself, given the desktop's
+    // `keyboard.repeat` host setting. Wayland leaves repeat to the client
+    // (wl_keyboard.repeat_info advertises the rate); a compositor that repeats
+    // server-side -- SerenityDE does -- declares "compositor" so clients stand
+    // down, or the key would repeat twice as fast.
+    static bool client_side_repeat(StringView host_setting);
+
     // Show the cursor `window_surface` asks for, if the pointer is over it.
     void apply_window_cursor(WaylandClient::WindowSurface const&);
     // Decode the cursors a window is likely to ask for, so the first move onto
@@ -96,6 +104,7 @@ public:
     void on_pointer_axis(i32 x, i32 y);
     void on_pointer_axis_delta(double x, double y);
     void on_keyboard_keymap(int fd, u32 size);
+    void on_keyboard_repeat_info(i32 rate, i32 delay);
     void on_keyboard_modifiers(u32 depressed, u32 latched, u32 locked, u32 group, u32 serial);
     void on_keyboard_key(u32 key, bool pressed);
     void on_keyboard_focus(wl_surface*, bool entered);
@@ -112,6 +121,11 @@ private:
 
     void ensure_text_input();
     Optional<CachedCursor> load_standard_cursor(Gfx::StandardCursor);
+    // Send one key event from the current XKB state (no state change).
+    void deliver_key(u32 key, bool pressed);
+    void start_key_repeat(u32 key);
+    void stop_key_repeat();
+    void repeat_tick();
     void apply_cursor_bitmap(RefPtr<Gfx::Bitmap> const&, Gfx::IntPoint hotspot);
     void apply_standard_cursor(Gfx::StandardCursor);
     // Caller holds WaylandClient::the().mutex().
@@ -145,6 +159,12 @@ private:
         // wheels); accumulate them so whole scroll steps reach the GUI.
         double axis_accum_x { 0 };
         double axis_accum_y { 0 };
+        // wl_keyboard.repeat_info: 0 disables repeat.
+        int repeat_rate { 0 };
+        int repeat_delay_ms { 0 };
+        u32 repeating_key { 0 };
+        bool repeat_timer_running { false };
+        RefPtr<Core::Timer> repeat_timer;
     };
 
     struct TextInputState {
