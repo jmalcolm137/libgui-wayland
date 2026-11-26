@@ -617,6 +617,8 @@ void WaylandSeat::on_seat_capabilities(u32 capabilities)
     // that the capability coming back (a keyboard plugged in again) gets a fresh
     // one, with its keymap and enter.
     if (!(capabilities & WL_SEAT_CAPABILITY_POINTER) && m_state.pointer) {
+        // Observers quote the pointer they were created with, so they go with it.
+        m_client.destroy_mouse_observers();
         wl_pointer_destroy(m_state.pointer);
         m_state.pointer = nullptr;
         m_state.pointer_popup = -1;
@@ -632,6 +634,9 @@ void WaylandSeat::on_seat_capabilities(u32 capabilities)
     if ((capabilities & WL_SEAT_CAPABILITY_POINTER) && !m_state.pointer) {
         m_state.pointer = wl_seat_get_pointer(m_state.seat);
         wl_pointer_add_listener(m_state.pointer, &s_pointer_listener, this);
+        // A tracker may have been enabled before a pointer existed (or while the
+        // pointer was away): create its observers now that there is one.
+        m_client.create_mouse_observers();
     }
     if ((capabilities & WL_SEAT_CAPABILITY_KEYBOARD) && !m_state.keyboard) {
         m_state.keyboard = wl_seat_get_keyboard(m_state.seat);
