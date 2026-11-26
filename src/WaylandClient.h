@@ -40,6 +40,8 @@ struct wl_subsurface;
 struct wl_surface;
 struct wp_fractional_scale_manager_v1;
 struct wp_pointer_warp_v1;
+struct ext_input_observation_manager_v1;
+struct ext_input_position_observer_v1;
 struct wp_fractional_scale_v1;
 struct wp_viewporter;
 struct wp_viewport;
@@ -115,6 +117,9 @@ public:
         Function<void(i32 window_id, Gfx::IntPoint position, u32 button, u32 buttons, u32 modifiers)> mouse_down;
         Function<void(i32 window_id, Gfx::IntPoint position, u32 button, u32 buttons, u32 modifiers)> mouse_up;
         Function<void(i32 window_id, Gfx::IntPoint position, u32 buttons, u32 modifiers, i32 wheel_delta_x, i32 wheel_delta_y)> mouse_wheel;
+        // The pointer position in output coordinates, for GUI::MouseTracker.
+        // Only delivered while global mouse tracking is enabled.
+        Function<void(Gfx::IntPoint)> track_mouse_move;
         Function<void(i32 window_id, u32 code_point, u32 key, u8 map_entry_index, u32 modifiers, u32 scancode, bool is_press)> key;
         Function<void(i32 window_id)> window_entered;
         Function<void(i32 window_id)> window_left;
@@ -222,6 +227,12 @@ public:
     // (wp_pointer_warp_v1); ignored when the point is not on one of them or the
     // compositor does not implement the protocol.
     void set_global_cursor_position(Gfx::IntPoint position);
+    // Serenity's set_global_mouse_tracking: GUI::MouseTracker wants the pointer's
+    // output position even when it is outside the application's windows (the
+    // Eyes/CatDog demos). Implemented with ext-input-observation-v1: one
+    // observer per toplevel surface, reconstructed with the surface origin the
+    // desktop reports. Without the protocol nothing is sent.
+    void set_global_mouse_tracking(bool enabled);
     void set_window_cursor(i32 window_id, i32 cursor_type);
     void set_window_custom_cursor(i32 window_id, Gfx::ShareableBitmap const& cursor);
 
@@ -331,6 +342,13 @@ private:
         MutexLocker locker(m_mutex);
         m_toplevel_icon_manager = manager;
     }
+    void set_input_observation_manager(ext_input_observation_manager_v1* manager)
+    {
+        MutexLocker locker(m_mutex);
+        m_input_observation_manager = manager;
+        if (m_global_mouse_tracking)
+            create_mouse_observers();
+    }
     void set_pointer_warp(wp_pointer_warp_v1* warp)
     {
         MutexLocker locker(m_mutex);
@@ -409,6 +427,13 @@ private:
         // placement, from the serenity_toplevel.position event. Screen-relative
         // pointer coordinates are built from this.
         Gfx::IntPoint global_position;
+        // The main surface's logical size, which ext-input-observation-v1
+        // positions are relative to, and whether global_position is the
+        // compositor's placement (serenity_toplevel.position) rather than a
+        // default. Both are needed to turn a relative position into output
+        // coordinates; observers are ignored until the origin is known.
+        Gfx::IntSize logical_size;
+        bool origin_known { false };
         // An xdg_toplevel must not attach a buffer before its first configure.
         bool toplevel_configured { false };
         // Whether the compositor currently wants this window's menu bar shown.
@@ -519,7 +544,12 @@ private:
     void render_csd_titlebar(WindowSurface const&, Gfx::Bitmap&, int width);
     void create_layer_window(i32 window_id, i32 window_type, Gfx::IntPoint position, Gfx::IntSize size, ByteString const& title, bool has_alpha, bool resizable);
     void create_overlay_window(i32 window_id, i32 window_type, Gfx::IntPoint position, Gfx::IntSize size, ByteString const& title, bool has_alpha, bool resizable);
-    void create_toplevel_window(i32 window_id, Gfx::IntSize size, ByteString const& title, bool has_alpha, bool resizable, bool frameless, i32 window_mode, i32 parent_window_id, Gfx::IntRect const& launch_origin);
+    void create_toplevel_window(i32 window_id, Gfx::IntPoint position, Gfx::IntSize size, ByteString const& title, bool has_alpha, bool resizable, bool frameless, i32 window_mode, i32 parent_window_id, Gfx::IntRect const& launch_origin);
+    void on_global_pointer_position(wl_surface*, u32 instance, i32 relative_x, i32 relative_y);
+    void create_mouse_observers();
+    void create_mouse_observer(i32 window_id);
+    void destroy_mouse_observer(i32 window_id);
+    void destroy_mouse_observers();
     void request_frame_callback(WindowSurface&);
     bool present_fractional(WindowSurface&, u8 const* src_base, size_t src_pitch, int src_w, int src_h, Gfx::IntSize visible_size, int logical_height, int csd_h, int menubar_h, int scale_v120, bool has_alpha);
     void present_composed(WindowSurface&, int client_fd, Gfx::IntSize size, Gfx::IntSize visible_size, i32 pitch, int csd_h, int menubar_h, int scale, int scale_v120, bool is_fractional, bool has_alpha, Vector<Gfx::IntRect> damage, bool full_damage);
@@ -549,6 +579,7 @@ private:
     wp_fractional_scale_manager_v1* m_fractional_scale_manager { nullptr };
     zwlr_layer_shell_v1* m_layer_shell { nullptr };
     wp_pointer_warp_v1* m_pointer_warp { nullptr };
+    ext_input_observation_manager_v1* m_input_observation_manager { nullptr };
     xdg_toplevel_icon_manager_v1* m_toplevel_icon_manager { nullptr };
     RefPtr<Core::Notifier> m_notifier;
 
@@ -561,6 +592,12 @@ private:
 
     InputCallbacks m_input;
     Function<void(ByteString const&)> m_connection_lost;
+
+    // ext-input-observation-v1 state (see set_global_mouse_tracking).
+    bool m_global_mouse_tracking { false };
+    HashMap<i32, ext_input_position_observer_v1*> m_mouse_observers;
+    Gfx::IntPoint m_last_tracked_position;
+    bool m_has_tracked_position { false };
 
     HashMap<i32, NonnullOwnPtr<WindowSurface>> m_windows;
     HashMap<i32, NonnullOwnPtr<Popup>> m_popups;

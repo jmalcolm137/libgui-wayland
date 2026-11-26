@@ -388,10 +388,15 @@ void SerenityShell::on_toplevel_position(serenity_toplevel* resource, i32 x, i32
         WaylandClient::MutexLocker surface_locker(it.value->mutex);
         // Layer surfaces (applets) are laid out by the compositor, so their
         // origin comes from here, not from their anchored corner.
-        if (it.value->is_layer)
+        if (it.value->is_layer) {
             it.value->layer_output_position = { x, y };
-        else
+        } else {
             it.value->global_position = { x, y };
+            // SerenityDE tells us where the toplevel really is; from here the
+            // relative positions reported by ext-input-observation-v1 can be
+            // turned into output coordinates.
+            it.value->origin_known = true;
+        }
         if (m_toplevel_position_changed)
             m_toplevel_position_changed(it.value->window_id, Gfx::IntPoint { x, y });
         return;

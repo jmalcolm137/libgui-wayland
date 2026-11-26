@@ -25,8 +25,9 @@ invoke ninja on the build tree, so CTest runs them one at a time.
 
 | CTest name | Script | Labels | Covers |
 |---|---|---|---|
+| `libwm.mouse-tracking` | `run-mouse-tracking-test.sh` | integration | global mouse tracking: a `GUI::MouseTracker` receives output positions while the pointer is inside the window and after it moves outside it (`ext-input-observation-v1`), and stops when the tracker is destroyed |
 | `libwm.headless` | `run-headless-tests.sh` | integration | presentation, input (pointer, wheel, XKB keys, double-click, held-key repeat), cursors, min size, alpha regions, opaque region, interactive resize (`xdg_toplevel.resize`, and the no-serial/none cases), outgoing and incoming drag-and-drop (including bad and stalled peers), long titles, IME, connection loss |
-| `libwm.window-and-portal` | `run-window-and-portal-tests.sh` | integration | `libwm-unit-test` (MenuController, clipboard image transcoding, Config persistence, thread safety, scale inference, cursor-warp surface geometry), fullscreen/maximize/resize, HiDPI at 1x and 2x (including a CSD titlebar composed through the fractional path), CSD, `set_global_cursor_position` end to end over `wp_pointer_warp_v1`, every WindowServer request with no Wayland equivalent (each is traced, including the base-size→minimum-size mapping, aspect/shadow/tracking no-ops, screen-number forwarding and a theme refresh), launching through `Desktop::AppFile`, the Calculator |
+| `libwm.window-and-portal` | `run-window-and-portal-tests.sh` | integration | `libwm-unit-test` (MenuController, clipboard image transcoding, Config persistence, thread safety, scale inference, cursor-warp surface geometry), fullscreen/maximize/resize, HiDPI at 1x and 2x (including a CSD titlebar composed through the fractional path), CSD, `set_global_cursor_position` end to end over `wp_pointer_warp_v1`, every remaining WindowServer request with no Wayland equivalent (each is traced, including the base-size→minimum-size mapping, aspect/shadow/flash no-ops, screen-number forwarding and a theme refresh), launching through `Desktop::AppFile`, the Calculator |
 | `libwm.clipboard` | `run-clipboard-test.sh` | integration | clipboard and primary selection in both directions with a native peer: text aliases, HTML, URI lists, PNG ↔ Serenity images |
 | `libwm.menu` | `run-menu-test.sh` | integration | menubar, popups, submenus, keyboard navigation, item activation, the About dialog; menubar pixels at 1x, 2x and after a resize |
 | `libwm.pdfviewer` | `run-pdfviewer-test.sh` | integration, apps | the unmodified PDFViewer: rendering, toolbar, Config and FileSystemAccess portals, opening a file, and zooming (measured from window dumps: the page grows). The wheel-scroll measurement is printed but **parked** (not counted): CI's slower runs reach the same zoom and receive the wheel, yet the captured frame is nearly unchanged, so the check must measure the scrollbar position rather than raw pixels |
@@ -52,7 +53,10 @@ It gives the tests:
   does), so `set_global_cursor_position` has an end-to-end test: the pointer
   enters the window, the request warps it, and the client receives the
   resulting motion (the compositor logs `HC: pointer warp to X,Y` with
-  `HC_TRACE=1`).
+  `HC_TRACE=1`);
+* `ext-input-observation-v1` (signed 16:16 fixed point, surface-relative), so
+  `set_global_mouse_tracking` is tested with the pointer inside and outside the
+  window.
 
 It offers no `xdg-decoration` (so LibWM draws client-side decorations) and no
 fractional scale; HiDPI is tested with `LIBWM_CLIENT_SCALE`. Native peers for

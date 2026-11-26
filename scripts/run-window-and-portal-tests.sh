@@ -168,7 +168,7 @@ check "wm requests: base size becomes the minimum size" "grep -q 'set base size 
 check "wm requests: aspect ratio traced as unrepresentable" "grep -q 'set_window_resize_aspect_ratio(.*4x3) has no Wayland equivalent' '$RUNTIME/wmreq.app.log'"
 check "wm requests: forced shadow traced as unrepresentable" "grep -q 'set_forced_shadow(.*) has no Wayland equivalent' '$RUNTIME/wmreq.app.log'"
 check "wm requests: flash flush is an explicit no-op"      "grep -q 'set_flash_flush(true) is a no-op' '$RUNTIME/wmreq.app.log'"
-check "wm requests: global mouse tracking traced and released" "grep -q 'set_global_mouse_tracking(true) has no Wayland equivalent' '$RUNTIME/wmreq.app.log' && grep -q 'set_global_mouse_tracking(false) has no Wayland equivalent' '$RUNTIME/wmreq.app.log'"
+check "wm requests: global mouse tracking enabled and released" "grep -q 'LibWM: set_global_mouse_tracking(true)' '$RUNTIME/wmreq.app.log' && grep -q 'LibWM: set_global_mouse_tracking(false)' '$RUNTIME/wmreq.app.log'"
 check "wm requests: screen numbers forwarded to the desktop" "grep -q 'show_screen_numbers(true) forwarded to the desktop' '$RUNTIME/wmreq.app.log'"
 check "wm requests: theme refreshed"                       "grep -q 'system theme refreshed' '$RUNTIME/wmreq.app.log'"
 

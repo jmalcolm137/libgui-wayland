@@ -544,7 +544,7 @@ void WaylandClient::create_window(i32 window_id, Gfx::IntPoint position, Gfx::In
         create_overlay_window(window_id, window_type, position, size, title, has_alpha, resizable);
         return;
     }
-    create_toplevel_window(window_id, size, title, has_alpha, resizable, frameless, window_mode, parent_window_id, launch_origin);
+    create_toplevel_window(window_id, position, size, title, has_alpha, resizable, frameless, window_mode, parent_window_id, launch_origin);
 }
 
 // The Taskbar, Desktop and applets: anchored layer-shell surfaces whose size and
@@ -641,7 +641,9 @@ void WaylandClient::create_layer_window(i32 window_id, i32 window_type, Gfx::Int
         // client's own origin would otherwise be stale.
         window_surface->chrome = m_serenity_shell->create_toplevel(layer_surface_object);
 
+        window_surface->logical_size = window_surface->size;
         m_windows.set(window_id, move(window_surface));
+        create_mouse_observer(window_id);
         wl_display_flush(m_display);
         return;
 }
@@ -682,15 +684,17 @@ void WaylandClient::create_overlay_window(i32 window_id, i32 window_type, Gfx::I
         if (m_viewporter)
             window_surface->viewport = wp_viewporter_get_viewport(m_viewporter, surface);
 
+        window_surface->logical_size = window_surface->size;
         m_windows.set(window_id, move(window_surface));
         wl_display_flush(m_display);
+        create_mouse_observer(window_id);
         trace("LibWM/Wayland: popup window {} ({}x{}) at {},{}", window_id, size.width(), size.height(), position.x(), position.y());
         return;
 }
 
 // An ordinary xdg_toplevel (window, dialog, ...): title, app_id, transient
 // parent, decorations and HiDPI objects.
-void WaylandClient::create_toplevel_window(i32 window_id, Gfx::IntSize size, ByteString const& title, bool has_alpha, bool resizable, bool frameless, i32 window_mode, i32 parent_window_id, Gfx::IntRect const& launch_origin)
+void WaylandClient::create_toplevel_window(i32 window_id, Gfx::IntPoint position, Gfx::IntSize size, ByteString const& title, bool has_alpha, bool resizable, bool frameless, i32 window_mode, i32 parent_window_id, Gfx::IntRect const& launch_origin)
 {
     auto* surface = wl_compositor_create_surface(m_compositor);
     auto* xdg_surface_object = xdg_wm_base_get_xdg_surface(m_wm_base, surface);
@@ -750,14 +754,20 @@ void WaylandClient::create_toplevel_window(i32 window_id, Gfx::IntSize size, Byt
         window_surface->decoration = decoration;
     }
 
+    window_surface->logical_size = window_surface->size;
+    // The compositor's placement is unknown until serenity_toplevel.position;
+    // mouse tracking falls back to the requested position until then.
+    window_surface->requested_position = position;
     m_windows.set(window_id, move(window_surface));
     wl_display_flush(m_display);
+    create_mouse_observer(window_id);
 }
 
 
 void WaylandClient::destroy_window(i32 window_id)
 {
     MutexLocker locker(m_mutex);
+    destroy_mouse_observer(window_id);
     auto it = m_windows.find(window_id);
     if (it == m_windows.end())
         return;
@@ -1651,6 +1661,9 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
 
     int const csd_h = window_surface.csd_height();
     int const menubar_h = (window_surface.inset > 0 && !window_surface.menubar_surface) ? window_surface.inset : 0;
+    // The surface's logical size, which ext-input-observation-v1 positions are
+    // relative to (the composed path includes the CSD/menubar strip).
+    window_surface.logical_size = { visible_size.width(), visible_size.height() + csd_h + menubar_h };
 
     if (csd_h + menubar_h > 0) {
         present_composed(window_surface, client_fd, size, visible_size, pitch, csd_h, menubar_h, scale, scale_v120, is_fractional, has_alpha, move(damage), full_damage);

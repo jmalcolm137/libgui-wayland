@@ -7,7 +7,8 @@
 // Exercises the WindowServer requests that Wayland cannot express (or that map
 // only partly), so the suite can check that each one is handled explicitly:
 // base size/increment, aspect ratio, forced shadow, flash flush, global mouse
-// tracking, screen numbers and a theme refresh.
+// tracking (ext-input-observation-v1 where the compositor has it), screen
+// numbers and a theme refresh.
 
 #include "LibWM.h"
 #include <LibCore/Timer.h>
@@ -48,8 +49,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     GUI::ConnectionToWindowServer::the().async_show_screen_numbers(true);
     GUI::ConnectionToWindowServer::the().async_set_flash_flush(true);
 
-    // Constructing a MouseTracker asks for global mouse tracking; constructing
-    // and destroying it also proves the disable path does not hang.
+    // Constructing a MouseTracker enables global mouse tracking (an observer per
+    // toplevel where ext-input-observation-v1 is offered); destroying it must
+    // tear the observers down again.
     {
         NullMouseTracker tracker;
         dbgln("WMREQ-TEST: mouse tracker active");

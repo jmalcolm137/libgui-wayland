@@ -63,6 +63,13 @@ libwm_gui_executable(libwm-wm-requests-test
     INCLUDES ${LIBWM_TEST_INCLUDES}
     LIBS LibMain LibGUI LibGfx LibCore LibIPC)
 
+# Global mouse tracking: a GUI::MouseTracker subclass must receive the pointer
+# position outside the window too (ext-input-observation-v1).
+libwm_gui_executable(libwm-mouse-tracking-test
+    SOURCES MouseTrackingTest.cpp
+    INCLUDES ${LIBWM_TEST_INCLUDES}
+    LIBS LibMain LibGUI LibGfx LibCore LibIPC)
+
 # set_global_cursor_position through wp_pointer_warp_v1: asks for the cursor to
 # be moved to an output position on this window.
 libwm_gui_executable(libwm-warp-test
@@ -114,6 +121,7 @@ function(libwm_add_script_test name script labels)
 endfunction()
 
 libwm_add_script_test(headless run-headless-tests.sh "integration")
+libwm_add_script_test(mouse-tracking run-mouse-tracking-test.sh "integration")
 libwm_add_script_test(window-and-portal run-window-and-portal-tests.sh "integration")
 libwm_add_script_test(clipboard run-clipboard-test.sh "integration")
 libwm_add_script_test(menu run-menu-test.sh "integration")

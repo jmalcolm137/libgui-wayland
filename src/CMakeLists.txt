@@ -44,6 +44,7 @@ add_library(LibWM SHARED
     SerenityShell.cpp
     WaylandClient.cpp
     WaylandDataDevice.cpp
+    WaylandInputObservation.cpp
     WaylandOutputs.cpp
     WaylandPopup.cpp
     WaylandSeat.cpp
@@ -89,6 +90,11 @@ libwm_wayland_protocol(LibWM xdg-toplevel-icon-v1 "${WAYLAND_PROTOCOLS_DIR}/stag
 # wp_pointer_warp_v1: move the pointer to a location on one of our surfaces
 # (Serenity's set_global_cursor_position, e.g. the Taskbar).
 libwm_wayland_protocol(LibWM pointer-warp-v1 "${WAYLAND_PROTOCOLS_DIR}/staging/pointer-warp/pointer-warp-v1.xml")
+# ext-input-observation-v1: the pointer's position relative to one of our
+# surfaces, even when it is outside it (Serenity's set_global_mouse_tracking).
+# A draft (wayland-protocols MR !335) implemented by SerenityDE and wlmaker, so
+# the XML is vendored.
+libwm_wayland_protocol(LibWM ext-input-observation-v1 "${CMAKE_CURRENT_SOURCE_DIR}/protocol/ext-input-observation-v1.xml")
 # zwp_primary_selection_v1: the middle-click selection shared with other toolkits.
 libwm_wayland_protocol(LibWM primary-selection-unstable-v1 "${WAYLAND_PROTOCOLS_DIR}/unstable/primary-selection/primary-selection-unstable-v1.xml")
 # wlr-layer-shell: the Serenity Taskbar/Desktop/applets map to layer surfaces.

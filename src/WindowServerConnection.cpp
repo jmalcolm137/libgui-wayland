@@ -192,6 +192,12 @@ void WindowServerConnection::install_input_callbacks()
         trace("LibWM: wheel to window {} at {},{} delta {}x{}", window_id, position.x(), position.y(), wheel_delta_x, wheel_delta_y);
         async_mouse_wheel(window_id, position, 0, buttons, modifiers, wheel_delta_x, wheel_delta_y, wheel_delta_x, wheel_delta_y);
     });
+    // GUI::MouseTracker (Eyes, CatDog) wants the pointer position even when it
+    // is outside the application's windows; ext-input-observation-v1 supplies
+    // it, and this is the WindowServer event that delivers it.
+    callbacks.track_mouse_move = on_server_thread([this](Gfx::IntPoint position) {
+        async_track_mouse_move(position);
+    });
     callbacks.key = on_server_thread([this](i32 window_id, u32 code_point, u32 key, u8 map_entry_index, u32 modifiers, u32 scancode, bool is_press) {
         // While a menu is open (or to open one with F10/Alt+letter) the menu handles keys.
         if (m_menu.handle_key(window_id, key, code_point, modifiers, is_press))
@@ -670,11 +676,11 @@ void WindowServerConnection::set_flash_flush(bool enabled)
 
 void WindowServerConnection::set_global_mouse_tracking(bool enabled)
 {
-    // Wayland delivers pointer events only over this client's own surfaces. The
-    // relative-pointer and pointer-constraints protocols are about locking the
-    // pointer to one, not tracking it globally; a compositor-side feature (the
-    // Magnifier's follow mode) would need a desktop protocol.
-    trace("LibWM: set_global_mouse_tracking({}) has no Wayland equivalent", enabled);
+    // Implemented with ext-input-observation-v1 where the compositor offers it
+    // (SerenityDE and wlmaker): the pointer position relative to our windows,
+    // even outside them. Elsewhere observers are not created and this traces.
+    WaylandClient::the().set_global_mouse_tracking(enabled);
+    trace("LibWM: set_global_mouse_tracking({})", enabled);
 }
 
 void WindowServerConnection::set_global_cursor_position(Gfx::IntPoint position)

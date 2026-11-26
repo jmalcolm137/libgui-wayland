@@ -22,6 +22,7 @@
 #include <wayland-client.h>
 
 #include "fractional-scale-v1-client-protocol.h"
+#include "ext-input-observation-v1-client-protocol.h"
 #include "pointer-warp-v1-client-protocol.h"
 #include "primary-selection-unstable-v1-client-protocol.h"
 #include "xdg-toplevel-icon-v1-client-protocol.h"
@@ -60,6 +61,8 @@ void WaylandEvents::registry_global(void* data, wl_registry* registry, uint32_t 
         self.set_decoration_manager(reinterpret_cast<zxdg_decoration_manager_v1*>(wl_registry_bind(registry, name, &zxdg_decoration_manager_v1_interface, min(version, 1u))));
     else if (!strcmp(interface, wp_pointer_warp_v1_interface.name))
         self.set_pointer_warp(reinterpret_cast<wp_pointer_warp_v1*>(wl_registry_bind(registry, name, &wp_pointer_warp_v1_interface, 1)));
+    else if (!strcmp(interface, ext_input_observation_manager_v1_interface.name))
+        self.set_input_observation_manager(reinterpret_cast<ext_input_observation_manager_v1*>(wl_registry_bind(registry, name, &ext_input_observation_manager_v1_interface, 1)));
     else if (!strcmp(interface, xdg_toplevel_icon_manager_v1_interface.name))
         self.set_toplevel_icon_manager(reinterpret_cast<xdg_toplevel_icon_manager_v1*>(wl_registry_bind(registry, name, &xdg_toplevel_icon_manager_v1_interface, 1)));
     else if (!strcmp(interface, zwp_primary_selection_device_manager_v1_interface.name))
