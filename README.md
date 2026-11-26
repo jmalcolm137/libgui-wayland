@@ -52,7 +52,8 @@ on every run of the test suites.
 - **M4** — theme, fonts, decorations, icons, alpha: done. The system theme and fonts come from
   the bundled `Base/res` or the desktop's broker; windows get server-side decorations
   (`zxdg_decoration_manager_v1`) or LibWM's own 22px client-side titlebar with
-  close/maximize/minimize; icons are sent over `serenity-window`; windows can have per-pixel
+  close/maximize/minimize; icons use `xdg-toplevel-icon-v1`, with `serenity-window` as the
+  fallback for older compositors; windows can have per-pixel
   alpha with a click-through hit threshold; pointers show the SerenityOS cursor theme.
 - **M5** — PDFViewer: done. The **unmodified SerenityOS PDFViewer** builds under
   Lagom and renders PDFs on the host. Opening a file goes through an in-process
@@ -108,6 +109,11 @@ on every run of the test suites.
   falls back to PRIMARY when nothing owns CLIPBOARD, so text crosses in both directions between
   Serenity applications and native ones (`zwp_primary_selection_v1`). wlroots-based compositors
   only deliver PRIMARY to the focused client, which is what a paste does.
+- **M12** — window icons: done. `GUI::Window::set_icon` reaches taskbars and window switchers
+  through the standard `xdg-toplevel-icon-v1` (LibWM uploads the bitmap as an shm icon buffer at
+  its scale), falling back to `serenity_toplevel.set_icon` on compositors without it. Verified
+  against the SerenityDE compositor, whose Taskbar draws the icon from its WindowManagerServer
+  updates.
 - **Applications** — the framework builds and tests **Calculator**, **PDFViewer** and **Piano**
   from unmodified source. The rest of `Userland/Applications` is built by the desktop that ships
   it (see [Desktops](#desktops)), with GML, icons, menus, dialogs and syntax highlighting intact.
@@ -148,7 +154,6 @@ The SerenityDE session supplies these over `serenity-window` or in its composito
 gaps in that session, but applications lose them on a third-party compositor (KDE, GNOME, sway),
 where the portable protocol or portal is not implemented:
 
-- **Window icons.** Sent with `serenity_toplevel.set_icon`; `xdg-toplevel-icon-v1` is not bound.
 - **Screenshots and the Magnifier.** `get_screen_bitmap` and `get_screen_bitmap_around_*` ask the
   compositor for a capture over `serenity-window`; elsewhere they return an empty image
   (`org.freedesktop.portal.Screenshot` would be the portable route).
@@ -184,11 +189,19 @@ desktop adds is its own business, built on the same pinned SerenityOS source:
   and wallpaper settings, and compositor-drawn window chrome, travel over the optional
   [`serenity-window`](src/protocol/serenity-window.xml) protocol, which this repository owns. A
   compositor that implements it keeps a copy; without it, applications run with defaults.
+* **Standard protocols the desktop only has to advertise.** Window icons
+  (`xdg-toplevel-icon-v1`), primary selection (`zwp_primary_selection_v1`) and the usual
+  `xdg-shell`/`wl_data_device`/`wl_seat` surfaces mean a desktop's taskbar, window switcher and
+  middle-click paste work with Serenity applications exactly as with native ones. SerenityDE's
+  compositor turns the standard icon into its Taskbar button; `serenity-window`'s icon event is
+  only used where `xdg-toplevel-icon-v1` is absent.
 
 The [Serenity Desktop Environment](https://github.com/jmalcolm137/serenity-desktop-environment)
 is that desktop and the reference session: its compositor, Taskbar/Desktop/applets and session
-services supply what the *Remaining work* section marks as desktop-provided, including key
-repeat, window icons, screenshots, theme and input settings, and the wallpaper.
+services supply what the *Remaining work* section marks as desktop-provided (screenshots,
+theme/input/display settings, wallpaper and applet layout), and they consume the standard
+protocols above, so Serenity applications' icons and selections appear in its Taskbar and
+clipboard just like native ones'.
 
 ## Building
 

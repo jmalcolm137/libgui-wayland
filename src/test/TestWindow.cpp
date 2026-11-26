@@ -118,6 +118,15 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     window->set_minimum_size(120, 90);
     window->set_cursor(Gfx::StandardCursor::Hand);
 
+    // Exercise the icon path (there is no xdg-toplevel-icon manager under the
+    // test compositor, so this covers the serenity-window fallback).
+    if (auto icon = Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, { 16, 16 }); !icon.is_error()) {
+        for (int y = 0; y < 16; ++y)
+            for (int x = 0; x < 16; ++x)
+                icon.value()->set_pixel(x, y, Gfx::Color::from_rgb(0x00a0ff));
+        window->set_icon(icon.value());
+    }
+
     auto widget = window->set_main_widget<ColorWidget>();
     widget->set_fill_with_background_color(true);
     window->show();

@@ -28,6 +28,7 @@
 
 #include "fractional-scale-v1-client-protocol.h"
 #include "viewporter-client-protocol.h"
+#include "xdg-toplevel-icon-v1-client-protocol.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "xdg-decoration-client-protocol.h"
 #include "xdg-shell-client-protocol.h"
@@ -755,6 +756,10 @@ void WaylandClient::destroy_window(i32 window_id)
         }
         if (window_surface.layer_surface)
             zwlr_layer_surface_v1_destroy(window_surface.layer_surface);
+        if (window_surface.xdg_icon)
+            xdg_toplevel_icon_v1_destroy(window_surface.xdg_icon);
+        if (window_surface.xdg_icon_buffer)
+            wl_buffer_destroy(window_surface.xdg_icon_buffer);
         m_serenity_shell->destroy_toplevel(window_surface.chrome);
         if (window_surface.decoration)
             zxdg_toplevel_decoration_v1_destroy(window_surface.decoration);
@@ -1034,6 +1039,60 @@ void WaylandClient::set_always_on_top(i32 window_id, bool always_on_top)
         m_serenity_shell->set_always_on_top(window_surface->chrome, always_on_top);
 }
 
+bool WaylandClient::publish_xdg_toplevel_icon(WindowSurface& window_surface, Gfx::Bitmap const* bitmap)
+{
+    if (!m_toplevel_icon_manager || !window_surface.toplevel)
+        return false;
+
+    SurfaceLocker surface_locker(window_surface.mutex);
+
+    // Replacing an icon: clear the old one first, then release the objects it
+    // referred to once nothing refers to them.
+    if (window_surface.xdg_icon) {
+        xdg_toplevel_icon_manager_v1_set_icon(m_toplevel_icon_manager, window_surface.toplevel, nullptr);
+        xdg_toplevel_icon_v1_destroy(window_surface.xdg_icon);
+        window_surface.xdg_icon = nullptr;
+    }
+    if (window_surface.xdg_icon_buffer) {
+        wl_buffer_destroy(window_surface.xdg_icon_buffer);
+        window_surface.xdg_icon_buffer = nullptr;
+    }
+    window_surface.xdg_icon_anon = {};
+
+    if (!bitmap || bitmap->width() <= 0 || bitmap->height() <= 0)
+        return true;
+
+    int const width = bitmap->width();
+    int const height = bitmap->height();
+    int const scale = max(1, bitmap->scale());
+    size_t const pitch = static_cast<size_t>(width) * sizeof(u32);
+    auto buffer = Core::AnonymousBuffer::create_with_size(pitch * static_cast<size_t>(height));
+    if (buffer.is_error())
+        return true;
+    window_surface.xdg_icon_anon = buffer.release_value();
+    auto* pixels = static_cast<u8*>(window_surface.xdg_icon_anon.data<void>());
+    for (int y = 0; y < height; ++y)
+        memcpy(pixels + static_cast<size_t>(y) * pitch, bitmap->scanline(y), pitch);
+
+    auto* pool = wl_shm_create_pool(m_shm, window_surface.xdg_icon_anon.fd(), static_cast<int>(pitch * static_cast<size_t>(height)));
+    if (!pool)
+        return true;
+    // The icccm-style buffer: BGRA in memory, ARGB8888 on the wire.
+    window_surface.xdg_icon_buffer = wl_shm_pool_create_buffer(pool, 0, width, height, static_cast<int>(pitch), WL_SHM_FORMAT_ARGB8888);
+    wl_shm_pool_destroy(pool);
+    if (!window_surface.xdg_icon_buffer)
+        return true;
+
+    window_surface.xdg_icon = xdg_toplevel_icon_manager_v1_create_icon(m_toplevel_icon_manager);
+    if (!window_surface.xdg_icon)
+        return true;
+    xdg_toplevel_icon_v1_add_buffer(window_surface.xdg_icon, window_surface.xdg_icon_buffer, scale);
+    xdg_toplevel_icon_manager_v1_set_icon(m_toplevel_icon_manager, window_surface.toplevel, window_surface.xdg_icon);
+    wl_display_flush(m_display);
+    trace("LibWM/Wayland: set xdg-toplevel-icon ({}x{} at scale {})", width, height, scale);
+    return true;
+}
+
 void WaylandClient::set_window_icon_bitmap(i32 window_id, Gfx::ShareableBitmap const& icon)
 {
     MutexLocker locker(m_mutex);
@@ -1045,7 +1104,15 @@ void WaylandClient::set_window_icon_bitmap(i32 window_id, Gfx::ShareableBitmap c
         window_surface->icon_bitmap = icon.is_valid() ? copy_for_other_thread(icon.bitmap()) : nullptr;
         window_surface->csd_dirty = true;
     }
-    m_serenity_shell->set_icon(window_surface->chrome, window_surface->icon_bitmap.ptr());
+    // The standard protocol reaches taskbars and window switchers on any
+    // compositor that implements it; serenity-window is the older desktop's
+    // route and the fallback.
+    if (!publish_xdg_toplevel_icon(*window_surface, window_surface->icon_bitmap.ptr())) {
+        // Older SerenityDE compositors only have serenity-window; anything else
+        // gets no icon, as before.
+        trace("LibWM/Wayland: no xdg-toplevel-icon manager; window {} icon via serenity-window", window_id);
+        m_serenity_shell->set_icon(window_surface->chrome, window_surface->icon_bitmap.ptr());
+    }
 }
 
 void WaylandClient::set_window_cursor(i32 window_id, i32 cursor_type)

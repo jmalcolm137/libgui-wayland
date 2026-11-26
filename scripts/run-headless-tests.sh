@@ -236,6 +236,7 @@ check "resize: nothing sent without a serial"     "! grep -q 'started interactiv
 check "key repeat: held key repeats (>= 5)"       "[ \$(grep -c 'key down code_point=97' '$RUNTIME/repeat-app.log') -ge 5 ]"
 check "key repeat: modifiers do not repeat"       "[ \$(grep -c 'key down code_point=0 .*key=.*modifiers=4' '$RUNTIME/repeat-app.log') -eq 1 ]"
 check "key repeat: stops at key release"          "! awk '/key up code_point=97/{up=1} up && /key down code_point=97/{found=1} END{exit found?0:1}' '$RUNTIME/repeat-app.log'"
+check "window icon falls back without xdg-toplevel-icon" "grep -q 'no xdg-toplevel-icon manager; window .* icon via serenity-window' '$RUNTIME/app.log'"
 check "frame captured to PNG"                    "[[ -s '$FRAME_OUT' ]]"
 
 if grep -q 'captured' "$RUNTIME/hc.log"; then

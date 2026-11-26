@@ -94,6 +94,11 @@ configures carry `RESIZING`, so LibWM stretches the last frame through
 input serial, from a non-resizable window, or for `ResizeDirection::None` is
 ignored rather than sent.
 
+Window icons use `xdg-toplevel-icon-v1` when the compositor offers it (an shm buffer
+at the icon's scale, attached to the toplevel), so taskbars and window switchers
+draw them like any native application's; `serenity_toplevel.set_icon` remains the
+fallback for older SerenityDE compositors.
+
 State that is presented on Wayland (title, minimum size, alpha, maximized) is
 owned by the `WindowSurface`; `WindowServerConnection::Window` keeps only the
 protocol view (the client-visible rect, the modified flag, the last backing

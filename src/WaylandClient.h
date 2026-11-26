@@ -43,6 +43,8 @@ struct wp_fractional_scale_v1;
 struct wp_viewporter;
 struct wp_viewport;
 struct xdg_popup;
+struct xdg_toplevel_icon_manager_v1;
+struct xdg_toplevel_icon_v1;
 struct xdg_surface;
 struct xdg_toplevel;
 struct xdg_wm_base;
@@ -213,8 +215,10 @@ public:
     void set_window_cursor(i32 window_id, i32 cursor_type);
     void set_window_custom_cursor(i32 window_id, Gfx::ShareableBitmap const& cursor);
 
-    // The window's icon, pushed to the compositor over serenity-window when it
-    // offers the manager (SerenityOS: Window::icon()). An invalid icon clears it.
+    // The window's icon. Sent with xdg-toplevel-icon-v1 where the compositor
+    // offers it (the standard route: taskbars and window switchers draw it), and
+    // over serenity-window otherwise (older SerenityDE compositors). An invalid
+    // icon clears it.
     void set_window_icon_bitmap(i32 window_id, Gfx::ShareableBitmap const&);
 
     // Attach the client's shared bitmap (given as an fd) and commit. `size` is
@@ -286,6 +290,11 @@ public:
         m_fractional_scale_manager = manager;
     }
     void on_preferred_scale(wp_fractional_scale_v1*, u32 scale_v120);
+    void set_toplevel_icon_manager(xdg_toplevel_icon_manager_v1* manager)
+    {
+        MutexLocker locker(m_mutex);
+        m_toplevel_icon_manager = manager;
+    }
     void set_layer_shell(zwlr_layer_shell_v1* shell)
     {
         MutexLocker locker(m_mutex);
@@ -401,6 +410,11 @@ private:
         i32 cursor_type { 0 };
         RefPtr<Gfx::Bitmap> custom_cursor;
         RefPtr<Gfx::Bitmap> icon_bitmap;
+        // xdg-toplevel-icon-v1 state: the icon object and the buffer it refers
+        // to must stay alive until the icon is replaced or the window is gone.
+        xdg_toplevel_icon_v1* xdg_icon { nullptr };
+        wl_buffer* xdg_icon_buffer { nullptr };
+        Core::AnonymousBuffer xdg_icon_anon;
         Gfx::IntSize fixed_size;
         Vector<NonnullOwnPtr<BufferRecord>> buffers;
         // Optional top strip (menubar). The direct path presents it from a small
@@ -479,6 +493,9 @@ private:
     void update_input_region(WindowSurface&, u8 const* client_pixels, size_t pitch, Gfx::IntSize visible_size, int scale, int total_inset);
     void present_menubar(WindowSurface&, Gfx::IntSize visible_size);
     void render_csd_titlebar(WindowSurface const&, Gfx::Bitmap&, int width);
+    // Publish (or clear) the window's icon with xdg-toplevel-icon-v1; false when
+    // the compositor has no such manager, so the caller falls back.
+    bool publish_xdg_toplevel_icon(WindowSurface&, Gfx::Bitmap const*);
     static void draw_inset_image(WindowSurface const&, Gfx::Bitmap& destination, Gfx::IntRect rect);
     Popup* find_popup(i32 popup_id);
     i32 popup_id_for_surface(wl_surface*) const;
@@ -498,6 +515,7 @@ private:
     wp_viewporter* m_viewporter { nullptr };
     wp_fractional_scale_manager_v1* m_fractional_scale_manager { nullptr };
     zwlr_layer_shell_v1* m_layer_shell { nullptr };
+    xdg_toplevel_icon_manager_v1* m_toplevel_icon_manager { nullptr };
     RefPtr<Core::Notifier> m_notifier;
 
     DisplayLinkState m_display_link;
