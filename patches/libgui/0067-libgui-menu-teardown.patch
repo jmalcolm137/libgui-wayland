@@ -1,5 +1,5 @@
 diff --git a/Userland/Libraries/LibGUI/ConnectionToWindowServer.cpp b/Userland/Libraries/LibGUI/ConnectionToWindowServer.cpp
-index 1cda0e70..683e8d48 100644
+index d315618..669ffde 100644
 --- a/Userland/Libraries/LibGUI/ConnectionToWindowServer.cpp
 +++ b/Userland/Libraries/LibGUI/ConnectionToWindowServer.cpp
 @@ -28,14 +28,25 @@
@@ -26,11 +26,11 @@ index 1cda0e70..683e8d48 100644
 +    return connection_slot().ptr();
 +}
 +
- static void set_system_theme_from_anonymous_buffer(Core::AnonymousBuffer buffer)
+ ConnectionToWindowServer::ConnectionToWindowServer(NonnullOwnPtr<Core::LocalSocket> socket)
+     : IPC::ConnectionToServer<WindowClientEndpoint, WindowServerEndpoint>(*this, move(socket))
  {
-     Gfx::set_system_theme(buffer);
 diff --git a/Userland/Libraries/LibGUI/ConnectionToWindowServer.h b/Userland/Libraries/LibGUI/ConnectionToWindowServer.h
-index 9c550856..32d6398a 100644
+index 9c55085..32d6398 100644
 --- a/Userland/Libraries/LibGUI/ConnectionToWindowServer.h
 +++ b/Userland/Libraries/LibGUI/ConnectionToWindowServer.h
 @@ -19,6 +19,11 @@ class ConnectionToWindowServer final
@@ -46,7 +46,7 @@ index 9c550856..32d6398a 100644
  
  private:
 diff --git a/Userland/Libraries/LibGUI/Menu.cpp b/Userland/Libraries/LibGUI/Menu.cpp
-index d333011e..2a66b07c 100644
+index d333011..2a66b07 100644
 --- a/Userland/Libraries/LibGUI/Menu.cpp
 +++ b/Userland/Libraries/LibGUI/Menu.cpp
 @@ -169,7 +169,12 @@ void Menu::unrealize_menu()

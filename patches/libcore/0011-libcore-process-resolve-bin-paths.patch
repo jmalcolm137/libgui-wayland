@@ -1,5 +1,5 @@
 diff --git a/Userland/Libraries/LibCore/Process.cpp b/Userland/Libraries/LibCore/Process.cpp
-index 2860cbb1..73234994 100644
+index 1e08414..afc4ae2 100644
 --- a/Userland/Libraries/LibCore/Process.cpp
 +++ b/Userland/Libraries/LibCore/Process.cpp
 @@ -8,6 +8,7 @@
@@ -10,33 +10,33 @@ index 2860cbb1..73234994 100644
  #include <AK/ScopeGuard.h>
  #include <AK/String.h>
  #include <AK/Vector.h>
-@@ -18,6 +19,8 @@
- #include <LibCore/SocketAddress.h>
- #include <LibCore/StandardPaths.h>
- #include <LibCore/System.h>
-+#include <stdlib.h>
-+#include <unistd.h>
+@@ -21,6 +22,7 @@
  #include <errno.h>
  #include <signal.h>
  #include <spawn.h>
-@@ -108,19 +111,66 @@ ErrorOr<Process> Process::spawn(ProcessSpawnOptions const& options)
++#include <stdlib.h>
+ #include <unistd.h>
+ 
+ #if defined(AK_OS_SERENITY)
+@@ -118,7 +120,8 @@ ErrorOr<Process> Process::spawn(ProcessSpawnOptions const& options)
  
  #undef CHECK
  
--    ArgvList argv_list(options.executable, options.arguments.size());
-+    ArgvList argv_list(resolve_executable_path(options.executable), options.arguments.size());
+-    auto argv_list = NullTerminatedStringArray::create_for_argv(options.executable, options.arguments.size());
++    auto executable = resolve_executable_path(options.executable);
++    auto argv_list = NullTerminatedStringArray::create_for_argv(executable, options.arguments.size());
      for (auto const& argument : options.arguments)
          argv_list.append(argument.characters());
  
-+    auto executable = resolve_executable_path(options.executable);
-+
+@@ -135,13 +138,58 @@ ErrorOr<Process> Process::spawn(ProcessSpawnOptions const& options)
+ 
      pid_t pid;
      if (options.search_for_executable_in_path) {
--        pid = TRY(System::posix_spawnp(options.executable.view(), &spawn_actions, nullptr, const_cast<char**>(argv_list.get().data()), Core::Environment::raw_environ()));
-+        pid = TRY(System::posix_spawnp(executable.view(), &spawn_actions, nullptr, const_cast<char**>(argv_list.get().data()), Core::Environment::raw_environ()));
+-        pid = TRY(System::posix_spawnp(options.executable.view(), &spawn_actions, nullptr, argv_list.get(), environment));
++        pid = TRY(System::posix_spawnp(executable.view(), &spawn_actions, nullptr, argv_list.get(), environment));
      } else {
--        pid = TRY(System::posix_spawn(options.executable.view(), &spawn_actions, nullptr, const_cast<char**>(argv_list.get().data()), Core::Environment::raw_environ()));
-+        pid = TRY(System::posix_spawn(executable.view(), &spawn_actions, nullptr, const_cast<char**>(argv_list.get().data()), Core::Environment::raw_environ()));
+-        pid = TRY(System::posix_spawn(options.executable.view(), &spawn_actions, nullptr, argv_list.get(), environment));
++        pid = TRY(System::posix_spawn(executable.view(), &spawn_actions, nullptr, argv_list.get(), environment));
      }
      return Process { pid };
  }
@@ -90,16 +90,16 @@ index 2860cbb1..73234994 100644
  {
      auto process = TRY(spawn({
 diff --git a/Userland/Libraries/LibCore/Process.h b/Userland/Libraries/LibCore/Process.h
-index 21f09928..a8fd1b89 100644
+index 38372f6..d6363b9 100644
 --- a/Userland/Libraries/LibCore/Process.h
 +++ b/Userland/Libraries/LibCore/Process.h
-@@ -80,6 +80,11 @@ public:
+@@ -81,6 +81,11 @@ public:
  
      static ErrorOr<Process> spawn(ProcessSpawnOptions const& options);
  
 +    // Maps a SerenityOS "/bin/X" path to a host binary: first LIBWM_SESSION_BIN_DIR
-+    // (a session-provided /bin shadow), then /bin/X itself, then the binary next
-+    // to this executable. Returns the path unchanged otherwise.
++    // (a session-provided /bin shadow), then LIBWM_APP_BIN_DIR, then /bin/X itself,
++    // then the binary next to this executable. Returns the path unchanged otherwise.
 +    static ByteString resolve_executable_path(StringView path);
 +
      // FIXME: Make the following 2 functions return Process instance or delete them.

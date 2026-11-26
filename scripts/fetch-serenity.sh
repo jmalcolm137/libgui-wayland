@@ -14,18 +14,18 @@ set -euo pipefail
 SERENITY_REMOTE="${SERENITY_REMOTE:-https://github.com/jmalcolm137/serenity.git}"
 # Pinned so the patch series in this repo is reproducible (see patches/README.md).
 #
-# Advanced 2026-10-15: the previous pin (80baeb29) predates upstream work the port
-# and the SDE now depend on — e.g. it has no Userland/Games/Sudoku at all, which
-# the SDE's Lagom targets add by name, so a fresh tree failed to configure
-# ("add_subdirectory given source .../Userland/Games/Sudoku which is not an
-# existing directory"). The development checkouts had drifted ahead of the pin,
-# which is why nothing noticed.
+# Advanced 2026-11-25: rebased the fork's `fixes` branch onto upstream
+# 835d22663febc14427577fc91468c1e4c1fcc914 (the latest SerenityOS master at the
+# time). The pin is the commit before the branch's blue-grid wallpaper commit:
+# the wallpaper is an SDE asset, and the libgui-wayland patch series adds it
+# itself (patches/lagom-and-resources/0066-...), so pinning at the wallpaper
+# commit would make that patch fail because the file already exists.
 #
-# The fork's `fixes` branch sits on upstream a43d652b44066ab4d2605e4be4dc0bc9aa8c116e
-# (SERENITY_UPSTREAM_BASE below); rebasing it onto a newer upstream is a `git
-# rebase` of real commits, and the pin moves to the rebased tip.
-SERENITY_UPSTREAM_BASE="a43d652b44066ab4d2605e4be4dc0bc9aa8c116e"
-SERENITY_REVISION="${SERENITY_REVISION:-054963e8116a3b13797318c5251313c1b8fa4caf}"
+# The fork's `fixes` branch sits on SERENITY_UPSTREAM_BASE below; rebasing it onto
+# a newer upstream is a `git rebase` of real commits, and the pin moves to the
+# same point on the rebased branch (one commit before the wallpaper).
+SERENITY_UPSTREAM_BASE="835d22663febc14427577fc91468c1e4c1fcc914"
+SERENITY_REVISION="${SERENITY_REVISION:-584ceca57dbaca5f3b304915c6b449a69100ba78}"
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERENITY_SRC="${SERENITY_SRC:-$PROJECT_ROOT/serenity}"

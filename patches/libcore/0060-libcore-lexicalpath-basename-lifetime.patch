@@ -1,6 +1,8 @@
+diff --git a/Userland/Libraries/LibCore/Process.cpp b/Userland/Libraries/LibCore/Process.cpp
+index 3aed23a..9b8871b 100644
 --- a/Userland/Libraries/LibCore/Process.cpp
 +++ b/Userland/Libraries/LibCore/Process.cpp
-@@ -153,7 +153,11 @@
+@@ -172,7 +172,11 @@ ByteString Process::resolve_executable_path(StringView path)
          return path.to_byte_string();
  
      auto as_byte_string = path.to_byte_string();

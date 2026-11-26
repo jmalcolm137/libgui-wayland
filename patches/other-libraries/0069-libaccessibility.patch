@@ -1773,10 +1773,11 @@ index 41d47574..6b784a3f 100644
 diff --git a/Meta/Lagom/CMakeLists.txt b/Meta/Lagom/CMakeLists.txt
 --- a/Meta/Lagom/CMakeLists.txt
 +++ b/Meta/Lagom/CMakeLists.txt
-@@ -469,6 +469,7 @@ if (BUILD_LAGOM)
+@@ -469,7 +469,8 @@ if (BUILD_LAGOM)
      set(lagom_standard_libraries
          AccelGfx
 +        Accessibility
+         ACPI
          Archive
          Audio
          Compress

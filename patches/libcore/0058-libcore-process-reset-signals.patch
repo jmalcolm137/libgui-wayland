@@ -1,6 +1,8 @@
+diff --git a/Userland/Libraries/LibCore/Process.cpp b/Userland/Libraries/LibCore/Process.cpp
+index afc4ae2..3aed23a 100644
 --- a/Userland/Libraries/LibCore/Process.cpp
 +++ b/Userland/Libraries/LibCore/Process.cpp
-@@ -109,6 +109,24 @@
+@@ -118,6 +118,24 @@ ErrorOr<Process> Process::spawn(ProcessSpawnOptions const& options)
              }));
      }
  
@@ -24,16 +26,16 @@
 +
  #undef CHECK
  
-     ArgvList argv_list(resolve_executable_path(options.executable), options.arguments.size());
-@@ -119,9 +137,9 @@
+     auto executable = resolve_executable_path(options.executable);
+@@ -138,9 +156,9 @@ ErrorOr<Process> Process::spawn(ProcessSpawnOptions const& options)
  
      pid_t pid;
      if (options.search_for_executable_in_path) {
--        pid = TRY(System::posix_spawnp(executable.view(), &spawn_actions, nullptr, const_cast<char**>(argv_list.get().data()), Core::Environment::raw_environ()));
-+        pid = TRY(System::posix_spawnp(executable.view(), &spawn_actions, &spawn_attributes, const_cast<char**>(argv_list.get().data()), Core::Environment::raw_environ()));
+-        pid = TRY(System::posix_spawnp(executable.view(), &spawn_actions, nullptr, argv_list.get(), environment));
++        pid = TRY(System::posix_spawnp(executable.view(), &spawn_actions, &spawn_attributes, argv_list.get(), environment));
      } else {
--        pid = TRY(System::posix_spawn(executable.view(), &spawn_actions, nullptr, const_cast<char**>(argv_list.get().data()), Core::Environment::raw_environ()));
-+        pid = TRY(System::posix_spawn(executable.view(), &spawn_actions, &spawn_attributes, const_cast<char**>(argv_list.get().data()), Core::Environment::raw_environ()));
+-        pid = TRY(System::posix_spawn(executable.view(), &spawn_actions, nullptr, argv_list.get(), environment));
++        pid = TRY(System::posix_spawn(executable.view(), &spawn_actions, &spawn_attributes, argv_list.get(), environment));
      }
      return Process { pid };
  }

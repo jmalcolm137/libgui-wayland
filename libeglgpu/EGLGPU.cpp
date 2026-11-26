@@ -20,7 +20,7 @@
 #include <AK/StdLibExtras.h>
 #include <LibGPU/Shader.h>
 #include <LibSoftGPU/Device.h>
-#include <LibSoftGPU/PixelConverter.h>
+#include <LibGPU/PixelConverter.h>
 #include <LibGfx/Bitmap.h>
 #include <LibGfx/Matrix4x4.h>
 #include <LibGfx/Vector4.h>
@@ -1144,7 +1144,7 @@ void Device::blit_from_color_buffer(void* output_data, Vector2<i32> offset, GPU:
     Vector<u8> pixels;
     read_color_pixels(offset, size, pixels);
     auto input_layout = bgra8_layout(size);
-    SoftGPU::PixelConverter converter { input_layout, output_layout };
+    GPU::PixelConverter converter { input_layout, output_layout };
     if (auto result = converter.convert(pixels.data(), output_data, {}); result.is_error())
         dbgln("EGLGPU: pixel conversion failed: {}", result.error().string_literal());
 }
@@ -1163,7 +1163,7 @@ void Device::blit_from_depth_buffer(void* output_data, Vector2<i32> offset, GPU:
         glReadPixels(offset.x(), offset.y(), static_cast<GLsizei>(size.x()), static_cast<GLsizei>(size.y()), GL_DEPTH_COMPONENT, GL_FLOAT, pixels.data());
 
     auto input_layout = depth_float_layout(size);
-    SoftGPU::PixelConverter converter { input_layout, output_layout };
+    GPU::PixelConverter converter { input_layout, output_layout };
     if (auto result = converter.convert(pixels.data(), output_data, {}); result.is_error())
         dbgln("EGLGPU: depth pixel conversion failed: {}", result.error().string_literal());
 }
@@ -1195,7 +1195,7 @@ void Device::blit_to_color_buffer_at_raster_position(void const* input_data, GPU
     Vector<u8> converted;
     converted.resize(selection.width * selection.height * 4);
     auto output_layout = rgba8_layout({ selection.width, selection.height });
-    SoftGPU::PixelConverter converter { input_layout, output_layout };
+    GPU::PixelConverter converter { input_layout, output_layout };
     if (auto result = converter.convert(input_data, converted.data(), {}); result.is_error()) {
         dbgln("EGLGPU: pixel conversion failed: {}", result.error().string_literal());
         return;
