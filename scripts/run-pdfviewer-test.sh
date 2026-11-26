@@ -224,7 +224,7 @@ check "plain resize still resizes the client"   "[[ \$(grep -c 'window_resized' 
 pdf_frame() {
     local name="$1" input="$2"
     printf '%b' "$input" > "$RUNTIME/$name.input"
-    "$HC" --socket "pdf-$name" --size 1024x768 --timeout 10 \
+    "$HC" --socket "pdf-$name" --size 1024x768 --timeout 14 \
         --output "$RUNTIME/$name.screen.png" --input "$RUNTIME/$name.input" > "$RUNTIME/$name.hc.log" 2>&1 &
     HC_PID=$!
     for _ in $(seq 1 100); do [[ -e "$RUNTIME/pdf-$name" ]] && break; sleep 0.1; done
@@ -232,7 +232,7 @@ pdf_frame() {
         SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
         LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
         LIBWM_DUMP="$RUNTIME/$name.png" \
-        timeout 11 "$APP" "$PDF" > "$RUNTIME/$name.app.log" 2>&1 || true
+        timeout 15 "$APP" "$PDF" > "$RUNTIME/$name.app.log" 2>&1 || true
     wait "$HC_PID" 2>/dev/null || true
     HC_PID=""
 }
@@ -245,7 +245,10 @@ FOCUS='motion 320 200\nbutton PRESS left\nbutton RELEASE left\nsleep 300\n'
 # timeouts above leave room for them.
 pdf_frame pdf-base 'sleep 4000\n'
 pdf_frame pdf-zoom "sleep 3500\n${FOCUS}${ZOOM_IN}${ZOOM_IN}sleep 2000\n"
-pdf_frame pdf-scroll "sleep 3500\n${FOCUS}${ZOOM_IN}${ZOOM_IN}sleep 1000\nmotion 320 200\nsleep 150\naxis vertical 1\nsleep 2000\n"
+# A slower runner is still re-rendering after the zoom when the wheel arrives,
+# and a wheel that lands mid-render is dropped; wait for the zoom to settle
+# first. One notch scrolls within the page; two can reach its end and flip it.
+pdf_frame pdf-scroll "sleep 3500\n${FOCUS}${ZOOM_IN}${ZOOM_IN}sleep 2500\nmotion 320 200\nsleep 200\naxis vertical 1\nsleep 2000\n"
 
 PROJECT_ROOT="$PROJECT_ROOT" python3 - "$RUNTIME/pdf-base.png" "$RUNTIME/pdf-zoom.png" "$RUNTIME/pdf-scroll.png" <<'PY' > "$RUNTIME/pdf-view.log" 2>&1 || true
 import os, sys

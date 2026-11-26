@@ -65,7 +65,7 @@ jobs:
             # summary are visible to anyone looking at the run.
             while IFS= read -r line; do
               echo "::error::${line}"
-            done < <(grep -E 'FAIL$|\*\*\*Failed' check.log | tail -10)
+            done < <(grep -E 'FAIL$|\*\*\*Failed|^zoom: |^scroll: ' check.log | tail -10)
             {
               echo "## LibWM checks failed (ctest exit $status)"
               echo
