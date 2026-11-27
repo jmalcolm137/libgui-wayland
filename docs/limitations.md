@@ -50,9 +50,11 @@ where the portable protocol or portal is not implemented:
   framework and its own test programs, not the applications or their assets. (The programs in
   `examples/` are the guide's example applications, documentation for the public API, not the
   SerenityOS applications.)
-- **Focus policy.** SerenityDE decides which window is raised and focused when an application
-  launches or a workspace changes. Elsewhere the compositor's own policy applies; see
-  [status.md](status.md) for the `xdg-activation-v1` gap.
+- **Focus policy.** Which window is raised and focused when an application launches or a
+  workspace changes is the desktop's decision. LibWM now requests activation over
+  `xdg-activation-v1` (the last input serial, or a launcher's `XDG_ACTIVATION_TOKEN`; see
+  [desktops.md](desktops.md)), so a launch can be raised on compositors that honour tokens;
+  SerenityDE's own focus policy still applies on top of that.
 
 ## Upstream or out of scope
 
