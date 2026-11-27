@@ -1,8 +1,8 @@
 # libgui-wayland
 
 Run **unmodified SerenityOS `LibGUI`/`LibGfx` applications** natively on **Wayland** (no
-SerenityOS WindowServer). The applications (Calculator, PDFViewer, …) are built and tested by
-the desktop that ships them; this repository is the framework they run on.
+SerenityOS WindowServer). The [Serenity Desktop Environment](https://github.com/jmalcolm137/serenity-desktop-environment)
+and its applications (Calculator, PDFViewer, …) run on this framework.
 
 The shim is called **LibWM**. It sits between `LibGUI`'s WindowServer IPC protocol and
 `libwayland-client`: the application side is Serenity, the system side is Wayland.
