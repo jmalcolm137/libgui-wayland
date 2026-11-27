@@ -97,7 +97,7 @@ suites).
 
 These are the gaps the framework itself still has; everything else that used to be listed here is
 either a limitation of the platform or provided by the desktop
-(see [limitations.md](limitations.md)).
+(see [limitations.md § Provided by the desktop](limitations.md#provided-by-the-desktop)).
 
 - **Touch input.** `wl_touch` is not translated at all, so a touchscreen cannot drive Serenity
   applications. The window server protocol has touch events; LibWM needs a `wl_touch` listener
