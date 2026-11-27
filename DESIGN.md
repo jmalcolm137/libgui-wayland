@@ -17,6 +17,9 @@ everything lives. The details are in `docs/`:
 | [docs/threading.md](docs/threading.md) | the two threads, what runs where, locking rules |
 | [docs/protocol-mapping.md](docs/protocol-mapping.md) | the Wayland protocols used, and the status of every WindowServer method |
 | [docs/testing.md](docs/testing.md) | the test suites, CTest labels, the headless compositor, CI |
+| [docs/status.md](docs/status.md) | milestones, remaining work and completed clean-ups |
+| [docs/limitations.md](docs/limitations.md) | platform limits, non-goals and what the desktop provides |
+| [docs/desktops.md](docs/desktops.md) | what a desktop adds: session services, settings and chrome, the protocols it advertises |
 | [docs/environment.md](docs/environment.md) | environment variables |
 | [docs/development-history.md](docs/development-history.md) | the original audit and milestone notes (historical; §2–§7) |
 | [docs/guide/guide.md](docs/guide/guide.md) | the guide for application developers |
