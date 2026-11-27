@@ -10,44 +10,36 @@ framework still has, see [status.md](status.md).
   `zwp_linux_dmabuf_v1` is not implemented, and a compositor cannot render GL for a client.
   `EGLGPU` also cannot run shader programs (`create_shader` returns an error), so programs that
   need GLSL must use `LibSoftGPU`. See [development-history.md](development-history.md) §4.11.
-- **WindowServer requests Wayland cannot fully express.** All of them are handled explicitly
-  rather than silently dropped: `refresh_system_theme` reloads the theme, base size becomes the
-  window's minimum size, `set_global_cursor_position` goes through `wp_pointer_warp_v1` (the
-  staging protocol KDE co-authored and SerenityDE implements), `set_global_mouse_tracking`
-  observes each toplevel with `ext-input-observation-v1` (a draft, wayland-protocols MR !335,
-  implemented by SerenityDE and wlmaker), and `show_screen_numbers` is forwarded to the desktop as
-  `effects.show_screen_numbers` (the compositor owns output overlays). Size increments, aspect
-  ratios, forced shadows and window stealing have **no** Wayland protocol: `xdg-shell` has no
-  increments or aspect constraints, a shadow is drawn outside the surface, and a client owns its
-  surfaces while the compositor owns stacking. The per-request rationale is in
-  [protocol-mapping.md](protocol-mapping.md). `is_minimized` remains LibWM's own record, set by
-  `set_minimized` and cleared when the compositor activates the window.
+- **WindowServer requests Wayland cannot express.** Size increments, aspect ratios, forced shadows
+  and window stealing have **no** Wayland protocol: `xdg-shell` has no increments or aspect
+  constraints, a shadow is drawn outside the surface, and a client owns its surfaces while the
+  compositor owns stacking. `show_screen_numbers` has no client protocol either; it is a
+  compositor overlay. The per-request rationale is in [protocol-mapping.md](protocol-mapping.md).
 - **Pointer lock and idle inhibit.** `pointer-constraints`/`relative-pointer` (for mouse-look
-  games) and idle inhibition (for video playback) are not used by LibWM, and LibGUI has no
-  application API for them; a future application API would bind them.
-- **No client protocol for some shell duties.** Screen-number overlays (`show_screen_numbers`)
-  and shadows around a surface are compositor features. The shim forwards the screen-number
-  request as the `effects.show_screen_numbers` host setting; the desktop draws it.
+  games) and idle inhibition (for video playback) have no LibGUI application API, so LibWM does
+  not bind them.
 
 ## Provided by the desktop
 
 The SerenityDE session supplies these over `serenity-window` or in its compositor. They are not
-gaps in that session, but applications lose them on a third-party compositor (KDE, GNOME, sway),
-where the portable protocol or portal is not implemented:
+gaps in that session, but outside it an application depends on whatever portable protocol or
+portal the compositor implements (if any):
 
-- **Screenshots and the Magnifier.** A desktop's compositor can serve `get_screen_bitmap` and
-  the Magnifier's `get_screen_bitmap_around_*` directly over `serenity-window` (SerenityDE
-  does). When it does not, LibWM uses the standard `org.freedesktop.portal.Screenshot`, so
-  `shot`, the Magnifier and the colour picker (`get_color_under_cursor`) also work on a desktop
-  that provides a screenshot portal backend. LibWM reuses a recent portal frame for the
-  Magnifier's per-frame asks (about 10 fps, rather than one portal round trip per frame); a
-  desktop with neither has no capture.
+- **Screenshots and the Magnifier.** A capture needs pixels only the display server has. A
+  compositor can serve `get_screen_bitmap` and the Magnifier's `get_screen_bitmap_around_*`
+  directly over `serenity-window` (SerenityDE does). Otherwise LibWM uses the standard
+  `org.freedesktop.portal.Screenshot`, which a desktop with `xdg-desktop-portal` and a
+  screenshot backend provides, so `shot`, the Magnifier and the colour picker
+  (`get_color_under_cursor`) keep working there. LibWM reuses a portal frame for 100 ms, capping
+  the Magnifier at about 10 portal captures a second. Only a session with neither a
+  `serenity-window` capture nor a screenshot portal has no capture.
 - **Fonts, pointer/keyboard and display settings, wallpaper, applet layout.** There is no
-  portable API for any of these: the Settings portal exposes appearance only (handled above),
-  and input/display configuration is compositor-specific (KDE's KScreen, GNOME's Mutter
-  settings, wlroots' output-management protocol). They arrive as `serenity-window` host settings
-  in a SerenityDE session; elsewhere the bundled fonts, default input behaviour and
-  compositor-owned layout apply. Wallpaper and applet layout are desktop features by design.
+  portable API for any of these: the Settings portal exposes appearance only (see
+  [desktops.md](desktops.md)), and input/display configuration is compositor-specific (KDE's
+  KScreen, GNOME's Mutter settings, wlroots' output-management protocol). They arrive as
+  `serenity-window` host settings in a SerenityDE session; elsewhere the bundled fonts, default
+  input behaviour and compositor-owned layout apply. Wallpaper and applet layout are desktop
+  features by design.
 - **Desktop chrome and session services.** The Taskbar, Desktop, applets, window menus and the
   session's LaunchServer/NotificationServer/AudioServer come from the desktop. **The
   applications themselves are built and tested by the desktop too**; this repository ships the
