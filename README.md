@@ -15,6 +15,8 @@ The shim is called **LibWM**. It sits between `LibGUI`'s WindowServer IPC protoc
 * **Build:** SerenityOS's Lagom host build, extended to compile the **full** LibGUI (not the
   six-file Lagom stub).
 
+A good demo application is the Ladybird SDE web browser [Flatpak avaiable](https://github.com/jmalcolm137/ladybird-sde/releases)
+
 ## Guide
 
 [**Building GUI Applications for Wayland**](docs/guide/LibGUI-Wayland-Guide.pdf) is a
