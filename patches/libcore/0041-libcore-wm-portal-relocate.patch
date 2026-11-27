@@ -5,20 +5,18 @@
  ErrorOr<ByteString> parse_path_with_sid(StringView general_path, Optional<pid_t> force_sid)
  {
 +    // The WindowManagerServer socket (the Taskbar's shell protocol) is a single
-+    // global path in SerenityOS. On the host, honour explicit overrides
-+    // (LIBWM_WM_PORTAL_PATH / SDE_WM_PORTAL_PATH) first, then scope the default
-+    // to XDG_RUNTIME_DIR (and WAYLAND_DISPLAY when set) so live sessions,
-+    // multi-seat logins, and headless tests never collide on /tmp/portal/wm.
++    // global path in SerenityOS. On the host, honour an explicit override
++    // (LIBWM_WM_PORTAL_PATH) first, then scope the default to XDG_RUNTIME_DIR
++    // (and WAYLAND_DISPLAY when set) so live sessions, multi-seat logins, and
++    // headless tests never collide on /tmp/portal/wm.
 +    if (general_path == "/tmp/portal/wm"sv) {
 +        if (auto const* wm_portal = getenv("LIBWM_WM_PORTAL_PATH"); wm_portal && *wm_portal)
-+            return ByteString(wm_portal);
-+        if (auto const* wm_portal = getenv("SDE_WM_PORTAL_PATH"); wm_portal && *wm_portal)
 +            return ByteString(wm_portal);
 +        if (auto const* runtime_dir = getenv("XDG_RUNTIME_DIR"); runtime_dir && *runtime_dir) {
 +            auto const* display = getenv("WAYLAND_DISPLAY");
 +            if (display && *display && !StringView { display, strlen(display) }.contains('/'))
-+                return ByteString::formatted("{}/sde-wm-{}", runtime_dir, display);
-+            return ByteString::formatted("{}/sde-wm", runtime_dir);
++                return ByteString::formatted("{}/libgui-wm-{}", runtime_dir, display);
++            return ByteString::formatted("{}/libgui-wm", runtime_dir);
 +        }
 +    }
      if (general_path.contains("%sid"sv)) {

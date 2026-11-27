@@ -20,7 +20,7 @@ Read by the patched SerenityOS libraries:
 | Variable | Default | Effect |
 |---|---|---|
 | `LIBWM_SESSION_DIR` | `/tmp/session/<sid>` | Per-session runtime directory, where session services' portal sockets live (LibCore) |
-| `LIBWM_WM_PORTAL_PATH` | `/tmp/portal/wm` | The WindowManagerServer socket the Taskbar connects to (LibCore) |
+| `LIBWM_WM_PORTAL_PATH` | `/tmp/portal/wm`, else `$XDG_RUNTIME_DIR/libgui-wm[-<display>]` | The WindowManagerServer socket the Taskbar connects to (LibCore) |
 | `LIBWM_SESSION_BIN_DIR` | — | Searched first when an application runs a SerenityOS `/bin/X`, so a session can provide its own helpers (LibCore) |
 | `LIBWM_APP_BIN_DIR` | — | Searched next for `/bin/X` (LibCore) |
 | `LIBWM_DEBUG_QUIT` | off | Print a backtrace when an application quits (LibGUI) |

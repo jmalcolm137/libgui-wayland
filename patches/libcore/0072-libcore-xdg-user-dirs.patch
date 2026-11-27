@@ -78,7 +78,7 @@ index 995c992e..ecb902fa 100644
  }
  
 -ByteString StandardPaths::documents_directory()
-+// user-dirs.dirs is written at login by the session (sde-user-dirs.sh); read it
++// user-dirs.dirs is written at login by the session; read it
 +// once per process. The function-local static is thread-safe and immutable
 +// afterwards.
 +Vector<UserDirEntry> const& user_dirs_entries()

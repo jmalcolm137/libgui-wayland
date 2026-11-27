@@ -17,9 +17,9 @@ SERENITY_REMOTE="${SERENITY_REMOTE:-https://github.com/jmalcolm137/serenity.git}
 # Advanced 2026-11-25: rebased the fork's `fixes` branch onto upstream
 # 835d22663febc14427577fc91468c1e4c1fcc914 (the latest SerenityOS master at the
 # time). The pin is the commit before the branch's blue-grid wallpaper commit:
-# the wallpaper is an SDE asset, and the libgui-wayland patch series adds it
-# itself (patches/lagom-and-resources/0066-...), so pinning at the wallpaper
-# commit would make that patch fail because the file already exists.
+# the wallpaper is an SDE asset, added by the SDE's own patch series. Pinning at
+# the wallpaper commit would make that patch fail because the file already
+# exists, so the desktop's series owns it.
 #
 # The fork's `fixes` branch sits on SERENITY_UPSTREAM_BASE below; rebasing it onto
 # a newer upstream is a `git rebase` of real commits, and the pin moves to the
