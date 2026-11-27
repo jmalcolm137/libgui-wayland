@@ -99,6 +99,13 @@ suites).
   `XDG_ACTIVATION_TOKEN` for the first window, and otherwise requests a token with the last input
   serial when a window is opened from a click or menu; the compositor then raises and focuses it.
   Tested against the headless compositor's activation implementation and SerenityDE's compositor.
+- **M15** — screen capture: done. `get_screen_bitmap`, the Magnifier's around-cursor and
+  around-location calls and the colour picker take the compositor's direct capture when
+  `serenity-window` provides it, and otherwise the standard
+  `org.freedesktop.portal.Screenshot`. The portal image is in output pixels; a requested
+  logical region is scaled and cropped onto it, and the Magnifier's per-frame asks reuse a
+  recent capture. Both paths are covered by the headless suites and by a test against the
+  SerenityDE compositor (including a capture of a static, non-repainting window).
 
 ## Remaining work
 

@@ -73,6 +73,7 @@ separate classes that share its mutex and window table:
 | `WaylandSeat` | `wl_seat`, `wl_pointer`, `wl_keyboard`, `zwp_text_input_v3` | input routing and translation, IME, cursors |
 | `WaylandDataDevice` | `wl_data_device` | clipboard and drag-and-drop |
 | `SerenityShell` | `serenity-window` (optional) | the desktop's host settings, wallpaper, capture, compositor-driven menubar and placement |
+| `ScreenshotPortal` | `org.freedesktop.portal.Screenshot` (D-Bus) | screen capture for `shot`, the Magnifier and the colour picker when the compositor has no `serenity-window` capture (output-pixel PNG, cropped to the logical request) |
 
 Events reach the WindowServer side through `WaylandClient::InputCallbacks` and a
 few named callbacks; `WindowServerConnection` re-posts every one of them to the

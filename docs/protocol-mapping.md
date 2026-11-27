@@ -34,6 +34,15 @@ Touch (`wl_touch`) has no WindowServer counterpart: LibWM maps the first touch
 point to the primary pointer (press, motion, release), so LibGUI's existing mouse
 path handles taps and drags. Extra fingers are ignored.
 
+Screen capture is answered off the Wayland path. When the compositor implements
+`serenity-window`'s `request_capture`, LibWM asks it and reads the pushed bitmap
+of the requested region. Otherwise it uses the standard
+`org.freedesktop.portal.Screenshot`: a non-interactive request, cached briefly,
+whose PNG is in output pixels; the requested logical region is scaled by the
+output factor and cropped out of it. That covers `get_screen_bitmap`, both
+Magnifier calls and `get_color_under_cursor`, which samples one pixel from the
+same path.
+
 ## WindowServer requests (client → LibWM)
 
 `WindowServerConnection` (`src/WindowServerConnection.cpp`,
@@ -54,7 +63,7 @@ then sends no reply, and the client's `send_sync()` blocks forever.
 | Cursor | `set_window_cursor`, `set_window_custom_cursor`, `get_global_cursor_position`, `set_global_cursor_position`, `set_global_mouse_tracking` | position reconstructed from the surface under the pointer; warps go through `wp_pointer_warp_v1`; tracking observes each toplevel with `ext-input-observation-v1` |
 | Menus | `create_menu`, `destroy_menu`, `set_menu_name`, `set_menu_minimum_width`, `add_menu`, `add_menu_item`, `add_menu_separator`, `update_menu_item`, `remove_menu_item`, `flash_menubar_menu`, `popup_menu`, `dismiss_menu` | rendered by `MenuController` |
 | Drag and drop | `start_drag`, `set_accepts_drag` | `wl_data_device` |
-| Screen and capture | `get_screen_layout`, `set_screen_layout`, `save_screen_layout`, `get_desktop_display_scale`, `set_output_scale`, `get_screen_bitmap`, `get_screen_bitmap_around_cursor`, `get_screen_bitmap_around_location`, `get_color_under_cursor`, `get_applet_rect_on_screen` | layout and capture come from the desktop where available; `get_screen_bitmap` waits up to 2 s for the capture, the Magnifier's calls return the latest one |
+| Screen and capture | `get_screen_layout`, `set_screen_layout`, `save_screen_layout`, `get_desktop_display_scale`, `set_output_scale`, `get_screen_bitmap`, `get_screen_bitmap_around_cursor`, `get_screen_bitmap_around_location`, `get_color_under_cursor`, `get_applet_rect_on_screen` | layout comes from the desktop where available; capture is direct (`serenity-window`) or the `org.freedesktop.portal.Screenshot` fallback. `get_screen_bitmap` waits up to 2 s for its capture, the Magnifier's calls return the latest one |
 | Theme, fonts, effects | `set_system_theme`, `get_system_theme`, `get_system_theme_override`, `is_system_theme_overridden`, `get_preferred_color_scheme`, `set_system_theme_override`, `clear_system_theme_override`, `set_system_fonts`, `set_system_effects` | the override (ThemeEditor's preview) restyles this application only |
 | Wallpaper and desktop | `set_wallpaper`, `get_wallpaper`, `set_wallpaper_mode`, `set_background_color`, `apply_workspace_settings`, `get_workspace_settings` | stored by the desktop; `get_wallpaper` reads the `wallpaper.file` it names |
 | Input settings | `get/set_mouse_acceleration` (+ min/max), `get/set_scroll_step_size` (+ min), `get/set_double_click_speed` (+ min/max), `are/set_mouse_buttons_switched`, `is/set_natural_scroll`, `get/set_keyboard_layout`, `get_keyboard_layout_names`, `get/apply_cursor_theme`, `get/set_cursor_highlight_color`, `get/set_cursor_highlight_radius` | applied by the desktop's compositor where available |

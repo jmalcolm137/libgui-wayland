@@ -6,6 +6,7 @@
 
 #include "WindowServerConnection.h"
 #include "Environment.h"
+#include "ScreenshotPortal.h"
 #include "SerenityShell.h"
 #include "WaylandClient.h"
 #include "WaylandSeat.h"
@@ -734,19 +735,64 @@ Messages::WindowServer::GetGlobalCursorPositionResponse WindowServerConnection::
 
 Messages::WindowServer::GetColorUnderCursorResponse WindowServerConnection::get_color_under_cursor()
 {
+    auto& wayland = WaylandClient::the();
+    auto const position = wayland.seat().global_pointer_position();
+    // One pixel at the pointer, captured directly when the compositor offers it.
+    // The ColourPicker asks once, so wait for the answer rather than returning the
+    // previous frame.
+    if (auto direct = wayland.serenity_shell().capture_now({ position, { 1, 1 } }, 1000))
+        return Messages::WindowServer::GetColorUnderCursorResponse { direct->get_pixel({ 0, 0 }) };
+    if (auto bitmap = ScreenshotPortal::the().capture(1000)) {
+        auto const screen_size = wayland.outputs().screen_size();
+        if (!screen_size.is_empty()) {
+            double const sx = static_cast<double>(bitmap->width()) / screen_size.width();
+            double const sy = static_cast<double>(bitmap->height()) / screen_size.height();
+            Gfx::IntPoint const point { static_cast<int>(position.x() * sx), static_cast<int>(position.y() * sy) };
+            if (bitmap->rect().contains(point))
+                return Messages::WindowServer::GetColorUnderCursorResponse { bitmap->get_pixel(point) };
+        }
+    }
     return Messages::WindowServer::GetColorUnderCursorResponse { Optional<Gfx::Color> {} };
 }
 
 namespace {
-// Accessibility: the Magnifier's capture. Ask for the region and answer
-// with the most recent one the compositor pushed; the first ask returns empty and
-// the next display-link tick paints it (one refresh interval of latency).
+// The portal image is in output pixels; screen coordinates are logical. Map a
+// logical region onto it and crop.
+RefPtr<Gfx::Bitmap> portal_capture_for(Gfx::IntRect const& region)
+{
+    auto& wayland = WaylandClient::the();
+    auto screen = ScreenshotPortal::the().capture();
+    if (!screen)
+        return nullptr;
+    auto const screen_size = wayland.outputs().screen_size();
+    if (screen_size.is_empty())
+        return screen;
+    double const sx = static_cast<double>(screen->width()) / screen_size.width();
+    double const sy = static_cast<double>(screen->height()) / screen_size.height();
+    Gfx::IntRect const scaled {
+        { static_cast<int>(region.x() * sx), static_cast<int>(region.y() * sy) },
+        { max(1, static_cast<int>(region.width() * sx)), max(1, static_cast<int>(region.height() * sy)) },
+    };
+    auto const clipped = scaled.intersected(screen->rect());
+    if (clipped.is_empty())
+        return nullptr;
+    auto cropped = screen->cropped(clipped);
+    if (cropped.is_error())
+        return nullptr;
+    return cropped.release_value();
+}
+
+// Accessibility: the Magnifier's capture. Prefer the compositor's own capture
+// (requested asynchronously, painted on the next display-link tick); on a
+// compositor without serenity-window fall back to the Screenshot portal.
 Gfx::ShareableBitmap capture_around(Gfx::IntSize size, Gfx::IntPoint location)
 {
     auto& wayland = WaylandClient::the();
     Gfx::IntRect const region { { location.x() - size.width() / 2, location.y() - size.height() / 2 }, size };
     wayland.serenity_shell().request_capture(region);
     if (auto bitmap = wayland.serenity_shell().captured_bitmap())
+        return bitmap->to_shareable_bitmap();
+    if (auto bitmap = portal_capture_for(region))
         return bitmap->to_shareable_bitmap();
     return Gfx::ShareableBitmap {};
 }
@@ -764,13 +810,14 @@ Messages::WindowServer::GetScreenBitmapAroundLocationResponse WindowServerConnec
 
 Messages::WindowServer::GetScreenBitmapResponse WindowServerConnection::get_screen_bitmap(Optional<Gfx::IntRect> const& rect, Optional<u32> const&)
 {
-    // A screenshot (the `shot` utility). Only a compositor offering serenity-window
-    // can capture the screen; elsewhere the bitmap is empty, which callers report
-    // as a failed capture.
-    // Unlike the Magnifier's capture this one waits for the compositor's reply.
+    // A screenshot (the `shot` utility). Prefer the compositor's own capture
+    // (serenity-window): unlike the Magnifier's capture this one waits for it.
+    // Elsewhere the standard Screenshot portal is the portable route.
     auto& wayland = WaylandClient::the();
     Gfx::IntRect const region = rect.value_or(Gfx::IntRect { {}, wayland.outputs().screen_size() });
     if (auto bitmap = wayland.serenity_shell().capture_now(region, 2000))
+        return bitmap->to_shareable_bitmap();
+    if (auto bitmap = portal_capture_for(region))
         return bitmap->to_shareable_bitmap();
     trace("LibWM: get_screen_bitmap: no capture available");
     return Gfx::ShareableBitmap {};

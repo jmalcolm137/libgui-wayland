@@ -35,9 +35,13 @@ The SerenityDE session supplies these over `serenity-window` or in its composito
 gaps in that session, but applications lose them on a third-party compositor (KDE, GNOME, sway),
 where the portable protocol or portal is not implemented:
 
-- **Screenshots and the Magnifier.** `get_screen_bitmap` and `get_screen_bitmap_around_*` ask the
-  compositor for a capture over `serenity-window`; elsewhere they return an empty image
-  (`org.freedesktop.portal.Screenshot` would be the portable route).
+- **Screenshots and the Magnifier.** A desktop's compositor can serve `get_screen_bitmap` and
+  the Magnifier's `get_screen_bitmap_around_*` directly over `serenity-window` (SerenityDE
+  does). When it does not, LibWM uses the standard `org.freedesktop.portal.Screenshot`, so
+  `shot`, the Magnifier and the colour picker (`get_color_under_cursor`) also work on a desktop
+  that provides a screenshot portal backend. LibWM reuses a recent portal frame for the
+  Magnifier's per-frame asks (about 10 fps, rather than one portal round trip per frame); a
+  desktop with neither has no capture.
 - **Fonts, pointer/keyboard and display settings, wallpaper, applet layout.** There is no
   portable API for any of these: the Settings portal exposes appearance only (handled above),
   and input/display configuration is compositor-specific (KDE's KScreen, GNOME's Mutter

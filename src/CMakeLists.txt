@@ -43,6 +43,7 @@ add_library(LibWM SHARED
     LaunchServerConnection.cpp
     LibWM.cpp
     MenuController.cpp
+    ScreenshotPortal.cpp
     SerenityShell.cpp
     WaylandActivation.cpp
     WaylandClient.cpp

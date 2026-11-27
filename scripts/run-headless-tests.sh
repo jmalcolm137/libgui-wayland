@@ -244,7 +244,7 @@ check "no Wayland protocol error during the run"  "! grep -q 'unknown object .* 
 check "oversized UTF-8 window title survived"    "grep -q 'TestWindow: oversized UTF-8 title clamped and sent' '$RUNTIME/app.log'"
 check "shim keeps the full title (6600 bytes)"    "grep -q 'TestWindow: shim state title_bytes=6600 ' '$RUNTIME/app.log'"
 check "shim owns min size; alpha from store"     "grep -q 'TestWindow: shim state .* min_size=120x90 alpha=true' '$RUNTIME/app.log'"
-check "sync WindowServer requests all answer"   "grep -q 'TestWindow: sync requests answered minimized=false->true screen_bitmap=false theme_override=true overridden=true cleared=true' '$RUNTIME/app.log'"
+check "sync WindowServer requests all answer"   "grep -q 'TestWindow: sync requests answered minimized=false->true screen_bitmap=false around_cursor=false around_location=false color_under_cursor=none theme_override=true overridden=true cleared=true' '$RUNTIME/app.log'"
 check "zwp_text_input_v3 preedit received"       "grep -q \"TestWindow: IME preedit='ni'\" '$RUNTIME/app.log'"
 check "zwp_text_input_v3 commit received"        "grep -q \"TestWindow: IME commit='你好'\" '$RUNTIME/app.log'"
 check "connection-lost callback fired on close"  "grep -q 'TestWindow: connection lost reason=' '$RUNTIME/app.log'"

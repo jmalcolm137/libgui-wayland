@@ -194,14 +194,30 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         auto const id = window->window_id();
         bool const minimized_before = server.is_minimized(id);
         auto screen = server.get_screen_bitmap({}, {});
+        auto region = server.get_screen_bitmap(Gfx::IntRect { 100, 100, 200, 200 }, {});
+        auto around = server.get_screen_bitmap_around_cursor({ 64, 64 });
+        auto around_location = server.get_screen_bitmap_around_location({ 64, 64 }, { 200, 200 });
+        auto color = server.get_color_under_cursor();
         bool const override_applied = server.set_system_theme_override(Gfx::current_system_theme_buffer());
         bool const overridden = server.is_system_theme_overridden();
         server.async_clear_system_theme_override();
         bool const cleared = !server.is_system_theme_overridden();
         window->set_minimized(true);
         bool const minimized_after = server.is_minimized(id);
-        dbgln("TestWindow: sync requests answered minimized={}->{} screen_bitmap={} theme_override={} overridden={} cleared={}",
-            minimized_before, minimized_after, screen.is_valid(), override_applied, overridden, cleared);
+        dbgln("TestWindow: sync requests answered minimized={}->{} screen_bitmap={} around_cursor={} around_location={} color_under_cursor={} theme_override={} overridden={} cleared={}",
+            minimized_before, minimized_after, screen.is_valid(), around.is_valid(), around_location.is_valid(),
+            color.has_value() ? "ok" : "none", override_applied, overridden, cleared);
+        if (screen.is_valid() && screen.bitmap())
+            dbgln("TestWindow: screenshot whole {}x{}", screen.bitmap()->width(), screen.bitmap()->height());
+        if (region.is_valid() && region.bitmap())
+            dbgln("TestWindow: screenshot region {}x{}", region.bitmap()->width(), region.bitmap()->height());
+        if (around.is_valid() && around.bitmap())
+            dbgln("TestWindow: screenshot around {}x{}", around.bitmap()->width(), around.bitmap()->height());
+        if (around_location.is_valid() && around_location.bitmap())
+            dbgln("TestWindow: screenshot around location {}x{}", around_location.bitmap()->width(), around_location.bitmap()->height());
+        if (color.has_value())
+            dbgln("TestWindow: color under cursor #{:02x}{:02x}{:02x}",
+                color->red(), color->green(), color->blue());
     });
     sync_timer->start();
 

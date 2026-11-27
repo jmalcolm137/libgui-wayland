@@ -21,6 +21,11 @@ What a desktop adds is its own business, built on the same pinned SerenityOS sou
   serial for a window opened from a click or menu, and honours `XDG_ACTIVATION_TOKEN` from a
   launcher. SerenityDE's compositor also focuses newly mapped windows itself, so a launch is
   raised even without a token.
+* **Screenshots and the Magnifier.** A compositor that implements `serenity-window`'s
+  `request_capture` serves `shot`, the Magnifier and the colour picker directly (SerenityDE
+  does, scheduling a frame so a static screen is captured too). Otherwise LibWM uses the
+  standard `org.freedesktop.portal.Screenshot`, so a screenshot portal backend is all another
+  desktop needs.
 * **Standard protocols the desktop only has to advertise.** Window icons
   (`xdg-toplevel-icon-v1`), primary selection (`zwp_primary_selection_v1`), the
   appearance preference (`org.freedesktop.portal.Settings`, via `xdg-desktop-portal`)
