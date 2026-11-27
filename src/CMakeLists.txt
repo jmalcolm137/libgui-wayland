@@ -44,6 +44,7 @@ add_library(LibWM SHARED
     LibWM.cpp
     MenuController.cpp
     SerenityShell.cpp
+    WaylandActivation.cpp
     WaylandClient.cpp
     WaylandDataDevice.cpp
     WaylandInputObservation.cpp
@@ -92,6 +93,15 @@ libwm_wayland_protocol(LibWM xdg-toplevel-icon-v1 "${WAYLAND_PROTOCOLS_DIR}/stag
 # wp_pointer_warp_v1: move the pointer to a location on one of our surfaces
 # (Serenity's set_global_cursor_position, e.g. the Taskbar).
 libwm_wayland_protocol(LibWM pointer-warp-v1 "${WAYLAND_PROTOCOLS_DIR}/staging/pointer-warp/pointer-warp-v1.xml")
+# xdg-activation-v1: ask the compositor to raise/focus a window, using an
+# activation token (the standard way a launcher raises a new window).
+# xdg-activation is staged in the wayland-protocols this project pins, but it
+# may move to stable; accept either location.
+set(XDG_ACTIVATION_XML "${WAYLAND_PROTOCOLS_DIR}/staging/xdg-activation/xdg-activation-v1.xml")
+if (NOT EXISTS "${XDG_ACTIVATION_XML}")
+    set(XDG_ACTIVATION_XML "${WAYLAND_PROTOCOLS_DIR}/stable/xdg-activation/xdg-activation-v1.xml")
+endif()
+libwm_wayland_protocol(LibWM xdg-activation-v1 "${XDG_ACTIVATION_XML}")
 # ext-input-observation-v1: the pointer's position relative to one of our
 # surfaces, even when it is outside it (Serenity's set_global_mouse_tracking).
 # A draft (wayland-protocols MR !335) implemented by SerenityDE and wlmaker, so

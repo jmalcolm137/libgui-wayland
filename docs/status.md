@@ -20,8 +20,10 @@ suites).
   `KeyCode`/modifiers), focus/activation/close are handled, and the full input path is verified
   headlessly (the compositor injects clicks and keys; the widget receives them). Held keys repeat
   client-side from `wl_keyboard.repeat_info`, as Wayland intends, so repeat works the same under
-  every compositor and does not double with toolkits that already repeat. Applications (the
-  desktop's Calculator among them) use this path unchanged.
+  every compositor and does not double with toolkits that already repeat. **Touch** (`wl_touch`)
+  is mapped to the primary pointer (LibGUI has no touch event type), so the first finger taps and
+  drags exactly like the mouse. Applications (the desktop's Calculator among them) use this path
+  unchanged.
 - **M4** — theme, fonts, decorations, icons, alpha: done. The system theme and fonts come from the
   bundled `Base/res` or the desktop's broker; windows get server-side decorations
   (`zxdg_decoration_manager_v1`) or LibWM's own 22px client-side titlebar with
@@ -45,12 +47,13 @@ suites).
   Config INI persistence and SerenityOS `/res/...` path redirection are in too. The menubar is
   rendered on the LibWM server thread and handed to the Wayland side as an image, so it is never
   drawn from under the menu model.
-- **M7** — testing and CI: done. Twelve CTest suites (input and drag-and-drop, window state and
-  portals, cursor warping over `wp_pointer_warp_v1`, global mouse tracking over
-  `ext-input-observation-v1` inside and outside the window, clipboard and primary selection,
-  menus, PDF, **client-side GL** and an animated 3D GL app, the desktop appearance portal, patch
-  series, triage tooling, upstream LibGfx) run against a headless Wayland compositor with
-  scripted input and frame capture. The framework tests itself with the programs in `src/test/`;
+- **M7** — testing and CI: done. Thirteen CTest suites (input, touch and drag-and-drop, window
+  state and portals, cursor warping over `wp_pointer_warp_v1`, global mouse tracking over
+  `ext-input-observation-v1` inside and outside the window, `xdg-activation-v1` with both a
+  serial and `XDG_ACTIVATION_TOKEN`, clipboard and primary selection, menus, PDF, **client-side
+  GL** and an animated 3D GL app, the desktop appearance portal, patch series, triage tooling,
+  upstream LibGfx) run against a headless Wayland compositor with scripted input and frame
+  capture. The framework tests itself with the programs in `src/test/`;
   the applications, which the desktop builds, are tested against the desktop's compositor
   (SerenityDE: `scripts/run-libgui-apps-test.sh`).
   `.github/workflows/ci.yml` builds and runs the suites in an Arch container on every push, with
@@ -92,28 +95,12 @@ suites).
   `org.freedesktop.portal.Settings` and applies the bundled `Dark`, `Light` or `Default` theme,
   following live changes; a desktop-provided theme still wins. Fonts, pointer/keyboard settings
   and the display layout have no portable API and remain the desktop's own.
+- **M14** — window activation: done. LibWM binds `xdg-activation-v1`, uses a launcher's
+  `XDG_ACTIVATION_TOKEN` for the first window, and otherwise requests a token with the last input
+  serial when a window is opened from a click or menu; the compositor then raises and focuses it.
+  Tested against the headless compositor's activation implementation and SerenityDE's compositor.
 
 ## Remaining work
 
-These are the gaps the framework itself still has; everything else that used to be listed here is
-either a limitation of the platform or provided by the desktop
-(see [limitations.md § Provided by the desktop](limitations.md#provided-by-the-desktop)).
-
-- **Touch input.** `wl_touch` is not translated at all, so a touchscreen cannot drive Serenity
-  applications. The window server protocol has touch events; LibWM needs a `wl_touch` listener
-  that maps them like the pointer path.
-- **Raising a window on launch.** `xdg-activation-v1` is not bound, so on a compositor without
-  SerenityDE's focus policy a launcher-spawned window may not be raised or focused.
-
-## Completed clean-ups
-
-Kept for the record; no work remains here.
-
-- SerenityDE's file handling lives in the desktop; the shim only reads the host settings and
-  `serenity-window`.
-- `WaylandClient`'s C protocol handlers are private behind the `WaylandEvents` friend, leaving
-  only the API its callers use public.
-- `create_window` and `create_popup` are split into their role-specific helpers
-  (`create_layer_window`/`create_overlay_window`/`create_toplevel_window`, and
-  `create_layer_popup`/`create_xdg_popup`), and `commit_window_content` is a short coordinator
-  over `present_composed`, `present_fractional` and `present_direct`.
+No known work items. Platform limits, non-goals and the features a desktop provides are in
+[limitations.md](limitations.md).

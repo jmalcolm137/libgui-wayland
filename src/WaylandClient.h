@@ -41,6 +41,8 @@ struct wl_surface;
 struct wp_fractional_scale_manager_v1;
 struct wp_pointer_warp_v1;
 struct ext_input_observation_manager_v1;
+struct xdg_activation_v1;
+struct xdg_activation_token_v1;
 struct ext_input_position_observer_v1;
 struct wp_fractional_scale_v1;
 struct wp_viewporter;
@@ -349,6 +351,11 @@ private:
         if (m_global_mouse_tracking)
             create_mouse_observers();
     }
+    void set_activation_manager(xdg_activation_v1* manager)
+    {
+        MutexLocker locker(m_mutex);
+        m_activation = manager;
+    }
     void set_pointer_warp(wp_pointer_warp_v1* warp)
     {
         MutexLocker locker(m_mutex);
@@ -434,6 +441,8 @@ private:
         // coordinates; observers are ignored until the origin is known.
         Gfx::IntSize logical_size;
         bool origin_known { false };
+        // xdg-activation: one request per window, once it has content.
+        bool activation_requested { false };
         // An xdg_toplevel must not attach a buffer before its first configure.
         bool toplevel_configured { false };
         // Whether the compositor currently wants this window's menu bar shown.
@@ -545,6 +554,8 @@ private:
     void create_layer_window(i32 window_id, i32 window_type, Gfx::IntPoint position, Gfx::IntSize size, ByteString const& title, bool has_alpha, bool resizable);
     void create_overlay_window(i32 window_id, i32 window_type, Gfx::IntPoint position, Gfx::IntSize size, ByteString const& title, bool has_alpha, bool resizable);
     void create_toplevel_window(i32 window_id, Gfx::IntPoint position, Gfx::IntSize size, ByteString const& title, bool has_alpha, bool resizable, bool frameless, i32 window_mode, i32 parent_window_id, Gfx::IntRect const& launch_origin);
+    void activate_window(i32 window_id);
+    void on_activation_token_done(i32 window_id, xdg_activation_token_v1* token, char const* token_string);
     void on_global_pointer_position(wl_surface*, u32 instance, i32 relative_x, i32 relative_y);
     void create_mouse_observers();
     void create_mouse_observer(i32 window_id);
@@ -579,6 +590,8 @@ private:
     wp_fractional_scale_manager_v1* m_fractional_scale_manager { nullptr };
     zwlr_layer_shell_v1* m_layer_shell { nullptr };
     wp_pointer_warp_v1* m_pointer_warp { nullptr };
+    xdg_activation_v1* m_activation { nullptr };
+    bool m_activation_token_used { false };
     ext_input_observation_manager_v1* m_input_observation_manager { nullptr };
     xdg_toplevel_icon_manager_v1* m_toplevel_icon_manager { nullptr };
     RefPtr<Core::Notifier> m_notifier;

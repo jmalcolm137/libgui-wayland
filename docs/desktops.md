@@ -17,6 +17,10 @@ What a desktop adds is its own business, built on the same pinned SerenityOS sou
   desktop is the right place to draw it. Pointer warping and global mouse tracking have
   protocols (`wp_pointer_warp_v1`, `ext-input-observation-v1`), implemented by
   SerenityDE, and the shim uses both.
+* **Activation.** `xdg-activation-v1` raises and focuses a window: LibWM uses the last input
+  serial for a window opened from a click or menu, and honours `XDG_ACTIVATION_TOKEN` from a
+  launcher. SerenityDE's compositor also focuses newly mapped windows itself, so a launch is
+  raised even without a token.
 * **Standard protocols the desktop only has to advertise.** Window icons
   (`xdg-toplevel-icon-v1`), primary selection (`zwp_primary_selection_v1`), the
   appearance preference (`org.freedesktop.portal.Settings`, via `xdg-desktop-portal`)

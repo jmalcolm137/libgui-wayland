@@ -28,11 +28,12 @@ are tested against the desktop's compositor, not here.
 | CTest name | Script | Labels | Covers |
 |---|---|---|---|
 | `libwm.mouse-tracking` | `run-mouse-tracking-test.sh` | integration | global mouse tracking: a `GUI::MouseTracker` receives output positions while the pointer is inside the window and after it moves outside it (`ext-input-observation-v1`), and stops when the tracker is destroyed |
-| `libwm.headless` | `run-headless-tests.sh` | integration | presentation, input (pointer, wheel, XKB keys, double-click, held-key repeat), cursors, min size, alpha regions, opaque region, interactive resize (`xdg_toplevel.resize`, and the no-serial/none cases), outgoing and incoming drag-and-drop (including bad and stalled peers), long titles, IME, connection loss |
+| `libwm.headless` | `run-headless-tests.sh` | integration | presentation, input (pointer, wheel, XKB keys, double-click, held-key repeat, touch mapped to the primary pointer), cursors, min size, alpha regions, opaque region, interactive resize (`xdg_toplevel.resize`, and the no-serial/none cases), outgoing and incoming drag-and-drop (including bad and stalled peers), long titles, IME, connection loss |
 | `libwm.window-and-portal` | `run-window-and-portal-tests.sh` | integration | `libwm-unit-test` (MenuController, clipboard image transcoding, Config persistence, thread safety, scale inference, cursor-warp surface geometry), fullscreen/maximize/resize, HiDPI at 1x and 2x (including a CSD titlebar composed through the fractional path), CSD, `set_global_cursor_position` end to end over `wp_pointer_warp_v1`, every remaining WindowServer request with no Wayland equivalent (each is traced, including the base-size→minimum-size mapping, aspect/shadow/flash no-ops, screen-number forwarding and a theme refresh), and launching an in-repo target through `Desktop::AppFile` and `Desktop::Launcher` |
 | `libwm.clipboard` | `run-clipboard-test.sh` | integration | clipboard and primary selection in both directions with a native peer: text aliases, HTML, URI lists, PNG ↔ Serenity images |
 | `libwm.menu` | `run-menu-test.sh` | integration | menubar, popups, submenus, keyboard navigation, item activation, the About dialog, with LibWM's own menubar test app; menubar pixels at 1x, 2x and after a resize |
 | `libwm.pdf` | `run-pdf-test.sh` | integration | PDF rendering with LibWM's own app: opening through the FileSystemAccess portal, LibPDF rendering, zoom via `Ctrl+=`, wheel scrolling and a compositor resize, all asserted from the app's traces and the frame dump |
+| `libwm.activation` | `run-activation-test.sh` | integration | `xdg-activation-v1`: a window opened from a click requests a token with the click's serial, and a launcher-provided `XDG_ACTIVATION_TOKEN` activates the first window; the compositor's activation log is checked both ways |
 | `libwm.settings-portal` | `run-settings-portal-test.sh` | integration | desktop appearance from `org.freedesktop.portal.Settings` (a private session bus with a fake portal): dark applied, then a live switch to light; **skipped** (exit 77) when the build has no libsystemd |
 | `libwm.gl` | `run-gl-test.sh` | integration, gl | client-side GL with LibWM's own program: LibGL renders a solid colour with `EGLGPU` (Mesa surfaceless when headless, no silent fallback) and with `LibSoftGPU`, painted in a LibGUI window and checked in its dump |
 | `libwm.3d` | `run-3d-test.sh` | integration, gl | an animated client-side 3D scene with LibWM's own app: LibGL renders frames into an offscreen bitmap, LibGUI paints them and LibWM presents them; the traces and the frame dump are checked |
@@ -58,7 +59,9 @@ It gives the tests:
   `HC_TRACE=1`);
 * `ext-input-observation-v1` (signed 16:16 fixed point, surface-relative), so
   `set_global_mouse_tracking` is tested with the pointer inside and outside the
-  window.
+  window;
+* `xdg-activation-v1` (tokens issued on commit and an activation log), so both
+  the serial and `XDG_ACTIVATION_TOKEN` activation paths are tested.
 
 It offers no `xdg-decoration` (so LibWM draws client-side decorations) and no
 fractional scale; HiDPI is tested with `LIBWM_CLIENT_SCALE`. Native peers for

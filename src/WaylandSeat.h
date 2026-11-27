@@ -22,6 +22,7 @@
 
 struct wl_keyboard;
 struct wl_pointer;
+struct wl_touch;
 struct wl_pointer;
 struct wl_seat;
 struct wl_surface;
@@ -100,6 +101,12 @@ public:
     void on_pointer_button(u32 button, bool pressed);
     void on_pointer_axis(i32 x, i32 y);
     void on_pointer_axis_delta(double x, double y);
+    // Touch is translated to the primary pointer: LibGUI has no touch events,
+    // so the first finger behaves like a mouse press/drag/release.
+    void on_touch_down(wl_surface*, u32 id, Gfx::IntPoint position);
+    void on_touch_motion(u32 id, Gfx::IntPoint position);
+    void on_touch_up(u32 id);
+    void on_touch_cancel();
     void on_keyboard_keymap(int fd, u32 size);
     void on_keyboard_repeat_info(i32 rate, i32 delay);
     void on_keyboard_modifiers(u32 depressed, u32 latched, u32 locked, u32 group, u32 serial);
@@ -132,6 +139,10 @@ private:
         wl_seat* seat { nullptr };
         wl_pointer* pointer { nullptr };
         wl_keyboard* keyboard { nullptr };
+        wl_touch* touch { nullptr };
+        bool touch_active { false };
+        i32 touch_id { -1 };
+        i32 touch_window { -1 };
         ::xkb_context* xkb_context { nullptr };
         ::xkb_keymap* xkb_keymap { nullptr };
         ::xkb_state* xkb_state { nullptr };

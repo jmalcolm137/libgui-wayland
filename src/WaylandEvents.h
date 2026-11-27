@@ -14,6 +14,7 @@ struct wl_registry;
 struct wl_surface;
 struct wp_fractional_scale_v1;
 struct ext_input_position_observer_v1;
+struct xdg_activation_token_v1;
 struct xdg_popup;
 struct xdg_surface;
 struct xdg_toplevel;
@@ -44,6 +45,7 @@ struct WaylandEvents {
     static void decoration_configure(void* data, zxdg_toplevel_decoration_v1*, u32 mode);
     static void frame_done(void* data, wl_callback* callback, u32);
     static void input_position(void* data, ext_input_position_observer_v1*, wl_surface* surface, u32 instance, i32 relative_x, i32 relative_y);
+    static void activation_token_done(void* data, xdg_activation_token_v1*, char const* token);
 
     static void menu_layer_configure(void* data, zwlr_layer_surface_v1*, u32 serial, u32 width, u32 height);
     static void menu_layer_closed(void* data, zwlr_layer_surface_v1*);

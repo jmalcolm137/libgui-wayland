@@ -361,6 +361,40 @@ static wl_pointer_listener const s_pointer_listener = {
     .warp = pointer_warp,
 };
 
+static void touch_down(void* data, wl_touch*, uint32_t serial, uint32_t, wl_surface* surface, int32_t id, wl_fixed_t x, wl_fixed_t y)
+{
+    auto* seat = static_cast<WaylandSeat*>(data);
+    seat->note_input_serial(serial);
+    seat->on_touch_down(surface, static_cast<u32>(id), { wl_fixed_to_int(x), wl_fixed_to_int(y) });
+}
+
+static void touch_up(void* data, wl_touch*, uint32_t serial, uint32_t, int32_t id)
+{
+    auto* seat = static_cast<WaylandSeat*>(data);
+    seat->note_input_serial(serial);
+    seat->on_touch_up(static_cast<u32>(id));
+}
+
+static void touch_motion(void* data, wl_touch*, uint32_t, int32_t id, wl_fixed_t x, wl_fixed_t y)
+{
+    static_cast<WaylandSeat*>(data)->on_touch_motion(static_cast<u32>(id), { wl_fixed_to_int(x), wl_fixed_to_int(y) });
+}
+
+static void touch_frame(void*, wl_touch*) { }
+static void touch_cancel(void* data, wl_touch*) { static_cast<WaylandSeat*>(data)->on_touch_cancel(); }
+static void touch_shape(void*, wl_touch*, int32_t, wl_fixed_t, wl_fixed_t) { }
+static void touch_orientation(void*, wl_touch*, int32_t, wl_fixed_t) { }
+
+static wl_touch_listener const s_touch_listener = {
+    .down = touch_down,
+    .up = touch_up,
+    .motion = touch_motion,
+    .frame = touch_frame,
+    .cancel = touch_cancel,
+    .shape = touch_shape,
+    .orientation = touch_orientation,
+};
+
 static void keyboard_keymap(void* data, wl_keyboard*, uint32_t, int32_t fd, uint32_t size)
 {
     static_cast<WaylandSeat*>(data)->on_keyboard_keymap(fd, size);
@@ -638,12 +672,22 @@ void WaylandSeat::on_seat_capabilities(u32 capabilities)
         // pointer was away): create its observers now that there is one.
         m_client.create_mouse_observers();
     }
+    if (!(capabilities & WL_SEAT_CAPABILITY_TOUCH) && m_state.touch) {
+        if (m_state.touch_active)
+            on_touch_cancel();
+        wl_touch_destroy(m_state.touch);
+        m_state.touch = nullptr;
+    }
     if ((capabilities & WL_SEAT_CAPABILITY_KEYBOARD) && !m_state.keyboard) {
         m_state.keyboard = wl_seat_get_keyboard(m_state.seat);
         wl_keyboard_add_listener(m_state.keyboard, &s_keyboard_listener, this);
     }
-    trace("LibWM/Wayland: seat capabilities 0x{:x} (pointer={}, keyboard={})", capabilities,
-        m_state.pointer != nullptr, m_state.keyboard != nullptr);
+    if ((capabilities & WL_SEAT_CAPABILITY_TOUCH) && !m_state.touch) {
+        m_state.touch = wl_seat_get_touch(m_state.seat);
+        wl_touch_add_listener(m_state.touch, &s_touch_listener, this);
+    }
+    trace("LibWM/Wayland: seat capabilities 0x{:x} (pointer={}, keyboard={}, touch={})", capabilities,
+        m_state.pointer != nullptr, m_state.keyboard != nullptr, m_state.touch != nullptr);
 }
 
 void WaylandSeat::on_pointer_enter(wl_surface* surface, Gfx::IntPoint position)
@@ -850,6 +894,62 @@ void WaylandSeat::on_pointer_button(u32 button, bool pressed)
         if (m_client.m_input.mouse_up)
             m_client.m_input.mouse_up(m_state.pointer_window, position, serenity_button, m_state.pointer_buttons, current_modifiers());
     }
+}
+
+void WaylandSeat::on_touch_down(wl_surface* surface, u32 id, Gfx::IntPoint position)
+{
+    MutexLocker locker(m_client.m_mutex);
+    // LibGUI models one pointer, so only the first finger is tracked; extra
+    // fingers are ignored until it lifts.
+    if (m_state.touch_active)
+        return;
+    auto window_id = m_client.window_id_for_surface(surface);
+    if (window_id < 0)
+        return;
+
+    m_state.touch_active = true;
+    m_state.touch_id = static_cast<i32>(id);
+    m_state.touch_window = window_id;
+    m_state.pointer_popup = -1;
+    m_state.pointer_window = window_id;
+    m_state.pointer_surface = surface;
+    m_state.pointer_position = position;
+    trace("LibWM/Wayland: touch down on window {} at {},{} (id {})", window_id, position.x(), position.y(), id);
+
+    dispatch_pointer_motion(position);
+    on_pointer_button(BTN_LEFT, true);
+}
+
+void WaylandSeat::on_touch_motion(u32 id, Gfx::IntPoint position)
+{
+    MutexLocker locker(m_client.m_mutex);
+    if (!m_state.touch_active || static_cast<i32>(id) != m_state.touch_id)
+        return;
+    m_state.pointer_position = position;
+    dispatch_pointer_motion(position);
+}
+
+void WaylandSeat::on_touch_up(u32 id)
+{
+    MutexLocker locker(m_client.m_mutex);
+    if (!m_state.touch_active || static_cast<i32>(id) != m_state.touch_id)
+        return;
+    on_pointer_button(BTN_LEFT, false);
+    m_state.touch_active = false;
+    m_state.touch_id = -1;
+    m_state.touch_window = -1;
+}
+
+void WaylandSeat::on_touch_cancel()
+{
+    MutexLocker locker(m_client.m_mutex);
+    if (!m_state.touch_active)
+        return;
+    on_pointer_button(BTN_LEFT, false);
+    m_state.touch_active = false;
+    m_state.touch_id = -1;
+    m_state.touch_window = -1;
+    trace("LibWM/Wayland: touch cancelled");
 }
 
 void WaylandSeat::on_pointer_axis(i32 x, i32 y)

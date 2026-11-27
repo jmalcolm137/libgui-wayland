@@ -14,7 +14,7 @@ required; without the others LibWM falls back as noted.
 | `xdg_wm_base` | 1 | toplevels and popups | required |
 | `wl_shm` | 1 | buffers (zero-copy over the client's memfd) | required |
 | `wl_subcompositor` | 1 | menubar subsurface | menubar composed into the window buffer |
-| `wl_seat` | ≤ 4 | pointer, keyboard, and the repeat rate (`repeat_info`, since v4) | no input, and no key repeat |
+| `wl_seat` | ≤ 4 | pointer, keyboard, touch, and the repeat rate (`repeat_info`, since v4) | no input, and no key repeat |
 | `wl_output` | ≤ 2 | screen size and integer scale | default size, scale 1 |
 | `zxdg_output_manager_v1` | ≤ 3 | logical size, hence fractional scale | integer scale only |
 | `wp_fractional_scale_manager_v1` | 1 | per-surface preferred scale | scale inferred from outputs |
@@ -24,10 +24,15 @@ required; without the others LibWM falls back as noted.
 | `zwp_primary_selection_device_manager_v1` | 1 | the middle-click selection, bridged both ways with the clipboard | no primary selection; clipboard only. wlroots only delivers it to the focused client, and validates `set_selection` serials, so a paste (focused) works and background polling does not |
 | `xdg_toplevel_icon_manager_v1` | 1 | the standard window icon (taskbars, switchers) | icons only through `serenity-window`, if present |
 | `wp_pointer_warp_v1` | 1 | `set_global_cursor_position` (the Taskbar puts the cursor back on itself) | the request is traced and dropped; the pointer does not move |
+| `xdg_activation_v1` | 1 | raise/focus a window (the last input serial, or `XDG_ACTIVATION_TOKEN` from a launcher) | windows are shown without asking to be raised; the compositor's own focus policy applies |
 | `ext_input_observation_manager_v1` | 1 | `set_global_mouse_tracking` (GUI::MouseTracker, the Eyes/CatDog demos): the pointer position relative to each toplevel, inside or outside it and regardless of focus | tracking is unavailable; the request is traced and nothing is sent. A draft (wayland-protocols MR !335) implemented by SerenityDE and wlmaker, so the XML is vendored in `src/protocol/` |
 | `zwp_text_input_manager_v3` | 1 | input methods (preedit, commit) | no IME |
 | `zwlr_layer_shell_v1` | ≤ 4 | Taskbar, Desktop, applets, popup-style windows, menus of layer surfaces | those become ordinary toplevels |
 | `serenity_window_manager` (`src/protocol/serenity-window.xml`) | ≤ 4 | a desktop's compositor: host settings, wallpaper, capture, menubar control, placement, icons | defaults; no compositor-driven chrome |
+
+Touch (`wl_touch`) has no WindowServer counterpart: LibWM maps the first touch
+point to the primary pointer (press, motion, release), so LibGUI's existing mouse
+path handles taps and drags. Extra fingers are ignored.
 
 ## WindowServer requests (client → LibWM)
 

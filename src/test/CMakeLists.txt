@@ -77,6 +77,13 @@ libwm_gui_executable(libwm-pdf-test
     INCLUDES ${LIBWM_TEST_INCLUDES}
     LIBS LibMain LibGUI LibGfx LibCore LibIPC LibPDF LibFileSystemAccessClient)
 
+# xdg-activation-v1: a window opened from a click requests activation, and a
+# launcher-provided XDG_ACTIVATION_TOKEN activates the first window.
+libwm_gui_executable(libwm-activation-test
+    SOURCES ActivationTest.cpp
+    INCLUDES ${LIBWM_TEST_INCLUDES}
+    LIBS LibMain LibGUI LibGfx LibCore LibIPC)
+
 # Animated client-side 3D GL (3DFileViewer lives in the desktop): LibGL renders
 # frames into an offscreen bitmap, LibGUI paints it, LibWM presents it.
 libwm_gui_executable(libwm-3d-test
@@ -147,6 +154,7 @@ libwm_add_script_test(window-and-portal run-window-and-portal-tests.sh "integrat
 libwm_add_script_test(clipboard run-clipboard-test.sh "integration")
 libwm_add_script_test(menu run-menu-test.sh "integration")
 libwm_add_script_test(pdf run-pdf-test.sh "integration")
+libwm_add_script_test(activation run-activation-test.sh "integration")
 libwm_add_script_test(gl run-gl-test.sh "integration;gl")
 libwm_add_script_test(settings-portal run-settings-portal-test.sh "integration")
 # No libsystemd in the build: the portal bridge is not compiled in.

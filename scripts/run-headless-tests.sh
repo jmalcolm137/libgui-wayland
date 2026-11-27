@@ -192,6 +192,27 @@ env XDG_RUNTIME_DIR="$RUNTIME" LIBWM_SESSION_DIR="$RUNTIME/session" WAYLAND_DISP
 wait "$HC_PID" 2>/dev/null || true
 HC_PID=""
 
+# Scenario 6: touch. LibGUI has no touch event type, so LibWM maps the first
+# finger to the primary pointer: down, a small drag, up.
+cat > "$RUNTIME/touch-input.txt" <<'EOF'
+sleep 1200
+touch 160 120
+sleep 600
+EOF
+
+"$HC" --socket libwm-touch --size 800x600 --timeout 3 \
+    --output "$RUNTIME/touch-frame.png" --input "$RUNTIME/touch-input.txt" > "$RUNTIME/touch-hc.log" 2>&1 &
+HC_PID=$!
+for _ in $(seq 1 100); do [[ -e "$RUNTIME/libwm-touch" ]] && break; sleep 0.1; done
+
+env XDG_RUNTIME_DIR="$RUNTIME" LIBWM_SESSION_DIR="$RUNTIME/session" WAYLAND_DISPLAY=libwm-touch \
+    SERENITY_RES_ROOT="$SERENITY_SRC/Base/res" \
+    LD_LIBRARY_PATH="$BUILD_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    timeout 4 "$APP" > "$RUNTIME/touch-app.log" 2>&1 || true
+
+wait "$HC_PID" 2>/dev/null || true
+HC_PID=""
+
 failures=0
 check() {
     if eval "$2"; then
@@ -238,6 +259,9 @@ check "resize: nothing sent without a serial"     "! grep -q 'started interactiv
 check "key repeat: held key repeats (>= 5)"       "[ \$(grep -c 'key down code_point=97' '$RUNTIME/repeat-app.log') -ge 5 ]"
 check "key repeat: modifiers do not repeat"       "[ \$(grep -c 'key down code_point=0 .*key=.*modifiers=4' '$RUNTIME/repeat-app.log') -eq 1 ]"
 check "key repeat: stops at key release"          "! awk '/key up code_point=97/{up=1} up && /key down code_point=97/{found=1} END{exit found?0:1}' '$RUNTIME/repeat-app.log'"
+check "touch: first touch became a mouse press"    "grep -q 'mouse down at 160,120 button 1' '$RUNTIME/touch-app.log'"
+check "touch: drag position reached the release"   "grep -q 'mouse up at 165,125 button 1' '$RUNTIME/touch-app.log'"
+check "touch: shim received wl_touch"              "grep -q 'touch down on window .* at 160,120' '$RUNTIME/touch-app.log'"
 check "window icon falls back without xdg-toplevel-icon" "grep -q 'no xdg-toplevel-icon manager; window .* icon via serenity-window' '$RUNTIME/app.log'"
 check "frame captured to PNG"                    "[[ -s '$FRAME_OUT' ]]"
 

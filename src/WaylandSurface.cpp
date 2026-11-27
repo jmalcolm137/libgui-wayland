@@ -1667,9 +1667,11 @@ void WaylandClient::commit_window_content(WindowSurface& window_surface, int cli
 
     if (csd_h + menubar_h > 0) {
         present_composed(window_surface, client_fd, size, visible_size, pitch, csd_h, menubar_h, scale, scale_v120, is_fractional, has_alpha, move(damage), full_damage);
+        activate_window(window_surface.window_id);
         return;
     }
     present_direct(window_surface, client_fd, size, visible_size, pitch, scale, has_alpha, is_fractional, move(damage), full_damage);
+    activate_window(window_surface.window_id);
 }
 
 
