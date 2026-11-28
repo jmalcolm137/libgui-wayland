@@ -58,6 +58,10 @@ add_library(LibWM SHARED
     "${SERENITY_PROJECT_ROOT}/Userland/Services/ImageDecoder/ConnectionFromClient.cpp"
 )
 
+# elogind's C headers test __STDC_VERSION__, which is not defined in C++; the
+# project's -Wundef -Werror turns that into an error.
+target_compile_options(LibWM PRIVATE -Wno-undef)
+
 # The library is libwm.so. It used to be built as libwindowserver.so and its
 # target was `windowserver` (short form `wm`). Consumers may still link against
 # or build those names (`target_link_libraries(... windowserver)`, `ninja

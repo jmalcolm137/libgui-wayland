@@ -11,9 +11,6 @@
 #include <AK/RefPtr.h>
 #include <pthread.h>
 
-struct sd_bus_error;
-struct sd_bus_message;
-
 struct sd_bus;
 
 namespace Core {
