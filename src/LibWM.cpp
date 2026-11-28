@@ -73,7 +73,15 @@ static RefPtr<ImageDecoder::ConnectionFromClient>& image_decoder_server_slot()
 // requested from any thread (the main thread, the LibWM server thread, or an
 // application's own worker), so both are guarded by s_portal_mutex. It is
 // recursive because starting the server thread may itself resolve a portal.
-static pthread_mutex_t s_portal_mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
+static pthread_mutex_t s_portal_mutex = [] {
+    pthread_mutex_t mutex;
+    pthread_mutexattr_t attributes;
+    pthread_mutexattr_init(&attributes);
+    pthread_mutexattr_settype(&attributes, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(&mutex, &attributes);
+    pthread_mutexattr_destroy(&attributes);
+    return mutex;
+}();
 static HashMap<ByteString, int> s_client_fds;
 static bool s_server_started { false };
 

@@ -60,7 +60,7 @@ class WindowServerConnection final
             // m_ref_count > 0 in on_toplevel_position). The connection is pinned for
             // the process lifetime by LibWM's leaked window_server_slot(), and the
             // server loop it posts to lives just as long, so the raw pointer is safe.
-            MainThreadInvoker::post_to_server([this, callback, ... args = move(args)]() mutable {
+            MainThreadInvoker::post_to_server([callback, ... args = move(args)]() mutable {
                 callback(move(args)...);
             });
         };
