@@ -25,7 +25,7 @@ SERENITY_REMOTE="${SERENITY_REMOTE:-https://github.com/jmalcolm137/serenity.git}
 # a newer upstream is a `git rebase` of real commits, and the pin moves to the
 # same point on the rebased branch (one commit before the wallpaper).
 SERENITY_UPSTREAM_BASE="835d22663febc14427577fc91468c1e4c1fcc914"
-SERENITY_REVISION="${SERENITY_REVISION:-be25c27251b4335e2b75077790cc56a23b8e6857}"
+SERENITY_REVISION="${SERENITY_REVISION:-584ceca57dbaca5f3b304915c6b449a69100ba78}"
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERENITY_SRC="${SERENITY_SRC:-$PROJECT_ROOT/serenity}"
