@@ -48,7 +48,7 @@ class WindowServerConnection final
     template<typename Callback>
     auto on_server_thread(Callback callback)
     {
-        return [this, callback = move(callback)](auto... args) {
+        return [callback = move(callback)](auto... args) {
             if (MainThreadInvoker::on_server_thread()) {
                 callback(move(args)...);
                 return;
